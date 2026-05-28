@@ -248,14 +248,18 @@ if (is4kCategory) {
 // 🔥 ADD THIS    
 const uniqueId = `${currentUrl}::${link}::${index}`;    
     
-metadataList.push(    
-  new meta.MetaPreview(    
-    uniqueId,    
-    'movie',    
-    title,    
-    poster,    
-    { videoPageUrl, is4kCategory } // ✅ pass flag    
-  ),    
+metadataList.push(
+  new meta.MetaPreview(
+    uniqueId,
+    'movie',
+    title,
+    poster,
+    {
+      videoPageUrl,
+      is4kCategory,
+      posterShape: 'landscape'
+    }
+  )
 );    
     });    
     
@@ -344,6 +348,7 @@ const videoPageUrl = this.baseUrl + cleanLink + '/';
     poster,
     background: poster,
     description,
+    posterShape: 'landscape'
   });
 }
 
@@ -366,6 +371,7 @@ const videoPageUrl = this.baseUrl + cleanLink + '/';
           poster,
           background: poster,
           description,
+          posterShape: 'landscape'
         });
       }
     }
@@ -490,6 +496,7 @@ if (is4kCategory) {
       poster,
       background: poster,
       description,
+      posterShape: 'landscape'
     });
   }
 }
