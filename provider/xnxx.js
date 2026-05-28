@@ -274,13 +274,16 @@ let titleRaw =
 titleRaw = titleRaw.replace(/\s+/g, ' ').trim();
 
       metadatas.push(
-        new meta.MetaPreview(
-          id,
-          Provider.TYPE,
-          cleanTitle(titleRaw),
-          thumb
-        )
-      );
+  new meta.MetaPreview(
+    id,
+    Provider.TYPE,
+    cleanTitle(titleRaw),
+    thumb,
+    {
+      posterShape: 'landscape'
+    }
+  )
+);
     });
 
     return metadatas;
@@ -344,20 +347,21 @@ titleRaw = titleRaw.replace(/\s+/g, ' ').trim();
       logger.warn('Invalid video page');
 
       return {
-        metaResponse: new meta.MetaResponse(
-          id,
-          Provider.TYPE,
-          'Unavailable Video',
-          {
-            links: [],
-            description: '',
-            background: null,
-            poster: DEFAULT_POSTER,
-            genres: []
-          }
-        ),
-        videoPageUrl: null
-      };
+  metaResponse: new meta.MetaResponse(
+    id,
+    Provider.TYPE,
+    'Unavailable Video',
+    {
+      links: [],
+      description: '',
+      background: null,
+      poster: DEFAULT_POSTER,
+      posterShape: 'landscape', // 👈 ADD
+      genres: []
+    }
+  ),
+  videoPageUrl: null
+};
     }
 
     /* TAGS */
@@ -397,17 +401,18 @@ background = resolvePoster(background);
       : [];
 
     const metaResponse = new meta.MetaResponse(
-      id,
-      Provider.TYPE,
-      cleanTitle(title || 'Video'),
-      {
-        links,
-        description,
-        background,
-        poster,
-        genres
-      }
-    );
+  id,
+  Provider.TYPE,
+  cleanTitle(title || 'Video'),
+  {
+    links,
+    description,
+    background,
+    poster,
+    posterShape: 'landscape', // 👈 ADD
+    genres
+  }
+);
 
     return {
       metaResponse,
