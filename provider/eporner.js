@@ -53,14 +53,15 @@ class EpornerProvider extends Provider {
       if (videoPageUrl) {
         metadataList.push(
           new meta.MetaPreview(
-            this.baseUrl + videoPageUrl,
-            'movie',
-            title,
-            poster,
-            {
-              videoPageUrl,
-            }
-          )
+  this.baseUrl + videoPageUrl,
+  'movie',
+  title,
+  poster,
+  {
+    videoPageUrl,
+    posterShape: 'landscape' // 👈 ADD THIS
+  }
+)
         );
       }
     });
@@ -95,19 +96,19 @@ class EpornerProvider extends Provider {
     }
 
     return new meta.MetaResponse(
-      id,
-      Provider.TYPE,
-      metaMap['og:title'],
-      {
-        description: metaMap['og:description'],
-        poster: metaMap['og:image'],
-        background: metaMap['og:image'],
-        genres: [],
-genre: [],
-links: [],
-        extra: { hash, videoId },
-      }
-    );
+  id,
+  Provider.TYPE,
+  metaMap['og:title'],
+  {
+    description: metaMap['og:description'],
+    poster: metaMap['og:image'],
+    background: metaMap['og:image'],
+    posterShape: 'landscape', // 👈 ADD THIS
+    genres: [],
+    links: [],
+    extra: { hash, videoId },
+  }
+);
   }
 
   hash(a) {
