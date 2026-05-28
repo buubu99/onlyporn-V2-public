@@ -202,13 +202,16 @@ getMode(catalogId = '') {
   if (titleLower.includes('virtual reality')) continue;
 
   allVideos.push(
-    new meta.MetaPreview(
-      url,
-      'movie',
-      v.title,
-      v.thumbURL || v.thumb
-    )
-  );
+  new meta.MetaPreview(
+    url,
+    'movie',
+    v.title,
+    v.thumbURL || v.thumb,
+    {
+      posterShape: 'landscape'
+    }
+  )
+);
 
   globalSeen.add(url);
 
@@ -291,7 +294,10 @@ if (title.includes('virtual reality')) return;
               v.pageURL,
               'movie',
               v.title,
-              poster
+              poster,
+              {
+      posterShape: 'landscape'
+    }
             )
           );
 
@@ -339,7 +345,15 @@ if (/\bvr\b/.test(titleLower) || titleLower.includes('virtual reality')) return;
 
 // ✅ keep original title
 metadataList.push(
-  new meta.MetaPreview(url, 'movie', titleRaw, poster)
+  new meta.MetaPreview(
+    url,
+    'movie',
+    titleRaw,
+    poster,
+    {
+      posterShape: 'landscape'
+    }
+  )
 );
     });
 
@@ -398,6 +412,7 @@ metadataList.push(
         description,
         poster,
         background: poster,
+        posterShape: 'landscape',
         genres: []
       }
     );

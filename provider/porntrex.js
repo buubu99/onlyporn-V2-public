@@ -212,14 +212,17 @@ if (poster && poster.startsWith('//')) {
           .replace(/\s+/g, ' ')      
           .trim();      
       
-      metas.push(      
-        new meta.MetaPreview(      
-          id,      
-          Provider.TYPE,      
-          title,      
-          poster      
-        )      
-      );      
+      metas.push(
+  new meta.MetaPreview(
+    id,
+    Provider.TYPE,
+    title,
+    poster,
+    {
+      posterShape: 'landscape' // 👈 THIS is the fix
+    }
+  )
+);      
     });      
       
     return metas;      
@@ -271,17 +274,18 @@ if (videoId) {
   }      
 }      
       
-  const metaResponse = new meta.MetaResponse(      
-    id,      
-    Provider.TYPE,      
-    title,      
-    {      
-      description,      
-      poster,      
-      background: poster,      
-      genres: []      
-    }      
-  );      
+  const metaResponse = new meta.MetaResponse(
+  id,
+  Provider.TYPE,
+  title,
+  {
+    description,
+    poster,
+    background: poster,
+    posterShape: 'landscape',
+    genres: []
+  }
+);      
       
   /* =========================      
      STREAM EXTRACTION (PRIMARY)      

@@ -2,17 +2,10 @@
   "type": "movie",
   "name": "OnlyPorn: Eporner",
   "id": "eporner",
+  "posterShape": "landscape",
   "extra": [
-    {
-      "name": "search"
-    },
-    {
-      "name": "skip"
-    }
+    { "name": "search" },
+    { "name": "skip" }
   ],
-  "extraSupported": [
-    "search",
-    "genre",
-    "skip"
-  ]
+  "extraSupported": ["search", "genre", "skip"]
 }
