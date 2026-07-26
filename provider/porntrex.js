@@ -402,7 +402,15 @@ const qb = Number(b.quality.replace('p', '')) || 0;
       url: finalUrl,
       name: s.quality,
       behaviorHints: {
-        notWebReady: false
+        notWebReady: true,
+        proxyHeaders: {
+          request: {
+            Referer: id,
+            Cookie: 'kt_tcookie=1; confirmed=true',
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36'
+          }
+        }
       }
     };
   })

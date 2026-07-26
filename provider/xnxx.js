@@ -482,13 +482,8 @@ background = resolvePoster(background);
     return { streams: [] };
   }
 
-  transformStream(url, stream) {
-    return {
-      ...stream,
-      url: url.includes('hls.m3u8')
-        ? url.replace('hls.m3u8', '') + stream.url
-        : url + stream.url
-    };
+  transformStream(baseUrl, stream) {
+    return super.transformStream(baseUrl, stream);
   }
 }
 

@@ -45,7 +45,7 @@ class Provider {
   /* =========================
      🚀 OPTIMIZED fetchHtml
   ========================= */
-  async fetchHtml(url) {
+  async fetchHtml(url, requestOptions = {}) {
     console.info('fetching url', url);
 
     // ⚡ CACHE HIT (5 sec TTL)
@@ -59,7 +59,17 @@ class Provider {
       return pending.get(url);
     }
 
+    const { headers: overrideHeaders = {}, ...overrideOptions } = requestOptions;
+    const defaultOrigin = (() => {
+      try {
+        return new URL(this.baseUrl).origin;
+      } catch {
+        return this.baseUrl;
+      }
+    })();
+
     const request = client.get(url, {
+      ...overrideOptions,
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122 Safari/537.36",
@@ -67,10 +77,11 @@ class Provider {
           "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
         "Accept-Language": "en-US,en;q=0.9",
         "Referer": this.baseUrl,
-        "Origin": this.baseUrl,
-        "Connection": "keep-alive"
+        "Origin": defaultOrigin,
+        "Connection": "keep-alive",
+        ...overrideHeaders
       },
-      timeout: 15000
+      timeout: requestOptions.timeout ?? 15000
     })
     .then(response => {
       // 💾 SAVE TO CACHE
@@ -355,16 +366,18 @@ if (meta.streams && meta.streams.length) {
 
     if (!stream.url) return stream;
 
-    if (stream.url.startsWith('http')) {
+    try {
+      return {
+        ...stream,
+        url: new URL(stream.url, baseUrl).toString()
+      };
+    } catch (error) {
+      logger.warn(
+        { baseUrl, streamUrl: stream.url, error: error.message },
+        'Unable to resolve stream URL'
+      );
       return stream;
     }
-
-    const base = baseUrl.substring(0, baseUrl.lastIndexOf('/') + 1);
-
-    return {
-      ...stream,
-      url: base + stream.url
-    };
   }
 
   parseM3u8(content) {

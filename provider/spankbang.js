@@ -24,6 +24,25 @@ class SpankbangProvider extends Provider {
     return new SpankbangProvider();
   }
 
+  addPlaybackHeaders(stream) {
+    return {
+      ...stream,
+      behaviorHints: {
+        ...(stream.behaviorHints || {}),
+        notWebReady: true,
+        proxyHeaders: {
+          request: {
+            Referer: 'https://spankbang.com/',
+            Origin: 'https://spankbang.com',
+            Cookie: 'sb=1; age_verified=1; hasVisited=1;',
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36',
+          },
+        },
+      },
+    };
+  }
+
   getInitialUrl() {
   return this.baseUrl + pathMappings.trending;
 }
@@ -267,24 +286,60 @@ metadataList.push(
     return metadataList;    
   }
 
+  getVideoPageDetails(id, extra = {}) {
+    const is4kCategory = extra.is4kCategory || id.includes('q=uhd');
+
+    if (!id.includes('::')) {
+      return {
+        videoPageUrl: new URL(id, this.baseUrl).toString(),
+        is4kCategory,
+      };
+    }
+
+    const [, link] = id.split('::');
+    if (!link) {
+      return { videoPageUrl: this.baseUrl, is4kCategory };
+    }
+
+    const cleanLink = link.split('/').slice(0, 3).join('/');
+    return {
+      videoPageUrl: new URL(`${cleanLink}/`, this.baseUrl).toString(),
+      is4kCategory,
+    };
+  }
+
   async getMetadata(args) {
-  logger.debug({ args }, 'getMetadata');
+    logger.debug({ args }, 'getMetadata');
 
-  const { id, extra } = args;
+    const { videoPageUrl, is4kCategory } = this.getVideoPageDetails(
+      args.id,
+      args.extra
+    );
 
-  const parts = id.split('::');
-  const link = parts[1];
+    return this.fetchHtml(videoPageUrl)
+      .then(html =>
+        this.parseVideoPage({ id: videoPageUrl, html, is4kCategory })
+      )
+      .then(parsed => parsed?.metaResponse || parsed)
+      .catch(error => {
+        logger.error({ error, args }, 'getMetadata error');
+        throw error;
+      });
+  }
 
-  const cleanLink = link.split('/').slice(0, 3).join('/');
-const videoPageUrl = this.baseUrl + cleanLink + '/';
-
-  return this.fetchHtml(videoPageUrl)
-    .then(html => this.parseVideoPage({ id: videoPageUrl, html, is4kCategory: extra?.is4kCategory }))
-    .catch((error) => {
-      logger.error({ error, args }, 'getMetadata error');
-      throw error;
+  async processStreams({ id, extra }) {
+    const { videoPageUrl, is4kCategory } = this.getVideoPageDetails(id, extra);
+    const html = await this.fetchHtml(videoPageUrl);
+    const parsed = await this.parseVideoPage({
+      id: videoPageUrl,
+      html,
+      is4kCategory,
     });
-}
+
+    return {
+      streams: Array.isArray(parsed?.streams) ? parsed.streams : [],
+    };
+  }
 
   async parseVideoPage({ html, is4kCategory }) {
     const $ = load(html);
@@ -317,11 +372,23 @@ const videoPageUrl = this.baseUrl + cleanLink + '/';
 
         const streamsData = JSON.parse(jsonString);
 
-        streams = Object.entries(streamsData).map(([quality, url]) => ({
-          name: quality,
-          url,
-          type: Provider.TYPE,
-        }));
+        streams = Object.entries(streamsData)
+          .map(([quality, value]) => {
+            const streamUrl = Array.isArray(value)
+              ? value.find(item => typeof item === 'string')
+              : value;
+
+            if (typeof streamUrl !== 'string' || !streamUrl.startsWith('http')) {
+              return null;
+            }
+
+            return this.addPlaybackHeaders({
+              name: quality,
+              url: streamUrl,
+              type: Provider.TYPE,
+            });
+          })
+          .filter(Boolean);
 
       } catch (e) {
         console.log('❌ stream_data parse failed', e);
@@ -343,13 +410,15 @@ const videoPageUrl = this.baseUrl + cleanLink + '/';
     }
   }
 
-  return new meta.MetaResponse(url, 'movie', title, {
-    streams,
-    poster,
-    background: poster,
-    description,
-    posterShape: 'landscape'
-  });
+  return {
+    metaResponse: new meta.MetaResponse(url, 'movie', title, {
+      poster,
+      background: poster,
+      description,
+      posterShape: 'landscape'
+    }),
+    streams
+  };
 }
 
     const m3u8Match = scripts.match(/https?:\/\/[^"' ]+\.m3u8[^"' ]*/);
@@ -366,13 +435,15 @@ const videoPageUrl = this.baseUrl + cleanLink + '/';
 
       if (Date.now() - cached.time < CACHE_TTL) {
         console.log('⚡ CACHE HIT');
-        return new meta.MetaResponse(url, 'movie', title, {
-          streams: cached.streams,
-          poster,
-          background: poster,
-          description,
-          posterShape: 'landscape'
-        });
+        return {
+          metaResponse: new meta.MetaResponse(url, 'movie', title, {
+            poster,
+            background: poster,
+            description,
+            posterShape: 'landscape'
+          }),
+          streams: cached.streams
+        };
       }
     }
 
@@ -412,14 +483,17 @@ const videoPageUrl = this.baseUrl + cleanLink + '/';
 
       console.log('📡 Playlist fetched');
 
+      if (!playlistRes.ok) {
+        throw new Error(`SpankBang playlist request failed: ${playlistRes.status}`);
+      }
+
       if (fourkRes && fourkRes.ok) {
         console.log('🔥 4K FOUND');
-        forced4kStream = {
+        forced4kStream = this.addPlaybackHeaders({
           name: '2160p 4K',
           url: forced4kUrl,
           type: Provider.TYPE,
-          headers,
-        };
+        });
       }
 
       const text = await playlistRes.text();
@@ -435,8 +509,8 @@ const videoPageUrl = this.baseUrl + cleanLink + '/';
           const height = parseInt(line.match(/RESOLUTION=\d+x(\d+)/)?.[1] || 0);
           const bitrate = parseInt(line.match(/BANDWIDTH=(\d+)/)?.[1] || 0);
 
-          const nextLine = lines[i + 1];
-          if (!nextLine) continue;
+          const nextLine = lines[i + 1]?.trim();
+          if (!nextLine || nextLine.startsWith('#')) continue;
 
           const streamUrl = new URL(nextLine, masterUrl).toString();
 
@@ -445,13 +519,15 @@ const videoPageUrl = this.baseUrl + cleanLink + '/';
             realHeight = 2160;
           }
 
-          variants.push({
-            name: `${realHeight}p`,
-            url: streamUrl,
-            type: Provider.TYPE,
-            height: realHeight,
-            bitrate,
-          });
+          variants.push(
+            this.addPlaybackHeaders({
+              name: `${realHeight}p`,
+              url: streamUrl,
+              type: Provider.TYPE,
+              height: realHeight,
+              bitrate,
+            })
+          );
         }
       }
 
@@ -491,13 +567,15 @@ if (is4kCategory) {
   }
 }
 
-    return new meta.MetaResponse(url, 'movie', title, {
-      streams,
-      poster,
-      background: poster,
-      description,
-      posterShape: 'landscape'
-    });
+    return {
+      metaResponse: new meta.MetaResponse(url, 'movie', title, {
+        poster,
+        background: poster,
+        description,
+        posterShape: 'landscape'
+      }),
+      streams
+    };
   }
 }
 
