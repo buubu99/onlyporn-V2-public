@@ -15,6 +15,126 @@ const CATALOG_TTL = 1000 * 60 * 3;
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
+
+function parseWindowInitials(html) {
+  if (!html || typeof html !== 'string') return null;
+
+  const encodedMatch = html.match(
+    /window\.initials\s*=\s*JSON\.parse\(("(?:\\.|[^"\\])*")\)\s*;?/s
+  );
+
+  if (encodedMatch) {
+    try {
+      const decodedJson = JSON.parse(encodedMatch[1]);
+      return JSON.parse(decodedJson);
+    } catch {
+      // Continue to the direct object assignment fallback.
+    }
+  }
+
+  const marker = 'window.initials';
+  const markerIndex = html.indexOf(marker);
+  if (markerIndex === -1) return null;
+
+  const assignmentIndex = html.indexOf('=', markerIndex + marker.length);
+  if (assignmentIndex === -1) return null;
+
+  const objectStart = html.indexOf('{', assignmentIndex + 1);
+  if (objectStart === -1) return null;
+
+  let depth = 0;
+  let quote = null;
+  let escaped = false;
+
+  for (let index = objectStart; index < html.length; index += 1) {
+    const char = html[index];
+
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === '\\') {
+        escaped = true;
+      } else if (char === quote) {
+        quote = null;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+
+    if (char === '{') depth += 1;
+
+    if (char === '}') {
+      depth -= 1;
+
+      if (depth === 0) {
+        try {
+          return JSON.parse(html.slice(objectStart, index + 1));
+        } catch {
+          return null;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+function findMediaUrl(value, cleanUrl, seen = new WeakSet(), depth = 0) {
+  if (depth > 10 || value == null) return null;
+
+  if (typeof value === 'string') {
+    const cleaned = cleanUrl(value);
+    if (
+      typeof cleaned === 'string' &&
+      /^https?:\/\//i.test(cleaned) &&
+      /\.(?:m3u8|mp4)(?:[?#]|$)/i.test(cleaned)
+    ) {
+      return cleaned;
+    }
+    return null;
+  }
+
+  if (typeof value !== 'object') return null;
+  if (seen.has(value)) return null;
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findMediaUrl(item, cleanUrl, seen, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  const preferredKeys = [
+    'url',
+    'src',
+    'hls',
+    'h264',
+    'av1',
+    'mp4',
+    'high',
+    'medium',
+    'low',
+  ];
+  const keys = Object.keys(value);
+  const orderedKeys = [
+    ...preferredKeys.filter(key => keys.includes(key)),
+    ...keys.filter(key => !preferredKeys.includes(key)),
+  ];
+
+  for (const key of orderedKeys) {
+    const found = findMediaUrl(value[key], cleanUrl, seen, depth + 1);
+    if (found) return found;
+  }
+
+  return null;
+}
+
 async function fetchWithRetry(instance, url, retries = 3) {
   for (let i = 0; i < retries; i++) {
     try {
@@ -77,15 +197,11 @@ getMode(catalogId = '') {
         return cached.data;
       }
 
+      // The upstream deployment worked because Provider.fetchHtml used its
+      // normal browser request profile here. Sending the minimal custom header
+      // set changes the xHamster video-page response and can remove player data.
       const html = await fetchWithRetry(
-        (u) => super.fetchHtml(u, {
-          headers: {
-            'User-Agent': 'Mozilla/5.0',
-            'Accept': 'text/html',
-            'Referer': 'https://xhamster.com/',
-            'Cookie': 'x_content_preference_index=straight; parental-control=yes'
-          }
-        }),
+        (u) => super.fetchHtml(u),
         url
       );
 
@@ -370,52 +486,120 @@ metadataList.push(
     const html = await this.fetchHtml(id);
     const data = this.parseVideoPage({ id, html });
 
-    metaCache.set(id, { data, time: Date.now() });
+    // Do not cache a temporary fallback-only response. This allows the next
+    // request to recover immediately if xHamster briefly returns a block page.
+    if (data?.videoPageUrl || data?.poster) {
+      metaCache.set(id, { data, time: Date.now() });
+    }
+
     return data;
   }
 
   parseVideoPage({ id, html }) {
-    const match =
-      html.match(/window\.initials\s*=\s*(\{.*?\});/) ||
-      html.match(/window\.initials\s*=\s*JSON\.parse\("(.+?)"\)/);
+    const pageHtml = typeof html === 'string' ? html : '';
+    const json = parseWindowInitials(pageHtml);
+    const $ = load(pageHtml);
 
-    if (!match) return {};
+    let structuredData = null;
+    $('script[type="application/ld+json"]').each((_, element) => {
+      if (structuredData) return;
 
-    let json;
-    try {
-      if (match[1].startsWith('{')) {
-        json = JSON.parse(match[1]);
-      } else {
-        const decoded = match[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\');
-        json = JSON.parse(decoded);
+      try {
+        const parsed = JSON.parse($(element).text());
+        structuredData = Array.isArray(parsed) ? parsed[0] : parsed;
+      } catch {
+        // Ignore malformed structured-data blocks.
       }
-    } catch {
-      return {};
+    });
+
+    const title =
+      json?.videoEntity?.title ||
+      json?.videoModel?.title ||
+      structuredData?.name ||
+      $('meta[property="og:title"]').attr('content') ||
+      $('title').text().trim() ||
+      this.titleFromId(id);
+
+    const description =
+      json?.videoModel?.description ||
+      json?.videoEntity?.description ||
+      structuredData?.description ||
+      $('meta[property="og:description"]').attr('content') ||
+      $('meta[name="description"]').attr('content') ||
+      title;
+
+    const structuredImage = Array.isArray(structuredData?.thumbnailUrl)
+      ? structuredData.thumbnailUrl[0]
+      : structuredData?.thumbnailUrl || structuredData?.image;
+
+    const poster =
+      json?.videoModel?.thumbURL ||
+      json?.videoEntity?.thumbURL ||
+      structuredImage ||
+      $('meta[property="og:image"]').attr('content');
+
+    const sourceCandidates = [
+      json?.xplayerSettings?.sources?.hls?.h264?.url,
+      json?.xplayerSettings?.sources?.hls?.av1?.url,
+      json?.xplayerSettings?.sources?.hls?.url,
+      json?.xplayerSettings?.sources?.mp4?.high?.url,
+      json?.xplayerSettings?.sources?.mp4?.medium?.url,
+      json?.xplayerSettings?.sources?.mp4?.low?.url,
+      structuredData?.contentUrl,
+      structuredData?.embedUrl,
+    ];
+
+    let streamUrl = sourceCandidates
+      .map(source => (typeof source === 'string' ? this.cleanUrl(source) : null))
+      .find(
+        source =>
+          typeof source === 'string' &&
+          source.startsWith('http') &&
+          /\.(?:m3u8|mp4)(?:[?#]|$)/i.test(source)
+      );
+
+    if (!streamUrl && json) {
+      streamUrl = findMediaUrl(json, value => this.cleanUrl(value));
     }
 
-    const title = json?.videoEntity?.title || json?.videoModel?.title;
-    const description = json?.videoModel?.description || title;
-    const poster = json?.videoModel?.thumbURL;
+    if (!streamUrl) {
+      const escapedMediaMatch = pageHtml.match(
+        /https?:\\?\/\\?\/[^\s"'<>]+?\.(?:m3u8|mp4)(?:\\?[^\s"'<>]*)?/i
+      );
 
-    let streamUrl =
-      json?.xplayerSettings?.sources?.hls?.h264?.url ||
-      json?.xplayerSettings?.sources?.mp4?.high?.url;
-
-    if (streamUrl && !streamUrl.startsWith('http')) streamUrl = null;
-
-    return new meta.MetaResponse(
-      id,
-      Provider.TYPE,
-      title,
-      {
-        videoPageUrl: streamUrl,
-        description,
-        poster,
-        background: poster,
-        posterShape: 'landscape',
-        genres: []
+      if (escapedMediaMatch) {
+        const cleaned = this.cleanUrl(escapedMediaMatch[0]);
+        if (cleaned?.startsWith('http')) streamUrl = cleaned;
       }
-    );
+    }
+
+    // Always return a structurally valid Stremio meta object. Previously an
+    // unrecognized page returned {}, which AIOStreams rejected because id and
+    // type were undefined.
+    return new meta.MetaResponse(id, Provider.TYPE, title, {
+      videoPageUrl: streamUrl,
+      description,
+      poster,
+      background: poster,
+      posterShape: 'landscape',
+      genres: []
+    });
+  }
+
+  titleFromId(id) {
+    try {
+      const slug = new URL(id).pathname.split('/').filter(Boolean).pop() || '';
+      const cleaned = decodeURIComponent(slug)
+        .replace(/-xh[a-z0-9]+$/i, '')
+        .replace(/[-_]+/g, ' ')
+        .trim();
+
+      return cleaned
+        ? cleaned.replace(/\b\w/g, char => char.toUpperCase())
+        : 'xHamster video';
+    } catch {
+      return 'xHamster video';
+    }
   }
 
   transformStream(baseUrl, stream) {

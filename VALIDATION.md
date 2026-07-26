@@ -12,3 +12,11 @@ Validated on 2026-07-26:
 - No `.env` file or embedded API key/password/token was found in the repository.
 
 Live requests to the third-party provider websites were not executed in the validation environment. Final verification must be performed after deploying the fork on Render and testing through AIOStreams/Stremio.
+
+
+## 2.0.2 validation
+
+- `node --check provider/xhamster.js`
+- Offline parser test: multiline `window.initials` metadata and HLS source extraction.
+- Offline transform test: relative HLS variant resolves against the master playlist and retains proxy headers.
+- Live provider access still requires deployment validation because third-party provider sites are not reachable from the build sandbox.
