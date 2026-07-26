@@ -418,17 +418,25 @@ metadataList.push(
     );
   }
 
-  transformStream(url, stream) {
-    return {
-      ...stream,
-      url,
-      headers: {
-        Referer: 'https://xhamster.com/',
-        Origin: 'https://xhamster.com',
-        'User-Agent': 'Mozilla/5.0',
-      },
-    };
-  }
-}
+ transformStream(baseUrl, stream) {
+  const resolvedStream = super.transformStream(baseUrl, stream);
 
+  return {
+    ...resolvedStream,
+    behaviorHints: {
+      ...(resolvedStream.behaviorHints || {}),
+      notWebReady: true,
+      proxyHeaders: {
+        request: {
+          Referer: 'https://xhamster.com/',
+          Origin: 'https://xhamster.com',
+          'User-Agent': 'Mozilla/5.0',
+          Cookie:
+            'x_content_preference_index=straight; parental-control=yes',
+        },
+      },
+    },
+  };
+}
+}
 module.exports = XhamsterProvider.create;
