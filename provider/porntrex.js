@@ -1,7 +1,13 @@
 const { load } = require('cheerio');      
 const logger = require('../logger');      
 const { meta } = require('../model');      
-const Provider = require('./provider');      
+const Provider = require('./provider');
+const {
+  cleanMediaUrl,
+  extractResolution,
+  isLikelyFullVideoMp4,
+  isPreviewMediaUrl,
+} = require('./media-utils');      
       
 class PorntrexProvider extends Provider {      
       
@@ -238,6 +244,15 @@ if (poster && poster.startsWith('//')) {
   return parsed.metaResponse;      
 }      
       
+  async processStreams({ id }) {
+    const html = await this.fetchHtml(id);
+    const parsed = await this.parseVideoPage({ id, html });
+
+    return {
+      streams: Array.isArray(parsed?.streams) ? parsed.streams : []
+    };
+  }
+
   /* =========================      
      PARSER      
   ========================= */      
@@ -320,10 +335,13 @@ if (videoId) {
         url = 'https:' + url;      
       }      
       
-      streams.push({      
-  url,      
-  quality: qualityMap[key] || '480p'      
-});      
+      url = cleanMediaUrl(url);
+      if (isPreviewMediaUrl(url)) continue;
+
+      streams.push({
+        url,
+        quality: qualityMap[key] || extractResolution(url) || '480p'
+      });
     }      
   }      
       
@@ -331,33 +349,30 @@ if (videoId) {
      FALLBACK (MP4 SCRAPE)      
   ========================= */      
       
-  if (!streams.length) {      
-    const matches =      
-      html.match(/https?:\/\/[^"' ]+\.mp4[^"' ]*/g) || [];      
-      
-    const unique = [...new Set(matches)];      
-      
-    unique.forEach((url) => {      
-  const qualityMatch = url.match(/(\d{3,4})p/);      
-      
-  let quality;      
-      
-  if (qualityMatch) {      
-    quality = qualityMatch[1] + 'p';      
-  } else if (url.includes('.mp4')) {      
-    // 🔥 base file ALWAYS = 480p      
-    quality = '480p';      
-  } else {      
-    quality = 'HD';      
-  }      
-      
-  streams.push({      
-    url,      
-    quality      
-  });      
-});      
-  }      
-      
+  if (!streams.length) {
+    const matches =
+      html.match(/https?:\/\/[^"' ]+\.mp4[^"' ]*/g) || [];
+
+    const candidates = [...new Set(matches)]
+      .map(cleanMediaUrl)
+      .filter(url =>
+        isLikelyFullVideoMp4(url, { allowKnownVideoPath: true })
+      );
+
+    const byQuality = new Map();
+
+    for (const url of candidates) {
+      const quality =
+        extractResolution(url) ||
+        (/\/contents\/videos\//i.test(url) ? '480p' : null);
+
+      if (!quality || byQuality.has(quality)) continue;
+      byQuality.set(quality, { url, quality });
+    }
+
+    streams.push(...byQuality.values());
+  }
+
   /* =========================      
      FINAL CHECK      
   ========================= */      
@@ -369,11 +384,14 @@ if (videoId) {
 
 // 🔥 Deduplicate streams
 const seenUrls = new Set();
+const seenQualities = new Set();
 const uniqueStreams = streams.filter(s => {
-  if (seenUrls.has(s.url)) return false;
+  if (!s?.url || isPreviewMediaUrl(s.url)) return false;
+  if (seenUrls.has(s.url) || seenQualities.has(s.quality)) return false;
   seenUrls.add(s.url);
+  seenQualities.add(s.quality);
   return true;
-});      
+});
       
   /* =========================      
      SORT STREAMS      

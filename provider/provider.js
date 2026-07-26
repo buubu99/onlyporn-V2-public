@@ -5,6 +5,7 @@ const { CookieJar } = require('tough-cookie');
 const jar = new CookieJar();
 const client = wrapper(axios.create({ jar }));
 const m3u8 = require('m3u8-parser');
+const { extractResolution, isLikelyFullVideoMp4 } = require('./media-utils');
 const logger = require('../logger');
 
 /* =========================
@@ -308,13 +309,23 @@ if (meta.streams && meta.streams.length) {
       return result;
     }
 
-    const mp4 = html.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/i);
+    const mp4Matches =
+      html.match(/https?:\/\/[^\s"'<>]+\.mp4[^\s"'<>]*/gi) || [];
+
+    const mp4 = mp4Matches
+      .map(candidate => this.cleanUrl(candidate))
+      .find(candidate =>
+        isLikelyFullVideoMp4(candidate, { allowKnownVideoPath: true })
+      );
+
     if (mp4) {
+      const resolution = extractResolution(mp4);
+
       return {
         streams: [{
           type: 'movie',
-          url: this.cleanUrl(mp4[0]),
-          name: 'MP4',
+          url: mp4,
+          name: resolution ? `${resolution} MP4` : 'MP4',
           behaviorHints: {
             notWebReady: false
           }

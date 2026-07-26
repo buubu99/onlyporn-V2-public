@@ -2,6 +2,12 @@ const { load } = require('cheerio');
 const logger = require('../logger');
 const { meta } = require('../model');
 const Provider = require('./provider');
+const {
+  cleanMediaUrl,
+  extractResolution,
+  isPlayableMediaUrl,
+  isPreviewMediaUrl,
+} = require('./media-utils');
 
 // 🚀 SIMPLE MEMORY CACHE
 const hlsCache = new Map();
@@ -372,15 +378,30 @@ metadataList.push(
 
         const streamsData = JSON.parse(jsonString);
 
+        const seenQualities = new Set();
+        const seenUrls = new Set();
+
         streams = Object.entries(streamsData)
-          .map(([quality, value]) => {
-            const streamUrl = Array.isArray(value)
+          .map(([qualityLabel, value]) => {
+            const rawUrl = Array.isArray(value)
               ? value.find(item => typeof item === 'string')
               : value;
+            const streamUrl = cleanMediaUrl(rawUrl);
+            const quality = extractResolution(qualityLabel, streamUrl);
 
-            if (typeof streamUrl !== 'string' || !streamUrl.startsWith('http')) {
+            if (
+              !streamUrl.startsWith('http') ||
+              !isPlayableMediaUrl(streamUrl) ||
+              isPreviewMediaUrl(streamUrl) ||
+              !quality ||
+              seenUrls.has(streamUrl) ||
+              seenQualities.has(quality)
+            ) {
               return null;
             }
+
+            seenUrls.add(streamUrl);
+            seenQualities.add(quality);
 
             return this.addPlaybackHeaders({
               name: quality,

@@ -3,6 +3,11 @@ const { load } = require('cheerio');
 const logger = require('../logger');
 const { meta } = require('../model');
 const Provider = require('./provider');
+const {
+  extractResolution,
+  isDirectMp4,
+  isPreviewMediaUrl,
+} = require('./media-utils');
 
 const sortByMappings = {
   'Most Recent': '/',
@@ -149,11 +154,28 @@ selectSources(sources) {
   }
 
   if (sources.mp4) {
-    const streams = Object.values(sources.mp4).map((mp4) => ({
-      url: mp4.src,
-      name: mp4.labelShort,
-      type: Provider.TYPE,
-    }));
+    const seenQualities = new Set();
+    const streams = Object.values(sources.mp4)
+      .map((mp4) => {
+        const quality = extractResolution(mp4.labelShort, mp4.label, mp4.src);
+
+        if (
+          !isDirectMp4(mp4.src) ||
+          isPreviewMediaUrl(mp4.src) ||
+          !quality ||
+          seenQualities.has(quality)
+        ) {
+          return null;
+        }
+
+        seenQualities.add(quality);
+        return {
+          url: mp4.src,
+          name: `${quality} MP4`,
+          type: Provider.TYPE,
+        };
+      })
+      .filter(Boolean);
 
     return { streams };
   }

@@ -40,7 +40,17 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Expanded direct-MP4 discovery across the full `window.initials` payload and escaped page source.
 - Nested AV1 HLS is no longer returned as a broken fallback.
 
-## 2.0.5
+## 2.0.6
 - Filters xHamster animated thumbnail/preview MP4 files (including `thumb-*` hosts and `.t.mp4` assets).
 - Keeps only full direct MP4 files carrying a recognized resolution.
 - Deduplicates xHamster streams to one entry per resolution and labels every entry explicitly (for example, `720p MP4`).
+
+## 2.0.6 provider-wide preview filtering
+
+- Audited every provider for thumbnail, preview, trailer, teaser, sample and sprite media contamination.
+- Porntrex now bypasses the shared first-media fallback and returns only its provider-parsed streams.
+- Porntrex broad MP4 fallback now rejects screenshot/preview assets and keeps at most one full stream per resolution.
+- SpankBang `stream_data` now accepts only playable media URLs with a recognized resolution and rejects preview assets.
+- Eporner MP4 API results are filtered and deduplicated by resolution.
+- The shared provider fallback no longer returns the first arbitrary MP4 found in page HTML.
+- XVideos and XNXX were audited and do not use broad page-wide MP4 scraping; no preview-filter change was required.
