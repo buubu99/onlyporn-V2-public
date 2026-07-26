@@ -19,3 +19,15 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Added Open Graph, JSON-LD and recursive media-URL fallbacks.
 - Prevented invalid empty metadata objects from being returned to Stremio/AIOStreams.
 - Avoided caching temporary fallback-only metadata responses.
+
+
+## 2.0.3 — xHamster direct-MP4 playback compatibility
+
+- Diagnoses the AIOStreams built-in proxy failure on nested xHamster HLS paths.
+- xHamster media playlists referenced paths such as
+  `480p.av1.mp4/init-v1-a1.mp4`; AIOStreams returned HTTP 404 before making an
+  upstream request for those nested paths.
+- Prefers and returns xHamster's direct MP4 sources when available.
+- Keeps the required Referer, Origin, User-Agent and age-preference Cookie in
+  standard Stremio `behaviorHints.proxyHeaders.request`.
+- Keeps H.264 HLS ahead of AV1 HLS only as a fallback when no MP4 exists.

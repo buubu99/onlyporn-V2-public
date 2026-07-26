@@ -20,3 +20,14 @@ Live requests to the third-party provider websites were not executed in the vali
 - Offline parser test: multiline `window.initials` metadata and HLS source extraction.
 - Offline transform test: relative HLS variant resolves against the master playlist and retains proxy headers.
 - Live provider access still requires deployment validation because third-party provider sites are not reachable from the build sandbox.
+
+
+## 2.0.3 validation
+
+- All JavaScript files pass `node --check`.
+- Synthetic xHamster parser test confirms direct MP4 sources are selected ahead
+  of AV1 HLS sources.
+- Synthetic test confirms direct MP4 streams include standard Stremio playback
+  headers and are not serialized into the metadata JSON.
+- Live third-party playback still requires deployment testing because xHamster
+  source availability varies by video and region.

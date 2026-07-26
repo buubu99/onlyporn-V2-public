@@ -135,6 +135,74 @@ function findMediaUrl(value, cleanUrl, seen = new WeakSet(), depth = 0) {
   return null;
 }
 
+
+function collectDirectMp4Sources(
+  value,
+  cleanUrl,
+  path = [],
+  results = [],
+  seen = new WeakSet(),
+  depth = 0
+) {
+  if (depth > 10 || value == null) return results;
+
+  if (typeof value === 'string') {
+    const cleaned = cleanUrl(value);
+
+    if (
+      typeof cleaned === 'string' &&
+      /^https?:\/\//i.test(cleaned) &&
+      /\.mp4(?:[?#]|$)/i.test(cleaned)
+    ) {
+      results.push({ url: cleaned, path });
+    }
+
+    return results;
+  }
+
+  if (typeof value !== 'object') return results;
+  if (seen.has(value)) return results;
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    value.forEach((item, index) =>
+      collectDirectMp4Sources(
+        item,
+        cleanUrl,
+        [...path, String(index)],
+        results,
+        seen,
+        depth + 1
+      )
+    );
+    return results;
+  }
+
+  for (const [key, child] of Object.entries(value)) {
+    collectDirectMp4Sources(
+      child,
+      cleanUrl,
+      [...path, key],
+      results,
+      seen,
+      depth + 1
+    );
+  }
+
+  return results;
+}
+
+function directMp4Label(path) {
+  const text = path.join(' ');
+  const resolution = text.match(/(?:^|\D)(2160|1440|1080|720|576|480|360|240|144)p?(?:\D|$)/i);
+
+  if (resolution) return `${resolution[1]}p MP4`;
+  if (/high/i.test(text)) return 'MP4 High';
+  if (/medium/i.test(text)) return 'MP4 Medium';
+  if (/low/i.test(text)) return 'MP4 Low';
+  return 'MP4';
+}
+
 async function fetchWithRetry(instance, url, retries = 3) {
   for (let i = 0; i < retries; i++) {
     try {
@@ -538,18 +606,51 @@ metadataList.push(
       structuredImage ||
       $('meta[property="og:image"]').attr('content');
 
+    // Prefer direct MP4 files over HLS. xHamster's AV1 HLS media
+    // playlists use nested relative init/segment paths such as
+    // `480p.av1.mp4/init-v1-a1.mp4`. AIOStreams' built-in proxy route does
+    // not accept those nested paths and returns 404 before reaching xhcdn.
+    // Direct MP4 files avoid that proxy-path limitation entirely.
+    const directMp4Candidates = collectDirectMp4Sources(
+      json?.xplayerSettings?.sources?.mp4,
+      value => this.cleanUrl(value)
+    );
+
+    if (structuredData?.contentUrl) {
+      collectDirectMp4Sources(
+        structuredData.contentUrl,
+        value => this.cleanUrl(value),
+        ['structuredData', 'contentUrl'],
+        directMp4Candidates
+      );
+    }
+
+    const seenMp4Urls = new Set();
+    const directMp4Streams = directMp4Candidates
+      .filter(candidate => {
+        if (seenMp4Urls.has(candidate.url)) return false;
+        seenMp4Urls.add(candidate.url);
+        return true;
+      })
+      .map(candidate =>
+        this.withPlaybackHeaders({
+          type: Provider.TYPE,
+          url: candidate.url,
+          name: directMp4Label(candidate.path),
+        })
+      );
+
+    // H.264 is preferred over AV1 when no direct MP4 source exists. This is
+    // only a fallback; the direct MP4 path above is the compatible path for
+    // AIOStreams' built-in proxy.
     const sourceCandidates = [
       json?.xplayerSettings?.sources?.hls?.h264?.url,
-      json?.xplayerSettings?.sources?.hls?.av1?.url,
       json?.xplayerSettings?.sources?.hls?.url,
-      json?.xplayerSettings?.sources?.mp4?.high?.url,
-      json?.xplayerSettings?.sources?.mp4?.medium?.url,
-      json?.xplayerSettings?.sources?.mp4?.low?.url,
-      structuredData?.contentUrl,
+      json?.xplayerSettings?.sources?.hls?.av1?.url,
       structuredData?.embedUrl,
     ];
 
-    let streamUrl = sourceCandidates
+    let streamUrl = directMp4Streams[0]?.url || sourceCandidates
       .map(source => (typeof source === 'string' ? this.cleanUrl(source) : null))
       .find(
         source =>
@@ -576,7 +677,7 @@ metadataList.push(
     // Always return a structurally valid Stremio meta object. Previously an
     // unrecognized page returned {}, which AIOStreams rejected because id and
     // type were undefined.
-    return new meta.MetaResponse(id, Provider.TYPE, title, {
+    const response = new meta.MetaResponse(id, Provider.TYPE, title, {
       videoPageUrl: streamUrl,
       description,
       poster,
@@ -584,6 +685,18 @@ metadataList.push(
       posterShape: 'landscape',
       genres: []
     });
+
+    // Provider.processStreams reads this property, but it must not be emitted
+    // in the metadata JSON returned to Stremio.
+    if (directMp4Streams.length) {
+      Object.defineProperty(response, 'streams', {
+        value: directMp4Streams,
+        enumerable: false,
+        configurable: true,
+      });
+    }
+
+    return response;
   }
 
   titleFromId(id) {
@@ -602,13 +715,11 @@ metadataList.push(
     }
   }
 
-  transformStream(baseUrl, stream) {
-    const resolvedStream = super.transformStream(baseUrl, stream);
-
+  withPlaybackHeaders(stream) {
     return {
-      ...resolvedStream,
+      ...stream,
       behaviorHints: {
-        ...(resolvedStream.behaviorHints || {}),
+        ...(stream.behaviorHints || {}),
         notWebReady: true,
         proxyHeaders: {
           request: {
@@ -622,6 +733,11 @@ metadataList.push(
         },
       },
     };
+  }
+
+  transformStream(baseUrl, stream) {
+    const resolvedStream = super.transformStream(baseUrl, stream);
+    return this.withPlaybackHeaders(resolvedStream);
   }
 }
 
