@@ -39,3 +39,8 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - xHamster now overrides `processStreams()` and returns direct MP4 sources first.
 - Expanded direct-MP4 discovery across the full `window.initials` payload and escaped page source.
 - Nested AV1 HLS is no longer returned as a broken fallback.
+
+## 2.0.5
+- Filters xHamster animated thumbnail/preview MP4 files (including `thumb-*` hosts and `.t.mp4` assets).
+- Keeps only full direct MP4 files carrying a recognized resolution.
+- Deduplicates xHamster streams to one entry per resolution and labels every entry explicitly (for example, `720p MP4`).

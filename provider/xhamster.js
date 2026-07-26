@@ -192,15 +192,48 @@ function collectDirectMp4Sources(
   return results;
 }
 
-function directMp4Label(path) {
-  const text = path.join(' ');
-  const resolution = text.match(/(?:^|\D)(2160|1440|1080|720|576|480|360|240|144)p?(?:\D|$)/i);
+function directMp4Resolution(candidate) {
+  const text = `${candidate.path.join(' ')} ${candidate.url}`;
+  const match = text.match(
+    /(?:^|\D)(2160|1440|1080|720|576|480|360|240|144)p?(?:\D|$)/i
+  );
 
-  if (resolution) return `${resolution[1]}p MP4`;
-  if (/high/i.test(text)) return 'MP4 High';
-  if (/medium/i.test(text)) return 'MP4 Medium';
-  if (/low/i.test(text)) return 'MP4 Low';
-  return 'MP4';
+  return match ? Number(match[1]) : null;
+}
+
+function isPreviewMp4(candidate) {
+  try {
+    const parsed = new URL(candidate.url);
+    const host = parsed.hostname.toLowerCase();
+    const path = decodeURIComponent(parsed.pathname).toLowerCase();
+    const context = candidate.path.join(' ').toLowerCase();
+
+    return (
+      host.startsWith('thumb-') ||
+      host.includes('.thumb.') ||
+      /(?:^|\/)(?:thumb|thumbs|preview|previews|trailer|trailers|teaser|teasers|sprite|sprites|sample|samples)(?:\/|$)/i.test(path) ||
+      /(?:^|[._-])(?:thumb|preview|trailer|teaser|sprite|sample)(?:[._-]|$)/i.test(path) ||
+      /\.t\.mp4$/i.test(path) ||
+      /(?:thumb|preview|trailer|teaser|sprite|sample)/i.test(context)
+    );
+  } catch {
+    return true;
+  }
+}
+
+function isPlayableDirectMp4(candidate) {
+  return (
+    /^https?:\/\//i.test(candidate.url) &&
+    /\.mp4(?:[?#]|$)/i.test(candidate.url) &&
+    !/\.mp4\.m3u8(?:[?#]|$)/i.test(candidate.url) &&
+    !isPreviewMp4(candidate) &&
+    directMp4Resolution(candidate) !== null
+  );
+}
+
+function directMp4Label(candidate) {
+  const resolution = directMp4Resolution(candidate);
+  return resolution ? `${resolution}p MP4` : 'MP4';
 }
 
 async function fetchWithRetry(instance, url, retries = 3) {
@@ -648,18 +681,28 @@ metadataList.push(
       );
     }
 
-    const seenMp4Urls = new Set();
-    const directMp4Streams = directMp4Candidates
-      .filter(candidate => {
-        if (seenMp4Urls.has(candidate.url)) return false;
-        seenMp4Urls.add(candidate.url);
-        return true;
-      })
-      .map(candidate =>
+    // The page payload also contains tiny animated thumbnail MP4s such as
+    // `thumb-v4.xhcdn.com/.../526x298...t.mp4`. They are only a few seconds
+    // long and must never be exposed as playable streams. Keep only genuine
+    // quality-labelled video files and one URL per resolution.
+    const byResolution = new Map();
+
+    for (const candidate of directMp4Candidates) {
+      if (!isPlayableDirectMp4(candidate)) continue;
+
+      const resolution = directMp4Resolution(candidate);
+      if (!byResolution.has(resolution)) {
+        byResolution.set(resolution, candidate);
+      }
+    }
+
+    const directMp4Streams = [...byResolution.entries()]
+      .sort(([left], [right]) => right - left)
+      .map(([, candidate]) =>
         this.withPlaybackHeaders({
           type: Provider.TYPE,
           url: candidate.url,
-          name: directMp4Label(candidate.path),
+          name: directMp4Label(candidate),
         })
       );
 

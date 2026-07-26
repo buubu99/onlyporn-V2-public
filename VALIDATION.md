@@ -36,3 +36,8 @@ Live requests to the third-party provider websites were not executed in the vali
 ## 2.0.4 regression check
 
 A synthetic xHamster page containing both an AV1 HLS URL and direct MP4 URLs is used to verify that `processStreams()` returns MP4 streams and never short-circuits to the HLS URL.
+
+## 2.0.5 xHamster stream hygiene
+- Rejects animated thumbnail clips such as `526x298.*.t.mp4`.
+- Requires a recognized resolution in the candidate path or URL.
+- Emits at most one direct MP4 per resolution, sorted highest to lowest.
