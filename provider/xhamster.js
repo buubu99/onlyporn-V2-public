@@ -616,6 +616,29 @@ metadataList.push(
       value => this.cleanUrl(value)
     );
 
+    // xHamster has moved MP4 source objects between releases. Scan the full
+    // player payload too, while the collector still accepts only real .mp4
+    // URLs (and therefore ignores .mp4.m3u8 AV1 playlists).
+    collectDirectMp4Sources(
+      json,
+      value => this.cleanUrl(value),
+      ['window.initials'],
+      directMp4Candidates
+    );
+
+    // Also recover escaped absolute MP4 URLs directly from the page source.
+    for (const match of pageHtml.matchAll(
+      /https?:\\?\/\\?\/[^\s"'<>]+?\.mp4(?:\?[^\s"'<>]*)?/gi
+    )) {
+      const cleaned = this.cleanUrl(match[0]);
+      if (cleaned?.startsWith('http')) {
+        directMp4Candidates.push({
+          url: cleaned,
+          path: ['pageHtml'],
+        });
+      }
+    }
+
     if (structuredData?.contentUrl) {
       collectDirectMp4Sources(
         structuredData.contentUrl,
@@ -697,6 +720,39 @@ metadataList.push(
     }
 
     return response;
+  }
+
+  async processStreams({ id }) {
+    const html = await this.fetchHtml(id);
+    const parsed = this.parseVideoPage({ id, html });
+
+    if (!parsed) return { streams: [] };
+
+    // Critical ordering: the shared Provider.processStreams() scans the raw
+    // HTML for the first .m3u8 before calling parseVideoPage(). On xHamster
+    // that always short-circuits to AV1 HLS, so the direct MP4 selection in
+    // parseVideoPage() was never reached.
+    if (parsed.streams?.length) {
+      return { streams: parsed.streams };
+    }
+
+    if (/\.mp4(?:[?#]|$)/i.test(parsed.videoPageUrl || '')) {
+      return {
+        streams: [
+          this.withPlaybackHeaders({
+            type: Provider.TYPE,
+            url: parsed.videoPageUrl,
+            name: 'MP4',
+          }),
+        ],
+      };
+    }
+
+    // Do not expose xHamster's nested AV1 HLS media playlists through the
+    // AIOStreams built-in proxy: their relative init/segment subpaths are
+    // rejected by that route. Returning no stream is safer than returning a
+    // guaranteed broken item.
+    return { streams: [] };
   }
 
   titleFromId(id) {

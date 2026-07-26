@@ -31,3 +31,11 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Keeps the required Referer, Origin, User-Agent and age-preference Cookie in
   standard Stremio `behaviorHints.proxyHeaders.request`.
 - Keeps H.264 HLS ahead of AV1 HLS only as a fallback when no MP4 exists.
+
+
+## 2.0.4
+
+- Fixed the xHamster stream-handler ordering regression: the shared provider previously selected the first HLS URL before xHamster's direct-MP4 parser could run.
+- xHamster now overrides `processStreams()` and returns direct MP4 sources first.
+- Expanded direct-MP4 discovery across the full `window.initials` payload and escaped page source.
+- Nested AV1 HLS is no longer returned as a broken fallback.

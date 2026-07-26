@@ -31,3 +31,8 @@ Live requests to the third-party provider websites were not executed in the vali
   headers and are not serialized into the metadata JSON.
 - Live third-party playback still requires deployment testing because xHamster
   source availability varies by video and region.
+
+
+## 2.0.4 regression check
+
+A synthetic xHamster page containing both an AV1 HLS URL and direct MP4 URLs is used to verify that `processStreams()` returns MP4 streams and never short-circuits to the HLS URL.
