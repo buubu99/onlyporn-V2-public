@@ -54,3 +54,16 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Eporner MP4 API results are filtered and deduplicated by resolution.
 - The shared provider fallback no longer returns the first arbitrary MP4 found in page HTML.
 - XVideos and XNXX were audited and do not use broad page-wide MP4 scraping; no preview-filter change was required.
+
+## 2.1.0 — Phase 1 reliability and security hardening
+
+- Replaced substring-based content routing with provider-scoped opaque Stremio IDs while preserving strictly validated legacy URL IDs.
+- Added exact provider-page hostname allowlists, HTTPS-only requests, private/reserved IP blocking, DNS validation, and validation of every redirect destination.
+- Replaced scattered raw network calls with one shared HTTP path providing 15-second timeouts, HTTP status validation, bounded retries, Retry-After support, and redirect limits.
+- Corrected shared page-number calculation so the first non-zero Stremio `skip` loads provider page 2 instead of repeating page 1.
+- Corrected Porntrex pagination to use `this.limit` rather than the undefined `this.perPage` property.
+- Implemented Porntrex keyword search through its `/search/<keyword>/` route.
+- Corrected the XVideos JSON-LD fallback by promoting `contentUrl` during page parsing and removed the undefined Cheerio `$` reference from `processStreams()`.
+- Added bounded TTL/LRU-style caches. Empty strings, null responses, failed requests, and empty provider pages are never inserted into shared caches.
+- Routed Porntrex stream resolution, SpankBang page/HLS requests, SpankBang 4K probes, and xHamster API backfill through the validated shared HTTP client.
+- Added offline Phase 1 regression tests for cache limits, cache expiry, scoped IDs, HTTPS/host validation, private-IP rejection, pagination source fixes, Porntrex fixes, and the XVideos fallback.

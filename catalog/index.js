@@ -34,11 +34,18 @@ const addonEnabled = (id) => {
 }
 
 const getActiveProvider = (id) => {
+  const value = String(id || '');
+
   for (const name of catalogNames) {
-    if (id.includes(name)) {
+    if (
+      value === name ||
+      new RegExp(`^${name}(?:[.\-_:]|$)`, 'i').test(value) ||
+      value.startsWith(`onlyporn:${name}:`)
+    ) {
       return name;
     }
   }
+
   return null;
 }
 

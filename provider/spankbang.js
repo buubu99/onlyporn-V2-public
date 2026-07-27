@@ -2,6 +2,7 @@ const { load } = require('cheerio');
 const logger = require('../logger');
 const { meta } = require('../model');
 const Provider = require('./provider');
+const BoundedTtlCache = require('./cache');
 const {
   cleanMediaUrl,
   extractResolution,
@@ -9,9 +10,8 @@ const {
   isPreviewMediaUrl,
 } = require('./media-utils');
 
-// 🚀 SIMPLE MEMORY CACHE
-const hlsCache = new Map();
 const CACHE_TTL = 1000 * 60 * 10; // 10 minutes
+const hlsCache = new BoundedTtlCache({ maxEntries: 200, ttlMs: CACHE_TTL });
 
 const pathMappings = {
   'trending': '/trending_videos/',
@@ -58,39 +58,25 @@ class SpankbangProvider extends Provider {
   }
 
   async fetchHtml(url) {
-    logger.info({ url }, 'fetching url');
+    const html = await super.fetchHtml(url, {
+      cache: false,
+      headers: {
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+        Pragma: 'no-cache',
+        Referer: 'https://spankbang.com/',
+        Origin: 'https://spankbang.com',
+        Cookie: 'sb=1; age_verified=1; hasVisited=1;',
+        'Upgrade-Insecure-Requests': '1',
+      },
+    });
 
-    try {
-      const response = await fetch(url, {
-        headers: {
-  'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-  'accept-language': 'en-US,en;q=0.9',
-  'cache-control': 'no-cache',
-  'pragma': 'no-cache',
-  'upgrade-insecure-requests': '1',
-  'referer': 'https://spankbang.com/',
-  'origin': 'https://spankbang.com',
-  'cookie': 'sb=1; age_verified=1; hasVisited=1;',
-  'sec-fetch-site': 'same-origin',
-  'sec-fetch-mode': 'navigate',
-  'sec-fetch-user': '?1',
-  'sec-fetch-dest': 'document',
-  'user-agent':
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36',
-}
-      });
-
-
-      const html = await response.text();
-if (html.includes('cf-chl') || html.includes('Just a moment')) {
-  console.log('🚫 CLOUDFLARE BLOCK');
-}
-
-      return html;
-    } catch (error) {
-      logger.error(error);
-      return '';
+    if (html.includes('cf-chl') || html.includes('Just a moment')) {
+      throw new Error('SpankBang returned a Cloudflare challenge page');
     }
+
+    return html;
   }
 
   handleGenre({ extra }) {
@@ -451,21 +437,17 @@ metadataList.push(
 
     const masterUrl = m3u8Match[0];
 
-    if (hlsCache.has(masterUrl)) {
-      const cached = hlsCache.get(masterUrl);
-
-      if (Date.now() - cached.time < CACHE_TTL) {
-        console.log('⚡ CACHE HIT');
-        return {
-          metaResponse: new meta.MetaResponse(url, 'movie', title, {
-            poster,
-            background: poster,
-            description,
-            posterShape: 'landscape'
-          }),
-          streams: cached.streams
-        };
-      }
+    const cachedStreams = hlsCache.get(masterUrl);
+    if (cachedStreams !== undefined) {
+      return {
+        metaResponse: new meta.MetaResponse(url, 'movie', title, {
+          poster,
+          background: poster,
+          description,
+          posterShape: 'landscape'
+        }),
+        streams: cachedStreams
+      };
     }
 
     console.log('🌐 HLS parsing started');
@@ -495,20 +477,14 @@ metadataList.push(
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36',
       };
 
-      const [playlistRes, fourkRes] = await Promise.all([
-        fetch(masterUrl, { headers }),
+      const [text, fourkAvailable] = await Promise.all([
+        this.fetchMediaText(masterUrl, { headers, cache: false }),
         forced4kUrl
-          ? fetch(forced4kUrl, { method: 'HEAD', headers }).catch(() => null)
-          : Promise.resolve(null),
+          ? this.mediaExists(forced4kUrl, { headers })
+          : Promise.resolve(false),
       ]);
 
-      console.log('📡 Playlist fetched');
-
-      if (!playlistRes.ok) {
-        throw new Error(`SpankBang playlist request failed: ${playlistRes.status}`);
-      }
-
-      if (fourkRes && fourkRes.ok) {
+      if (fourkAvailable) {
         console.log('🔥 4K FOUND');
         forced4kStream = this.addPlaybackHeaders({
           name: '2160p 4K',
@@ -517,7 +493,6 @@ metadataList.push(
         });
       }
 
-      const text = await playlistRes.text();
       const lines = text.split('\n');
       const variants = [];
 
@@ -560,10 +535,7 @@ metadataList.push(
         streams.unshift(forced4kStream);
       }
 
-      hlsCache.set(masterUrl, {
-        streams,
-        time: Date.now(),
-      });
+      if (streams.length) hlsCache.set(masterUrl, streams);
 
       console.log('✅ STREAMS READY');
 

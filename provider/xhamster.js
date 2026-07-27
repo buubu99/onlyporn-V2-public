@@ -2,19 +2,16 @@ const { load } = require('cheerio');
 const logger = require('../logger');
 const { meta } = require('../model');
 const Provider = require('./provider');
+const BoundedTtlCache = require('./cache');
 
-const metaCache = new Map();
 const META_TTL = 1000 * 60 * 10;
-
-const htmlCache = new Map();
-const inFlight = new Map();
 const HTML_TTL = 1000 * 60 * 5;
-
-const catalogCache = new Map();
 const CATALOG_TTL = 1000 * 60 * 3;
 
-const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-
+const metaCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: META_TTL });
+const htmlCache = new BoundedTtlCache({ maxEntries: 200, ttlMs: HTML_TTL });
+const catalogCache = new BoundedTtlCache({ maxEntries: 100, ttlMs: CATALOG_TTL });
+const inFlight = new Map();
 
 function parseWindowInitials(html) {
   if (!html || typeof html !== 'string') return null;
@@ -236,22 +233,6 @@ function directMp4Label(candidate) {
   return resolution ? `${resolution}p MP4` : 'MP4';
 }
 
-async function fetchWithRetry(instance, url, retries = 3) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      return await instance(url);
-    } catch (err) {
-      if (err.response?.status === 429) {
-        logger.debug(`429 retry (${i + 1})`);
-        await delay(2000 * (i + 1));
-      } else {
-        throw err;
-      }
-    }
-  }
-  throw new Error('Max retries reached');
-}
-
 const pathMappings = {
   'Best (Daily)': '/best',
   'Best (Weekly)': '/best/weekly',
@@ -290,28 +271,19 @@ getMode(catalogId = '') {
 }
 
   async fetchHtml(url) {
+    const cached = htmlCache.get(url);
+    if (cached !== undefined) return cached;
     if (inFlight.has(url)) return inFlight.get(url);
 
     const promise = (async () => {
-      const cached = htmlCache.get(url);
-      if (cached && Date.now() - cached.time < HTML_TTL) {
-        return cached.data;
-      }
-
-      // The upstream deployment worked because Provider.fetchHtml used its
-      // normal browser request profile here. Sending the minimal custom header
-      // set changes the xHamster video-page response and can remove player data.
-      const html = await fetchWithRetry(
-        (u) => super.fetchHtml(u),
-        url
-      );
-
-      htmlCache.set(url, { data: html, time: Date.now() });
+      // Provider.fetchHtml supplies the browser headers, timeout, status
+      // validation, redirect validation, and bounded retries.
+      const html = await super.fetchHtml(url);
+      htmlCache.set(url, html);
       return html;
     })();
 
     inFlight.set(url, promise);
-
     try {
       return await promise;
     } finally {
@@ -370,10 +342,7 @@ getMode(catalogId = '') {
 
     const cacheKey = `${baseUrl}-${genreName}`;
     const cached = catalogCache.get(cacheKey);
-
-    if (cached && Date.now() - cached.time < CATALOG_TTL) {
-      return cached.data;
-    }
+    if (cached !== undefined) return cached;
 
     const globalSeen = new Set();
     let allVideos = [];
@@ -404,8 +373,7 @@ getMode(catalogId = '') {
 
       try {
         const apiUrl = `https://xhamster.com/api/v4/videos?category=${slug}&size=60`;
-        const res = await fetch(apiUrl);
-        const json = await res.json();
+        const json = await this.fetchJson(apiUrl, { cache: false });
 
         for (const v of json?.videos || []) {
   const url = v.url || v.pageURL;
@@ -439,10 +407,7 @@ getMode(catalogId = '') {
 
     const finalData = allVideos.slice(0, this.limit);
 
-    catalogCache.set(cacheKey, {
-      data: finalData,
-      time: Date.now()
-    });
+    catalogCache.set(cacheKey, finalData);
 
     return finalData;
   }
@@ -582,7 +547,7 @@ metadataList.push(
     if (!id.startsWith('http')) id = this.baseUrl + id;
 
     const cached = metaCache.get(id);
-    if (cached && Date.now() - cached.time < META_TTL) return cached.data;
+    if (cached !== undefined) return cached;
 
     const html = await this.fetchHtml(id);
     const data = this.parseVideoPage({ id, html });
@@ -590,7 +555,7 @@ metadataList.push(
     // Do not cache a temporary fallback-only response. This allows the next
     // request to recover immediately if xHamster briefly returns a block page.
     if (data?.videoPageUrl || data?.poster) {
-      metaCache.set(id, { data, time: Date.now() });
+      metaCache.set(id, data);
     }
 
     return data;

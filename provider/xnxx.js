@@ -2,6 +2,7 @@ const { load } = require('cheerio');
 const logger = require('../logger');
 const { meta } = require('../model');
 const Provider = require('./provider');
+const BoundedTtlCache = require('./cache');
 
 const DEFAULT_POSTER =
   'https://thumb-cdn77.xnxx-cdn.com/default.jpg';
@@ -60,12 +61,11 @@ const resolveThumbNum = (url) => {
 /* =========================
    CACHE
 ========================= */
-const htmlCache = new Map();
-const metaCache = new Map();
-const inFlight = new Map();
-
 const HTML_TTL = 1000 * 60 * 5;
 const META_TTL = 1000 * 60 * 5;
+const htmlCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: HTML_TTL });
+const metaCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: META_TTL });
+const inFlight = new Map();
 
 /* =========================
    REGEX
@@ -96,9 +96,7 @@ class XnxxProvider extends Provider {
   async fetchHtml(url) {
 
     const cached = htmlCache.get(url);
-    if (cached && (Date.now() - cached.time < HTML_TTL)) {
-      return cached.data;
-    }
+    if (cached !== undefined) return cached;
 
     if (inFlight.has(url)) {
       return inFlight.get(url);
@@ -108,15 +106,7 @@ class XnxxProvider extends Provider {
       try {
         const html = await super.fetchHtml(url);
 
-        htmlCache.set(url, {
-          data: html,
-          time: Date.now()
-        });
-
-        if (htmlCache.size > 300) {
-          const firstKey = htmlCache.keys().next().value;
-          htmlCache.delete(firstKey);
-        }
+        htmlCache.set(url, html);
 
         return html;
       } finally {
@@ -295,22 +285,12 @@ titleRaw = titleRaw.replace(/\s+/g, ' ').trim();
   async getMetadata(args) {
 
     const cached = metaCache.get(args.id);
-    if (cached && (Date.now() - cached.time < META_TTL)) {
-      return cached.data.metaResponse;
-    }
+    if (cached !== undefined) return cached.metaResponse;
 
     const html = await this.fetchHtml(args.id);
     const parsed = this.parseVideoPage({ id: args.id, html });
 
-    metaCache.set(args.id, {
-      data: parsed,
-      time: Date.now()
-    });
-
-    if (metaCache.size > 300) {
-      const firstKey = metaCache.keys().next().value;
-      metaCache.delete(firstKey);
-    }
+    metaCache.set(args.id, parsed);
 
     return parsed.metaResponse;
   }
@@ -428,16 +408,13 @@ background = resolvePoster(background);
     let cached = metaCache.get(id);
     let metaData;
 
-    if (cached && (Date.now() - cached.time < META_TTL)) {
-      metaData = cached.data;
+    if (cached !== undefined) {
+      metaData = cached;
     } else {
       const html = await this.fetchHtml(id);
       metaData = this.parseVideoPage({ id, html });
 
-      metaCache.set(id, {
-        data: metaData,
-        time: Date.now()
-      });
+      metaCache.set(id, metaData);
     }
 
     let streamsResponse = await super.getStreams(metaData);

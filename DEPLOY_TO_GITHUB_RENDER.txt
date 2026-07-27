@@ -1,0 +1,70 @@
+ONLYPORN PHASE 1 v2.1.0 — EXACT DEPLOYMENT COMMAND
+
+Run this in macOS Terminal after downloading the ZIP to Downloads.
+It first verifies that the local Git checkout is clean, updates it from GitHub,
+creates a remote backup branch for the working 2.0.6 state, installs the complete
+2.1.0 project, runs offline checks, commits, and pushes to main.
+
+set -e
+
+ZIP="$HOME/Downloads/onlyporn-V2-public-PHASE1-2.1.0.zip"
+WORK="$HOME/Desktop/onlyporn-v2-upload"
+TMP="/tmp/onlyporn-v2-210"
+BACKUP_BRANCH="backup-v2.0.6-before-phase1"
+
+[ -f "$ZIP" ] || { echo "ERROR: ZIP not found: $ZIP"; exit 1; }
+[ -d "$WORK/.git" ] || { echo "ERROR: Git checkout not found: $WORK"; exit 1; }
+
+cd "$WORK"
+
+if [ -n "$(git status --porcelain)" ]; then
+  echo "ERROR: The Git checkout has uncommitted changes. Nothing was replaced."
+  git status --short
+  exit 1
+fi
+
+git fetch origin
+git checkout main
+git pull --ff-only origin main
+
+git branch -f "$BACKUP_BRANCH" HEAD
+git push -f origin "$BACKUP_BRANCH"
+
+echo "Backup created on GitHub: $BACKUP_BRANCH"
+
+rm -rf "$TMP"
+mkdir -p "$TMP"
+unzip -q "$ZIP" -d "$TMP"
+
+rsync -a --delete \
+  --exclude='.git/' \
+  "$TMP/onlyporn-V2-public-PHASE1-2.1.0/" \
+  "$WORK/"
+
+cd "$WORK"
+
+find . -type f -name '*.js' -not -path './node_modules/*' -print0 \
+  | xargs -0 -n1 node --check
+
+node --test provider/phase1.test.js
+git diff --check
+
+git status --short
+git add -A
+git commit -m "Phase 1 reliability and security hardening"
+git push origin main
+
+echo "DONE: GitHub main was updated. Render should now auto-deploy v2.1.0."
+
+AFTER RENDER SHOWS LIVE
+1. Open: https://onlyporn-v2-public-k143.onrender.com/manifest.json
+2. Confirm the manifest version is 2.1.0.
+3. Restart or hard-refresh Stremio/AIOStreams.
+4. Test all seven catalogs, Porntrex search, Load More/page 2, metadata, and playback.
+
+ROLLBACK ONLY IF THE LIVE DEPLOYMENT FAILS
+cd "$HOME/Desktop/onlyporn-v2-upload"
+git fetch origin
+git checkout main
+git reset --hard "origin/backup-v2.0.6-before-phase1"
+git push --force-with-lease origin main

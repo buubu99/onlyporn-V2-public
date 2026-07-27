@@ -48,3 +48,28 @@ A synthetic xHamster page containing both an AV1 HLS URL and direct MP4 URLs is 
 - Preview URL classifier tested against xHamster `.t.mp4`, Porntrex screenshot paths and common preview/trailer/sample naming.
 - Full-video classifier tested against resolution-labelled MP4 paths and Porntrex `/contents/videos/` media paths.
 - Live third-party provider playback still requires deployment testing because provider pages and CDN responses change independently.
+
+## 2.1.0 Phase 1 validation — 2026-07-27
+
+Completed offline:
+
+- All JavaScript files passed `node --check`.
+- `package.json` parsed successfully and reports version `2.1.0`.
+- Seven Phase 1 tests passed with `node --test provider/phase1.test.js`:
+  - bounded cache eviction;
+  - expired-entry deletion;
+  - rejection of empty/null cache values;
+  - opaque provider-scoped ID round-trip;
+  - HTTPS/credential/port/localhost validation;
+  - private/reserved IPv4 and IPv6 rejection;
+  - approved-host enforcement and source-level regression checks.
+- Repository scan found no `.env` file, private key, password, API token, or Git metadata.
+- No new npm dependency was added; the existing Render build/install process remains unchanged.
+
+Not executable in the offline build environment:
+
+- Live provider HTTP requests.
+- Render build and deployment.
+- Playback through AIOStreams/Stremio.
+
+After deployment, verify all seven catalogs, search, page 2, metadata, and at least one stream per provider. Preserve the existing 2.0.6 Git commit so rollback is immediate if a provider has changed its live HTML or redirect behavior.

@@ -1,18 +1,18 @@
-const { load } = require('cheerio');      
-const logger = require('../logger');      
-const { meta } = require('../model');      
+const { load } = require('cheerio');
+const logger = require('../logger');
+const { meta } = require('../model');
 const Provider = require('./provider');
 const {
   cleanMediaUrl,
   extractResolution,
   isLikelyFullVideoMp4,
   isPreviewMediaUrl,
-} = require('./media-utils');      
-      
-class PorntrexProvider extends Provider {      
-      
-  constructor() {      
-    super('https://www.porntrex.com/', 'porntrex', 85);      
+} = require('./media-utils');
+
+class PorntrexProvider extends Provider {
+
+  constructor() {
+    super('https://www.porntrex.com/', 'porntrex', 85);
   }
 
 GENRE_MAP = {
@@ -42,7 +42,7 @@ GENRE_MAP = {
   'Cuckold': 'cuckold',
   'Hentai': 'hentai',
   'Celebrities': 'celebrities'
-}; 
+};
 
 extractVideoId(url) {
   const match = url.match(/\/video\/(\d+)\//);
@@ -52,89 +52,85 @@ extractVideoId(url) {
 buildPoster(videoId) {
   const bucket = Math.floor(videoId / 1000) * 1000;
   return `https://ptx.cdntrex.com/contents/videos_screenshots/${bucket}/${videoId}/preview.mp4.jpg`;
-}     
-      
-async fetchHtml(url) {      
-  return super.fetchHtml(url, {      
-    headers: {      
-      'User-Agent':      
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',      
-      
-      'Accept':      
-        'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',      
-      
-      'Accept-Language': 'en-US,en;q=0.9',      
-      
-      'Referer': 'https://www.porntrex.com/',      
-      
-      // 🔥 THIS UNLOCKS CONTENT      
-      'Cookie': 'kt_tcookie=1; confirmed=true'      
-    }      
-  });      
-}      
-      
-async resolveStream(url) {
-  try {
-    let res = await fetch(url, {
-      method: 'HEAD',
-      redirect: 'follow',
-      headers: {
-        'User-Agent': 'Mozilla/5.0',
-        'Referer': 'https://www.porntrex.com/',
-        'Cookie': 'kt_tcookie=1; confirmed=true'
-      }
-    });
+}
 
-    if (!res.url || res.status >= 400) {
-      // fallback
-      res = await fetch(url, {
+async fetchHtml(url) {
+  return super.fetchHtml(url, {
+    headers: {
+      'User-Agent':
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36',
+
+      'Accept':
+        'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+
+      'Accept-Language': 'en-US,en;q=0.9',
+
+      'Referer': 'https://www.porntrex.com/',
+
+      // 🔥 THIS UNLOCKS CONTENT
+      'Cookie': 'kt_tcookie=1; confirmed=true'
+    }
+  });
+}
+
+async resolveStream(url) {
+  const headers = {
+    'User-Agent': 'Mozilla/5.0',
+    Referer: 'https://www.porntrex.com/',
+    Cookie: 'kt_tcookie=1; confirmed=true'
+  };
+
+  try {
+    return await this.resolveMediaUrl(url, { headers });
+  } catch (headError) {
+    try {
+      const response = await this.request(url, {
         method: 'GET',
-        redirect: 'follow',
-        headers: {
-          'User-Agent': 'Mozilla/5.0',
-          'Referer': 'https://www.porntrex.com/',
-          'Cookie': 'kt_tcookie=1; confirmed=true'
-        }
+        headers,
+        responseType: 'text',
+        allowedHosts: null,
+        cache: null,
+        retries: 1,
       });
+      return response.finalUrl;
+    } catch (getError) {
+      logger.warn({ error: getError.message }, 'Stream resolve failed');
+      return null;
+    }
+  }
+}
+
+  static create() {
+    return new PorntrexProvider();
+  }
+
+  /* =========================
+     URL HANDLERS
+  ========================= */
+
+  getInitialUrl(catalogId) {
+    if (!catalogId) {
+      return `${this.baseUrl}latest-updates/`;
     }
 
-    return res.url;
-  } catch (e) {
-    logger.warn({ error: e.message }, 'Stream resolve failed');
-    return null;
+    if (catalogId.includes('top-rated')) {
+      return `${this.baseUrl}top-rated/`;
+    }
+
+    if (catalogId.includes('most-popular')) {
+      return `${this.baseUrl}most-popular/`;
+    }
+
+    // fallback
+    return `${this.baseUrl}latest-updates/`;
   }
-}      
-      
-  static create() {      
-    return new PorntrexProvider();      
-  }      
-      
-  /* =========================      
-     URL HANDLERS      
-  ========================= */      
-      
-  getInitialUrl(catalogId) {      
-    if (!catalogId) {      
-      return `${this.baseUrl}latest-updates/`;      
-    }      
-      
-    if (catalogId.includes('top-rated')) {      
-      return `${this.baseUrl}top-rated/`;      
-    }      
-      
-    if (catalogId.includes('most-popular')) {      
-      return `${this.baseUrl}most-popular/`;      
-    }      
-      
-    // fallback      
-    return `${this.baseUrl}latest-updates/`;      
-  }      
-      
-  handleSearch() {
-  // 🚫 Completely ignore search → fallback to safe page
-  return `${this.baseUrl}latest-updates/`;
-}      
-      
+
+  handleSearch({ extra: { search } }) {
+    const keyword = String(search || '').trim();
+    if (!keyword) return `${this.baseUrl}latest-updates/`;
+    return `${this.baseUrl}search/${encodeURIComponent(keyword)}/`;
+  }
+
   handleGenre(args) {
   const input = (args.extra.genre || '').trim();
 
@@ -156,42 +152,39 @@ async resolveStream(url) {
 
   // ✅ normal categories
   return `${this.baseUrl}categories/${slug}/`;
-}      
-      
-  handlePagination(url, { extra: { skip } }) {      
-    const page = Math.floor(skip / this.perPage) + 1;      
-      
-    // page 1 = base URL      
-    if (page <= 1) return url;      
-      
-    // ensure trailing slash      
-    if (!url.endsWith('/')) url += '/';      
-      
-    return `${url}${page}/`;      
-  }      
-      
-  /* =========================      
-     CATALOG      
-  ========================= */      
-      
-  getCatalogMetas(html) {      
-    const $ = load(html);      
-    const metas = [];      
-    const seen = new Set();      
-      
-    $('div.video-item').each((_, el) => {      
-      const $el = $(el);      
-      const $a = $el.find('a').first();      
-      
-      const href = $a.attr('href');      
-      if (!href) return;      
-      
-      const id = new URL(href, this.baseUrl).href;      
-      if (seen.has(id)) return;      
-      seen.add(id);      
-      
-      const $img = $a.find('img');      
-      
+}
+
+  handlePagination(url, { extra: { skip } }) {
+    const page = Math.floor(Number(skip || 0) / this.limit) + 1;
+
+    if (page <= 1) return url;
+
+    const base = url.endsWith('/') ? url : `${url}/`;
+    return `${base}${page}/`;
+  }
+
+  /* =========================
+     CATALOG
+  ========================= */
+
+  getCatalogMetas(html) {
+    const $ = load(html);
+    const metas = [];
+    const seen = new Set();
+
+    $('div.video-item').each((_, el) => {
+      const $el = $(el);
+      const $a = $el.find('a').first();
+
+      const href = $a.attr('href');
+      if (!href) return;
+
+      const id = new URL(href, this.baseUrl).href;
+      if (seen.has(id)) return;
+      seen.add(id);
+
+      const $img = $a.find('img');
+
       let poster;
 
 // extract ID
@@ -211,13 +204,13 @@ if (!poster) {
 // normalize
 if (poster && poster.startsWith('//')) {
   poster = 'https:' + poster;
-}      
-      
-      const title =      
-        ($img.attr('alt') || 'Video')      
-          .replace(/\s+/g, ' ')      
-          .trim();      
-      
+}
+
+      const title =
+        ($img.attr('alt') || 'Video')
+          .replace(/\s+/g, ' ')
+          .trim();
+
       metas.push(
   new meta.MetaPreview(
     id,
@@ -228,22 +221,22 @@ if (poster && poster.startsWith('//')) {
       posterShape: 'landscape' // 👈 THIS is the fix
     }
   )
-);      
-    });      
-      
-    return metas;      
-  }      
-      
-  /* =========================      
-     METADATA      
-  ========================= */      
-      
-  async getMetadata(args) {      
-  const html = await this.fetchHtml(args.id);      
-  const parsed = await this.parseVideoPage({ id: args.id, html });      
-  return parsed.metaResponse;      
-}      
-      
+);
+    });
+
+    return metas;
+  }
+
+  /* =========================
+     METADATA
+  ========================= */
+
+  async getMetadata(args) {
+  const html = await this.fetchHtml(args.id);
+  const parsed = await this.parseVideoPage({ id: args.id, html });
+  return parsed.metaResponse;
+}
+
   async processStreams({ id }) {
     const html = await this.fetchHtml(id);
     const parsed = await this.parseVideoPage({ id, html });
@@ -253,27 +246,27 @@ if (poster && poster.startsWith('//')) {
     };
   }
 
-  /* =========================      
-     PARSER      
-  ========================= */      
-      
-  async parseVideoPage({ id, html }) {      
-  const $ = load(html);      
-      
-  /* =========================      
-     META (ROBUST)      
-  ========================= */      
-      
-  const title =      
-    $('meta[property="og:title"]').attr('content') ||      
-    $('title').text().trim() ||      
-    'Video';      
-      
-  const description =      
-    $('meta[name="description"]').attr('content') ||      
-    title;      
-      
-  // 🔥 Extract video ID from URL      
+  /* =========================
+     PARSER
+  ========================= */
+
+  async parseVideoPage({ id, html }) {
+  const $ = load(html);
+
+  /* =========================
+     META (ROBUST)
+  ========================= */
+
+  const title =
+    $('meta[property="og:title"]').attr('content') ||
+    $('title').text().trim() ||
+    'Video';
+
+  const description =
+    $('meta[name="description"]').attr('content') ||
+    title;
+
+  // 🔥 Extract video ID from URL
 const videoId = this.extractVideoId(id);
 
 let poster;
@@ -281,14 +274,14 @@ let poster;
 if (videoId) {
   poster = this.buildPoster(videoId);
   logger.debug(poster, 'High quality poster');
-} else {      
-  poster = $('meta[property="og:image"]').attr('content');      
-      
-  if (poster && poster.startsWith('//')) {      
-    poster = 'https:' + poster;      
-  }      
-}      
-      
+} else {
+  poster = $('meta[property="og:image"]').attr('content');
+
+  if (poster && poster.startsWith('//')) {
+    poster = 'https:' + poster;
+  }
+}
+
   const metaResponse = new meta.MetaResponse(
   id,
   Provider.TYPE,
@@ -300,41 +293,41 @@ if (videoId) {
     posterShape: 'landscape',
     genres: []
   }
-);      
-      
-  /* =========================      
-     STREAM EXTRACTION (PRIMARY)      
-  ========================= */      
-      
-  const playerMatch = html.match(      
-    /kt_player\s*\(\s*['"][^'"]+['"]\s*,\s*(\{[\s\S]*?\})\s*\)/      
-  );      
-      
-  const streams = [];      
-      
-  if (playerMatch) {      
-    const raw = playerMatch[1];      
-      
-    const streamRegex = /video_alt_url(\d*)\s*:\s*'([^']+)'/g;      
-      
-    const qualityMap = {      
-      '': '480p',      
-      '2': '720p',      
-      '3': '1080p',      
-      '4': '1440p',      
-      '5': '2160p'      
-    };      
-      
-    let match;      
-      
-    while ((match = streamRegex.exec(raw)) !== null) {      
-      const key = match[1] || '';      
-      let url = match[2];      
-      
-      if (url.startsWith('//')) {      
-        url = 'https:' + url;      
-      }      
-      
+);
+
+  /* =========================
+     STREAM EXTRACTION (PRIMARY)
+  ========================= */
+
+  const playerMatch = html.match(
+    /kt_player\s*\(\s*['"][^'"]+['"]\s*,\s*(\{[\s\S]*?\})\s*\)/
+  );
+
+  const streams = [];
+
+  if (playerMatch) {
+    const raw = playerMatch[1];
+
+    const streamRegex = /video_alt_url(\d*)\s*:\s*'([^']+)'/g;
+
+    const qualityMap = {
+      '': '480p',
+      '2': '720p',
+      '3': '1080p',
+      '4': '1440p',
+      '5': '2160p'
+    };
+
+    let match;
+
+    while ((match = streamRegex.exec(raw)) !== null) {
+      const key = match[1] || '';
+      let url = match[2];
+
+      if (url.startsWith('//')) {
+        url = 'https:' + url;
+      }
+
       url = cleanMediaUrl(url);
       if (isPreviewMediaUrl(url)) continue;
 
@@ -342,13 +335,13 @@ if (videoId) {
         url,
         quality: qualityMap[key] || extractResolution(url) || '480p'
       });
-    }      
-  }      
-      
-  /* =========================      
-     FALLBACK (MP4 SCRAPE)      
-  ========================= */      
-      
+    }
+  }
+
+  /* =========================
+     FALLBACK (MP4 SCRAPE)
+  ========================= */
+
   if (!streams.length) {
     const matches =
       html.match(/https?:\/\/[^"' ]+\.mp4[^"' ]*/g) || [];
@@ -373,13 +366,13 @@ if (videoId) {
     streams.push(...byQuality.values());
   }
 
-  /* =========================      
-     FINAL CHECK      
-  ========================= */      
-      
-  if (!streams.length) {      
-    logger.warn('Porntrex: no streams found at all');      
-    return { metaResponse };      
+  /* =========================
+     FINAL CHECK
+  ========================= */
+
+  if (!streams.length) {
+    logger.warn('Porntrex: no streams found at all');
+    return { metaResponse };
   }
 
 // 🔥 Deduplicate streams
@@ -392,21 +385,21 @@ const uniqueStreams = streams.filter(s => {
   seenQualities.add(s.quality);
   return true;
 });
-      
-  /* =========================      
-     SORT STREAMS      
-  ========================= */      
-      
-  uniqueStreams.sort((a, b) => {      
+
+  /* =========================
+     SORT STREAMS
+  ========================= */
+
+  uniqueStreams.sort((a, b) => {
     const qa = Number(a.quality.replace('p', '')) || 0;
-const qb = Number(b.quality.replace('p', '')) || 0;      
-    return qb - qa;      
-  });      
-      
-  /* =========================      
-     RETURN STREAMS      
-  ========================= */      
-      
+const qb = Number(b.quality.replace('p', '')) || 0;
+    return qb - qa;
+  });
+
+  /* =========================
+     RETURN STREAMS
+  ========================= */
+
   const resolvedStreams = await Promise.all(
   uniqueStreams.map(async (s) => {
     const finalUrl = await this.resolveStream(s.url);
@@ -437,7 +430,7 @@ const qb = Number(b.quality.replace('p', '')) || 0;
 return {
   metaResponse,
   streams: resolvedStreams.filter(Boolean)
-};      
-}      
-}      
+};
+}
+}
 module.exports = PorntrexProvider.create;

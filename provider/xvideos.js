@@ -1,17 +1,18 @@
-const { load } = require('cheerio');    
-const logger = require('../logger');    
-const { meta } = require('../model');    
-const Provider = require('./provider');  
-  
-const DEFAULT_POSTER =  
-  'https://thumb-cdn77.xvideos-cdn.com/default.jpg';  
-  
-const cleanTitle = (title = '') =>  
-  title  
-    .replace(/^xvideos\s*video\s*/i, '')  
-    .replace(/^xvideos\s*/i, '')  
-    .trim();  
-  
+const { load } = require('cheerio');
+const logger = require('../logger');
+const { meta } = require('../model');
+const Provider = require('./provider');
+const BoundedTtlCache = require('./cache');
+
+const DEFAULT_POSTER =
+  'https://thumb-cdn77.xvideos-cdn.com/default.jpg';
+
+const cleanTitle = (title = '') =>
+  title
+    .replace(/^xvideos\s*video\s*/i, '')
+    .replace(/^xvideos\s*/i, '')
+    .trim();
+
 const normalizeUrl = (url) => {
   if (!url || typeof url !== 'string') return undefined;
 
@@ -31,23 +32,21 @@ const resolvePoster = (url) => {
   url = normalizeUrl(url);
   if (!url) return DEFAULT_POSTER;
 
-  
+
 
   return url;
 };
 
-  
-  
-/* =========================    
-   🔥 ADDED CACHE    
-========================= */    
-const htmlCache = new Map();    
-  
-const inFlight = new Map(); // ✅ FIX (missing before)    
-const HTML_TTL = 1000 * 60 * 5; // 5 min
 
-const metaCache = new Map();
+
+/* =========================
+   🔥 ADDED CACHE
+========================= */
+const HTML_TTL = 1000 * 60 * 5; // 5 min
 const META_TTL = 1000 * 60 * 5;
+const htmlCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: HTML_TTL });
+const metaCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: META_TTL });
+const inFlight = new Map();
 
 const REGEX = {
   videoHLS: /html5player\.setVideoHLS\(['"]([^'"]+)['"]\)/,
@@ -57,66 +56,60 @@ const REGEX = {
   thumb: /html5player\.setThumbUrl\(['"]([^'"]+)['"]\)/,
   thumbCdn: /(https:\/\/thumb-cdn\d+\.xvideos-cdn\.com\/[^'"]+xv_\d+_p\.avif)/,
   thumbSlide: /(https:\/\/thumb(?:-cdn\d+)?\.xvideos-cdn\.com\/[^'"]+xv_\d+_t\.jpg)/
-};    
-  
-class XvideosProvider extends Provider {    
-  
-  constructor() {    
-    super('https://www.xvideos.com', 'xvideos', 50);    
-  }    
-  
-  static create() {    
-    return new XvideosProvider();    
-  }    
-  
-  async fetchHtml(url) {    
-  
-    const cached = htmlCache.get(url);    
-    if (cached && (Date.now() - cached.time < HTML_TTL)) {    
-      return cached.data;    
-    }    
-  
-    if (inFlight.has(url)) {    
-      return inFlight.get(url);    
-    }    
-    
-  
-    const promise = (async () => {    
-  try {    
-  
-  
-    const html = await super.fetchHtml(url);    
-  
-    htmlCache.set(url, { data: html, time: Date.now() });    
-if (htmlCache.size > 300) {    
-  const firstKey = htmlCache.keys().next().value;    
-  htmlCache.delete(firstKey);    
-}    
-    return html;    
-  } finally {    
-    inFlight.delete(url);    
-  }    
-})();    
-  
-    inFlight.set(url, promise);    
-  
-    return promise;    
-  }    
-  
-  getInitialUrl() {    
-    return this.baseUrl;    
-  }    
-  
-  handleSearch({ extra: { search: keyword } }) {    
-    return `${this.baseUrl}/?k=${encodeURIComponent(keyword)}`;    
-  }    
-  
-  handleGenre(args) {    
-    return this.handleSearch({ ...args, extra: { search: args.extra.genre } });    
-  }    
-  
+};
+
+class XvideosProvider extends Provider {
+
+  constructor() {
+    super('https://www.xvideos.com', 'xvideos', 50);
+  }
+
+  static create() {
+    return new XvideosProvider();
+  }
+
+  async fetchHtml(url) {
+
+    const cached = htmlCache.get(url);
+    if (cached !== undefined) return cached;
+
+    if (inFlight.has(url)) {
+      return inFlight.get(url);
+    }
+
+
+    const promise = (async () => {
+  try {
+
+
+    const html = await super.fetchHtml(url);
+
+    htmlCache.set(url, html);
+    return html;
+  } finally {
+    inFlight.delete(url);
+  }
+})();
+
+    inFlight.set(url, promise);
+
+    return promise;
+  }
+
+  getInitialUrl() {
+    return this.baseUrl;
+  }
+
+  handleSearch({ extra: { search: keyword } }) {
+    return `${this.baseUrl}/?k=${encodeURIComponent(keyword)}`;
+  }
+
+  handleGenre(args) {
+    return this.handleSearch({ ...args, extra: { search: args.extra.genre } });
+  }
+
   handlePagination(url, { extra: { skip } }) {
-  const page = Math.floor(skip / 48);
+  const page = Math.floor(Number(skip || 0) / this.limit);
 
   const u = new URL(url);
 
@@ -135,32 +128,32 @@ if (htmlCache.size > 300) {
 
   // ✅ FALLBACK (safety)
   return `${this.baseUrl}/new/${page}`;
-}    
-  
-   getCatalogMetas(html) {  
-  const $ = load(html);  
-  const metadatas = [];  
-  const seen = new Set();  
-  
-  $('div.thumb-block a').each((_, el) => {  
-    const href = $(el).attr('href');  
-    if (!href || !href.startsWith('/video')) return;  
-  
-    let id = new URL(href, this.baseUrl).href;  
-  
-id = id  
-  .split('?')[0]  
-  .replace(/\/THUMBNUM.*/, '')  
-  .replace(/\/$/, '');  
-  
-    if (seen.has(id)) return;  
-    seen.add(id); 
+}
+
+   getCatalogMetas(html) {
+  const $ = load(html);
+  const metadatas = [];
+  const seen = new Set();
+
+  $('div.thumb-block a').each((_, el) => {
+    const href = $(el).attr('href');
+    if (!href || !href.startsWith('/video')) return;
+
+    let id = new URL(href, this.baseUrl).href;
+
+id = id
+  .split('?')[0]
+  .replace(/\/THUMBNUM.*/, '')
+  .replace(/\/$/, '');
+
+    if (seen.has(id)) return;
+    seen.add(id);
 
 const parent = $(el).closest('div.thumb-block');
 const img = parent.find('img').first();
-const titleAnchor = parent.find('.thumb-under p > a'); 
-      
-  
+const titleAnchor = parent.find('.thumb-under p > a');
+
+
     let thumb =
   img.attr('data-thumb_url169') ||
   img.attr('data-thumb_url') ||
@@ -206,16 +199,16 @@ if (!thumb) {
   }
 }
 
-  
-  
+
+
 
 let titleRaw =
   $(el).attr('title') ||
   img.attr('alt') ||
   titleAnchor.attr('title') ||
   titleAnchor.text() ||
-  'Video';  
-  
+  'Video';
+
     metadatas.push(
   new meta.MetaPreview(
     id,
@@ -226,67 +219,57 @@ let titleRaw =
       posterShape: 'landscape' // 👈 ADD
     }
   )
-);  
-  });  
-  
-  return metadatas;  
-}    
-  
+);
+  });
+
+  return metadatas;
+}
+
   async getMetadata(args) {
   const cached = metaCache.get(args.id);
-  if (cached && (Date.now() - cached.time < META_TTL)) {
-    return cached.data.metaResponse;
-  }
+  if (cached !== undefined) return cached.metaResponse;
 
   const html = await this.fetchHtml(args.id);
   const parsed = this.parseVideoPage({ id: args.id, html });
 
-  metaCache.set(args.id, {
-    data: parsed,
-    time: Date.now()
-  });
-
-if (metaCache.size > 300) {
-  const firstKey = metaCache.keys().next().value;
-  metaCache.delete(firstKey);
-}
+  metaCache.set(args.id, parsed);
 
   return parsed.metaResponse;
-}    
-  
+}
+
   parseVideoPage({ id, html }) {
 
-const $ = load(html);  
-  
-    
-  
-  
-  
-let jsonContentUrl = null;  
-  
-try {  
-  const json = JSON.parse(  
-    $('script[type="application/ld+json"]').first().text()  
-  );  
-  jsonContentUrl = json?.contentUrl || null;  
-} catch (e) {}  
-  
+const $ = load(html);
+
+
+
+
+
+let jsonContentUrl = null;
+
+try {
+  const json = JSON.parse(
+    $('script[type="application/ld+json"]').first().text()
+  );
+  jsonContentUrl = json?.contentUrl || null;
+} catch (e) {}
+
 const videoMatch =
   html.match(REGEX.videoHLS) ||
   html.match(REGEX.videoHigh) ||
   html.match(REGEX.videoLow);
 
 
-const videoPageUrl = videoMatch ? videoMatch[1] : null;  
-  
+const videoPageUrl = videoMatch ? videoMatch[1] : jsonContentUrl;
+
 const isBroken =
   !videoPageUrl &&
   !jsonContentUrl &&
-  !html.includes('html5player');  
-  
-if (isBroken) {  
-  logger.warn('Invalid video page (real failure)');  
-  
+  !html.includes('html5player');
+
+if (isBroken) {
+  logger.warn('Invalid video page (real failure)');
+
   return {
   metaResponse: new meta.MetaResponse(
     id,
@@ -302,37 +285,37 @@ if (isBroken) {
     }
   ),
   videoPageUrl: null
-};  
-}  
-  
-  /* =========================  
-     TAGS / LINKS  
-  ========================= */  
-  const links = [];  
-  $('div.video-tags > a').each((i, e) => {  
-    const $tag = $(e);  
-  
-    links.push(  
-      new meta.MetaLink(  
-        $tag.text(),  
-        'Genre',  
-        this.baseUrl + $tag.attr('href')  
-      )  
-    );  
-  });    
-  
-    
-  
-    
-  
-  /* =========================  
-     META TAGS  
-  ========================= */  
+};
+}
+
+  /* =========================
+     TAGS / LINKS
+  ========================= */
+  const links = [];
+  $('div.video-tags > a').each((i, e) => {
+    const $tag = $(e);
+
+    links.push(
+      new meta.MetaLink(
+        $tag.text(),
+        'Genre',
+        this.baseUrl + $tag.attr('href')
+      )
+    );
+  });
+
+
+
+
+
+  /* =========================
+     META TAGS
+  ========================= */
   const title = $('meta[property="og:title"]').attr('content');
 const description = $('meta[name="description"]').attr('content');
 const ogImage = $('meta[property="og:image"]').attr('content');
-const keywords = $('meta[name="keywords"]').attr('content');  
-  
+const keywords = $('meta[name="keywords"]').attr('content');
+
   const thumbMatch =
   html.match(REGEX.thumb169) ||
   html.match(REGEX.thumbCdn) ||
@@ -340,23 +323,23 @@ const keywords = $('meta[name="keywords"]').attr('content');
 
 let background = resolvePoster(
   thumbMatch?.[1] || ogImage
-);  
-  
-  
+);
+
+
   let poster = background;
-  
-  
-  /* =========================  
-     GENRES  
-  ========================= */  
+
+
+  /* =========================
+     GENRES
+  ========================= */
   const genres = keywords
   ? keywords.split(',').map(g => g.trim())
-  : [];  
-  
-  
-  /* =========================  
-     META RESPONSE  
-  ========================= */  
+  : [];
+
+
+  /* =========================
+     META RESPONSE
+  ========================= */
   const metaResponse = new meta.MetaResponse(
   id,
   Provider.TYPE,
@@ -369,105 +352,86 @@ let background = resolvePoster(
     posterShape: 'landscape', // 👈 ADD
     genres
   }
-);  
-  
-  logger.debug({ videoPageUrl, poster }, 'XVideos FINAL extraction');  
-  
-  return {  
-    metaResponse,  
-    videoPageUrl  
-  };  
-}    
-  
+);
+
+  logger.debug({ videoPageUrl, poster }, 'XVideos FINAL extraction');
+
+  return {
+    metaResponse,
+    videoPageUrl
+  };
+}
+
   async processStreams({ id }) {
 
   let cached = metaCache.get(id);
   let metaData;
 
-  if (cached && (Date.now() - cached.time < META_TTL)) {
-    metaData = cached.data;
+  if (cached !== undefined) {
+    metaData = cached;
   } else {
     const html = await this.fetchHtml(id);
     metaData = this.parseVideoPage({ id, html });
 
-    metaCache.set(id, {
-      data: metaData,
-      time: Date.now()
-    });
+    metaCache.set(id, metaData);
   }
 
   logger.debug({ videoPageUrl: metaData.videoPageUrl }, 'XVideos stream source');
 
-  let streamsResponse = await super.getStreams(metaData);    
-  
-    /* =========================    
-       🔥 FIX LOW QUALITY ISSUE    
-    ========================= */    
-    if (streamsResponse?.streams?.length) {    
-  
-  streamsResponse.streams = streamsResponse.streams.map(s => {    
-  
-    // ✅ SAFE RESOLUTION FALLBACK    
-    const match = s.url?.match(/(\d{3,4})p/);    
-const resolution =    
-  s.resolution ||    
-  (match ? match[1] + 'p' : null) ||    
-  'unknown';    
-  
-    // ✅ SAFE URL BUILD (DO NOT BREAK PATH)    
-    let finalUrl = s.url;    
-  
-if (!s.url.startsWith('http') && metaData.videoPageUrl) {    
-  const base = metaData.videoPageUrl.substring(    
-    0,    
-    metaData.videoPageUrl.lastIndexOf('/') + 1    
-  );    
-  finalUrl = base + s.url;    
-}    
-  
-    return {    
-      ...s,    
-      url: finalUrl,    
-      name: `XVideos ${resolution}`,    
-      quality: resolution    
-    };    
-  });    
-  
-  // ✅ SORT PROPERLY    
-  streamsResponse.streams.sort((a, b) => {    
-    const getNum = (r) => parseInt(r) || 0;    
-    return getNum(b.quality) - getNum(a.quality);    
-  });    
-  
-  return streamsResponse;    
-}    
-  
-        
-    let streams = [];    
-  
-    try {    
-      const json = JSON.parse(    
-        $('script[type="application/ld+json"]').first().text()    
-      );    
-  
-      if (json && json.contentUrl) {    
-        streams.push({    
-          type: 'movie',    
-          url: json.contentUrl,    
-          name: 'Onlyporn'    
-        });    
-      }    
-  
-    } catch (e) {    
-      logger.warn('ld+json parse failed');    
-    }    
-  
-    return { streams };    
-  }    
-  
+  let streamsResponse = await super.getStreams(metaData);
+
+    /* =========================
+       🔥 FIX LOW QUALITY ISSUE
+    ========================= */
+    if (streamsResponse?.streams?.length) {
+
+  streamsResponse.streams = streamsResponse.streams.map(s => {
+
+    // ✅ SAFE RESOLUTION FALLBACK
+    const match = s.url?.match(/(\d{3,4})p/);
+const resolution =
+  s.resolution ||
+  (match ? match[1] + 'p' : null) ||
+  'unknown';
+
+    // ✅ SAFE URL BUILD (DO NOT BREAK PATH)
+    let finalUrl = s.url;
+
+if (!s.url.startsWith('http') && metaData.videoPageUrl) {
+  const base = metaData.videoPageUrl.substring(
+    0,
+    metaData.videoPageUrl.lastIndexOf('/') + 1
+  );
+  finalUrl = base + s.url;
+}
+
+    return {
+      ...s,
+      url: finalUrl,
+      name: `XVideos ${resolution}`,
+      quality: resolution
+    };
+  });
+
+  // ✅ SORT PROPERLY
+  streamsResponse.streams.sort((a, b) => {
+    const getNum = (r) => parseInt(r) || 0;
+    return getNum(b.quality) - getNum(a.quality);
+  });
+
+  return streamsResponse;
+}
+
+
+    // parseVideoPage already promotes JSON-LD contentUrl to videoPageUrl.
+    // Reaching this branch means neither the normal player data nor JSON-LD
+    // produced a playable source.
+    return { streams: [] };
+  }
+
   transformStream(baseUrl, stream) {
     return super.transformStream(baseUrl, stream);
   }
-}    
-  
+}
+
 module.exports = XvideosProvider.create;
