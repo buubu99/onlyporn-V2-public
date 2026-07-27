@@ -1,6 +1,6 @@
 {
   "name": "OnlyPorn",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "description": "Use your TV remote to its full potential!",
   "license": "MIT",
   "scripts": {
@@ -9,7 +9,9 @@
     "app": "LOG_ENABLED=true LOG_LEVEL=info yarn start -- --install",
     "test": "LOG_ENABLED=true LOG_LEVEL=info node --test",
     "dev": "LOG_ENABLED=true LOG_LEVEL=info nodemon server.js",
-    "test:phase1": "node --test provider/phase1.test.js"
+    "test:phase1": "node --test provider/phase1.test.js",
+    "test:phase2": "node --test provider/phase2.test.js",
+    "test:release": "node --test provider/phase1.test.js provider/phase2.test.js"
   },
   "dependencies": {
     "axios": "^1.13.6",

@@ -67,3 +67,16 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Added bounded TTL/LRU-style caches. Empty strings, null responses, failed requests, and empty provider pages are never inserted into shared caches.
 - Routed Porntrex stream resolution, SpankBang page/HLS requests, SpankBang 4K probes, and xHamster API backfill through the validated shared HTTP client.
 - Added offline Phase 1 regression tests for cache limits, cache expiry, scoped IDs, HTTPS/host validation, private-IP rejection, pagination source fixes, Porntrex fixes, and the XVideos fallback.
+
+## 2.2.0 — Phase 2 provider reliability improvements
+
+- Implemented functional Eporner genre/sort routing and safer metadata/source extraction.
+- Added direct-MP4 preference for Eporner, XVideos, and XNXX, with HLS retained as fallback.
+- Added JSON-LD media extraction supporting arrays and `@graph` structures.
+- Replaced SpankBang catalog-position IDs with stable canonical video IDs while preserving legacy-ID compatibility.
+- Replaced SpankBang's fragile `stream_data` quote conversion with a constrained JavaScript-literal parser that does not use `eval`.
+- Connected xHamster's catalog aggregation/backfill code to the live catalog handler, added challenge-page detection before caching, and sliced results by global Stremio skip.
+- Centralized provider-wide direct-MP4 selection and preview/thumbnail/trailer/sample rejection.
+- Corrected root-relative and protocol-relative media URL handling.
+- Made XNXX poster-frame selection deterministic.
+- Added eight Phase 2 regression tests; the combined Phase 1 and Phase 2 suite contains 15 passing tests.

@@ -3,6 +3,12 @@ const logger = require('../logger');
 const { meta } = require('../model');
 const Provider = require('./provider');
 const BoundedTtlCache = require('./cache');
+const {
+  extractResolution,
+  isHls,
+  isLikelyFullVideoMp4,
+  normalizeAbsoluteUrl,
+} = require('./media-utils');
 
 const META_TTL = 1000 * 60 * 10;
 const HTML_TTL = 1000 * 60 * 5;
@@ -88,7 +94,7 @@ function findMediaUrl(value, cleanUrl, seen = new WeakSet(), depth = 0) {
     if (
       typeof cleaned === 'string' &&
       /^https?:\/\//i.test(cleaned) &&
-      /\.(?:m3u8|mp4)(?:[?#]|$)/i.test(cleaned)
+      /\.m3u8(?:[?#]|$)/i.test(cleaned)
     ) {
       return cleaned;
     }
@@ -190,48 +196,30 @@ function collectDirectMp4Sources(
 }
 
 function directMp4Resolution(candidate) {
-  const text = `${candidate.path.join(' ')} ${candidate.url}`;
-  const match = text.match(
-    /(?:^|\D)(2160|1440|1080|720|576|480|360|240|144)p?(?:\D|$)/i
-  );
-
-  return match ? Number(match[1]) : null;
-}
-
-function isPreviewMp4(candidate) {
-  try {
-    const parsed = new URL(candidate.url);
-    const host = parsed.hostname.toLowerCase();
-    const path = decodeURIComponent(parsed.pathname).toLowerCase();
-    const context = candidate.path.join(' ').toLowerCase();
-
-    return (
-      host.startsWith('thumb-') ||
-      host.includes('.thumb.') ||
-      /(?:^|\/)(?:thumb|thumbs|preview|previews|trailer|trailers|teaser|teasers|sprite|sprites|sample|samples)(?:\/|$)/i.test(path) ||
-      /(?:^|[._-])(?:thumb|preview|trailer|teaser|sprite|sample)(?:[._-]|$)/i.test(path) ||
-      /\.t\.mp4$/i.test(path) ||
-      /(?:thumb|preview|trailer|teaser|sprite|sample)/i.test(context)
-    );
-  } catch {
-    return true;
-  }
+  const context = candidate.path.join(' ');
+  const resolution = extractResolution(context, candidate.url);
+  return resolution ? Number.parseInt(resolution, 10) : null;
 }
 
 function isPlayableDirectMp4(candidate) {
-  return (
-    /^https?:\/\//i.test(candidate.url) &&
-    /\.mp4(?:[?#]|$)/i.test(candidate.url) &&
-    !/\.mp4\.m3u8(?:[?#]|$)/i.test(candidate.url) &&
-    !isPreviewMp4(candidate) &&
-    directMp4Resolution(candidate) !== null
-  );
+  const context = candidate.path.join(' ');
+  return isLikelyFullVideoMp4(candidate.url, {
+    allowKnownVideoPath: true,
+    context,
+  }) && directMp4Resolution(candidate) !== null;
 }
 
 function directMp4Label(candidate) {
   const resolution = directMp4Resolution(candidate);
   return resolution ? `${resolution}p MP4` : 'MP4';
 }
+
+function isBlockedXhamsterHtml(html) {
+  if (typeof html !== 'string' || html.length < 500) return true;
+  return /cf-chl|just a moment|captcha|access denied|verify you are human/i.test(html);
+}
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const pathMappings = {
   'Best (Daily)': '/best',
@@ -276,11 +264,26 @@ getMode(catalogId = '') {
     if (inFlight.has(url)) return inFlight.get(url);
 
     const promise = (async () => {
-      // Provider.fetchHtml supplies the browser headers, timeout, status
-      // validation, redirect validation, and bounded retries.
-      const html = await super.fetchHtml(url);
-      htmlCache.set(url, html);
-      return html;
+      let lastError;
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        try {
+          // Disable the shared HTML cache here so a HTTP 200 challenge page is
+          // inspected before any xHamster response is cached.
+          const html = await super.fetchHtml(url, { cache: false });
+          if (isBlockedXhamsterHtml(html)) {
+            throw new Error('xHamster returned a challenge or incomplete page');
+          }
+
+          htmlCache.set(url, html);
+          return html;
+        } catch (error) {
+          lastError = error;
+          if (attempt < 2) await sleep(400 * 2 ** attempt);
+        }
+      }
+
+      throw lastError || new Error('xHamster request failed');
     })();
 
     inFlight.set(url, promise);
@@ -338,77 +341,95 @@ getMode(catalogId = '') {
   return `${base}/${page}/`;
 }
 
-  async fetchCatalog(baseUrl, genreName) {
+  catalogBaseUrl(url) {
+    return String(url || '').replace(/\/$/, '');
+  }
 
-    const cacheKey = `${baseUrl}-${genreName}`;
+  catalogPageUrl(baseUrl, page) {
+    const base = this.catalogBaseUrl(baseUrl);
+    return page <= 1 ? base : `${base}/${page}/`;
+  }
+
+  async handleCatalog(args) {
+    if (args.type !== Provider.TYPE || !this.activate(args.id)) return { metas: [] };
+
+    try {
+      const extra = args.extra || {};
+      let baseUrl = this.getInitialUrl(args.id);
+      if (extra.search) baseUrl = this.handleSearch(args);
+      else if (extra.genre) baseUrl = this.handleGenre(args);
+
+      const skip = Math.max(0, Number(extra.skip || 0) || 0);
+      const parsed = await this.fetchCatalog(baseUrl, extra.genre || '', skip);
+      const metas = parsed.map(item => ({
+        ...item,
+        id: this.toStremioId(item.id),
+      }));
+
+      return { metas };
+    } catch (error) {
+      logger.warn({ error: error.message }, 'xHamster catalog request failed');
+      return { metas: [] };
+    }
+  }
+
+  async fetchCatalog(baseUrl, genreName, skip = 0) {
+    const normalizedBase = this.catalogBaseUrl(baseUrl);
+    const cacheKey = `${normalizedBase}|${genreName}|${skip}`;
     const cached = catalogCache.get(cacheKey);
     if (cached !== undefined) return cached;
 
     const globalSeen = new Set();
-    let allVideos = [];
+    const allVideos = [];
+    const targetEnd = skip + this.limit;
+    const maxPages = Math.min(8, Math.max(2, Math.ceil(targetEnd / this.limit) + 2));
 
-    const base = baseUrl.replace(/\/$/, '');
-
-    // 🔥 PAGE 1
-    try {
-      const html = await this.fetchHtml(base);
-      const vids = this.getCatalogMetas(html, globalSeen);
-      allVideos.push(...vids);
-    } catch (e) {
-      logger.debug('HTML fetch failed');
-    }
-
-    // 🔥 PAGE 2 ONLY (max)
-    if (allVideos.length < this.limit) {
+    for (let page = 1; page <= maxPages; page += 1) {
       try {
-        const html = await this.fetchHtml(`${base}/2/`);
-        const vids = this.getCatalogMetas(html, globalSeen);
-        allVideos.push(...vids);
-      } catch {}
+        const html = await this.fetchHtml(this.catalogPageUrl(normalizedBase, page));
+        const videos = this.getCatalogMetas(html, globalSeen);
+        allVideos.push(...videos);
+
+        if (allVideos.length >= targetEnd) break;
+        if (page > 1 && videos.length === 0) break;
+      } catch (error) {
+        logger.debug({ page, error: error.message }, 'xHamster catalog page failed');
+        if (page === 1) throw error;
+        break;
+      }
     }
 
-    // ⚡ OPTIONAL API BACKFILL (only if very low results)
-    if (allVideos.length < 20 && genreName) {
+    if (allVideos.length < targetEnd && genreName) {
       const slug = this.toSlug(genreName);
-
       try {
-        const apiUrl = `https://xhamster.com/api/v4/videos?category=${slug}&size=60`;
+        const apiUrl = `${this.baseUrl}/api/v4/videos?category=${encodeURIComponent(slug)}&size=100`;
         const json = await this.fetchJson(apiUrl, { cache: false });
 
-        for (const v of json?.videos || []) {
-  const url = v.url || v.pageURL;
-  if (!url || !url.includes('/videos/')) continue;
-  if (globalSeen.has(url)) continue;
+        for (const video of json?.videos || []) {
+          const url = normalizeAbsoluteUrl(video.url || video.pageURL, this.baseUrl);
+          if (!url || !url.includes('/videos/') || globalSeen.has(url)) continue;
 
-  const titleLower = (v.title || '').toLowerCase();
+          const title = String(video.title || '').trim();
+          const titleLower = title.toLowerCase();
+          if (!title || video.isVR === true || /\bvr\b/.test(titleLower)) continue;
+          if (titleLower.includes('virtual reality') || video.isVertical === true) continue;
 
-  // 🚫 FILTER VR HERE TOO
-  if (/\bvr\b/.test(titleLower)) continue;
-  if (titleLower.includes('virtual reality')) continue;
-
-  allVideos.push(
-  new meta.MetaPreview(
-    url,
-    'movie',
-    v.title,
-    v.thumbURL || v.thumb,
-    {
-      posterShape: 'landscape'
-    }
-  )
-);
-
-  globalSeen.add(url);
-
-  if (allVideos.length >= this.limit) break;
-}
-      } catch {}
+          const poster = normalizeAbsoluteUrl(video.thumbURL || video.thumb, this.baseUrl);
+          allVideos.push(
+            new meta.MetaPreview(url, Provider.TYPE, title, poster, {
+              posterShape: 'landscape',
+            })
+          );
+          globalSeen.add(url);
+          if (allVideos.length >= targetEnd) break;
+        }
+      } catch (error) {
+        logger.debug({ error: error.message }, 'xHamster API backfill failed');
+      }
     }
 
-    const finalData = allVideos.slice(0, this.limit);
-
-    catalogCache.set(cacheKey, finalData);
-
+    const finalData = allVideos.slice(skip, targetEnd);
+    if (finalData.length) catalogCache.set(cacheKey, finalData);
     return finalData;
   }
 
@@ -417,11 +438,10 @@ getMode(catalogId = '') {
 
     const metadataList = [];
 
-    const match = html.match(/window\.initials\s*=\s*(\{.*?\});/s);
+    const json = parseWindowInitials(html);
 
-    if (match) {
+    if (json) {
       try {
-        const json = JSON.parse(match[1]);
         const videos = [];
         const visited = new WeakSet();
 
@@ -464,16 +484,14 @@ if (title.includes('virtual reality')) return;
         extract(json);
 
         for (const v of videos) {
-          if (seen.has(v.pageURL)) continue;
+          const pageUrl = normalizeAbsoluteUrl(v.pageURL, this.baseUrl);
+          if (!pageUrl || seen.has(pageUrl)) continue;
 
-          let poster = v.thumbURL || v.imageURL;
-          if (poster && !poster.startsWith('http')) {
-            poster = this.baseUrl + poster;
-          }
+          const poster = normalizeAbsoluteUrl(v.thumbURL || v.imageURL, this.baseUrl);
 
           metadataList.push(
             new meta.MetaPreview(
-              v.pageURL,
+              pageUrl,
               'movie',
               v.title,
               poster,
@@ -483,7 +501,7 @@ if (title.includes('virtual reality')) return;
             )
           );
 
-          seen.add(v.pageURL);
+          seen.add(pageUrl);
         }
 
         // ✅ STOP if JSON worked
@@ -498,24 +516,20 @@ if (title.includes('virtual reality')) return;
     $('.thumb-list__item, .video-thumb').each((_, el) => {
       const $a = $(el).find('a').first();
 
-      let url = $a.attr('href');
-      if (!url) return;
-      if (!url.includes('/videos/')) return;
+      const href = $a.attr('href');
+      if (!href || !href.includes('/videos/')) return;
 
-      if (!url.startsWith('http')) url = this.baseUrl + url;
-      if (seen.has(url)) return;
+      const url = normalizeAbsoluteUrl(href, this.baseUrl);
+      if (!url || seen.has(url)) return;
 
       seen.add(url);
 
       const $img = $a.find('img').first();
 
-      let poster =
-        $img.attr('data-src') ||
-        $img.attr('src');
-
-      if (poster && !poster.startsWith('http')) {
-        poster = this.baseUrl + poster;
-      }
+      const poster = normalizeAbsoluteUrl(
+        $img.attr('data-src') || $img.attr('src'),
+        this.baseUrl
+      );
 
       const titleRaw = $img.attr('alt') || $a.attr('title') || '';
 const titleLower = titleRaw.toLowerCase();
@@ -598,11 +612,13 @@ metadataList.push(
       ? structuredData.thumbnailUrl[0]
       : structuredData?.thumbnailUrl || structuredData?.image;
 
-    const poster =
+    const poster = normalizeAbsoluteUrl(
       json?.videoModel?.thumbURL ||
-      json?.videoEntity?.thumbURL ||
-      structuredImage ||
-      $('meta[property="og:image"]').attr('content');
+        json?.videoEntity?.thumbURL ||
+        structuredImage ||
+        $('meta[property="og:image"]').attr('content'),
+      this.baseUrl
+    );
 
     // Prefer direct MP4 files over HLS. xHamster's AV1 HLS media
     // playlists use nested relative init/segment paths such as
@@ -678,30 +694,25 @@ metadataList.push(
       json?.xplayerSettings?.sources?.hls?.h264?.url,
       json?.xplayerSettings?.sources?.hls?.url,
       json?.xplayerSettings?.sources?.hls?.av1?.url,
-      structuredData?.embedUrl,
     ];
 
     let streamUrl = directMp4Streams[0]?.url || sourceCandidates
       .map(source => (typeof source === 'string' ? this.cleanUrl(source) : null))
-      .find(
-        source =>
-          typeof source === 'string' &&
-          source.startsWith('http') &&
-          /\.(?:m3u8|mp4)(?:[?#]|$)/i.test(source)
-      );
+      .find(source => typeof source === 'string' && source.startsWith('http') && isHls(source));
 
     if (!streamUrl && json) {
-      streamUrl = findMediaUrl(json, value => this.cleanUrl(value));
+      const found = findMediaUrl(json, value => this.cleanUrl(value));
+      if (found && isHls(found)) streamUrl = found;
     }
 
     if (!streamUrl) {
       const escapedMediaMatch = pageHtml.match(
-        /https?:\\?\/\\?\/[^\s"'<>]+?\.(?:m3u8|mp4)(?:\\?[^\s"'<>]*)?/i
+        /https?:\?\/\?\/[^\s"'<>]+?\.m3u8(?:\?[^\s"'<>]*)?/i
       );
 
       if (escapedMediaMatch) {
         const cleaned = this.cleanUrl(escapedMediaMatch[0]);
-        if (cleaned?.startsWith('http')) streamUrl = cleaned;
+        if (cleaned?.startsWith('http') && isHls(cleaned)) streamUrl = cleaned;
       }
     }
 
@@ -805,4 +816,11 @@ metadataList.push(
   }
 }
 
-module.exports = XhamsterProvider.create;
+const create = XhamsterProvider.create;
+create._test = {
+  directMp4Resolution,
+  isBlockedXhamsterHtml,
+  isPlayableDirectMp4,
+  parseWindowInitials,
+};
+module.exports = create;

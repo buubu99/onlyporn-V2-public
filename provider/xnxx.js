@@ -3,85 +3,72 @@ const logger = require('../logger');
 const { meta } = require('../model');
 const Provider = require('./provider');
 const BoundedTtlCache = require('./cache');
+const {
+  extractResolution,
+  isHls,
+  normalizeAbsoluteUrl,
+  selectDirectMp4Candidates,
+} = require('./media-utils');
+const {
+  collectStructuredMediaUrls,
+  findVideoObject,
+  firstString,
+  parseStructuredDataBlocks,
+} = require('./structured-data');
+const { resolveTemplateFrame, stableFrame } = require('./poster-utils');
 
-const DEFAULT_POSTER =
-  'https://thumb-cdn77.xnxx-cdn.com/default.jpg';
-
-/* =========================
-   HELPERS
-========================= */
-const cleanTitle = (title = '') =>
-  title
-    .replace(/^xnxx\s*/i, '')
-    .trim();
-
-const normalizeUrl = (url) => {
-  if (!url || typeof url !== 'string') return undefined;
-
-  if (!url.startsWith('http')) {
-    return 'https:' + url;
-  }
-
-  return url;
-};
-
-
-const resolvePoster = (url) => {
-  if (!url) return DEFAULT_POSTER;
-
-  url = normalizeUrl(url);
-  return url || DEFAULT_POSTER;
-};
-
-/* =========================
-   🔥 XNXX THUMB HELPERS
-========================= */
-
-// upgrades CDN quality (from header.static.js logic)
-const upgradeThumbQuality = (url) => {
-  if (!url) return url;
-
-  return url
-    .replace(/\/thumbs169xnxx\//g, '/thumbs169ll/')
-    .replace(/\/thumbs169\//g, '/thumbs169ll/')
-    .replace(/\/thumbs\//g, '/thumbs169ll/');
-};
-
-// resolves THUMBNUM like site JS does
-const resolveThumbNum = (url) => {
-  if (!url) return url;
-
-  const frame = Math.floor(Math.random() * 30) + 1;
-
-  return url
-    .replace(/THUMBNUM/g, frame)
-    .replace(/\.[0-9]+\.jpg/, `.${frame}.jpg`);
-};
-
-/* =========================
-   CACHE
-========================= */
+const DEFAULT_POSTER = 'https://thumb-cdn77.xnxx-cdn.com/default.jpg';
 const HTML_TTL = 1000 * 60 * 5;
 const META_TTL = 1000 * 60 * 5;
 const htmlCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: HTML_TTL });
 const metaCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: META_TTL });
 const inFlight = new Map();
 
-/* =========================
-   REGEX
-========================= */
 const REGEX = {
   videoHLS: /html5player\.setVideoHLS\(['"]([^'"]+)['"]\)/,
   videoHigh: /html5player\.setVideoUrlHigh\(['"]([^'"]+)['"]\)/,
   videoLow: /html5player\.setVideoUrlLow\(['"]([^'"]+)['"]\)/,
-  thumb169: /html5player\.setThumbUrl169\(['"]([^'"]+)['"]\)/
+  thumb169: /html5player\.setThumbUrl169\(['"]([^'"]+)['"]\)/,
 };
 
-/* =========================
-   PROVIDER
-========================= */
-class XnxxProvider extends Provider {
+function cleanTitle(title = '') {
+  return title.replace(/^xnxx\s*/i, '').trim();
+}
 
+function resolveThumbNum(url, seed) {
+  return resolveTemplateFrame(url, seed);
+}
+
+function upgradeThumbQuality(url) {
+  if (!url) return url;
+  return url
+    .replace(/\/thumbs169xnxx\//g, '/thumbs169ll/')
+    .replace(/\/thumbs169\//g, '/thumbs169ll/')
+    .replace(/\/thumbs\//g, '/thumbs169ll/');
+}
+
+function normalizePoster(value, baseUrl, seed) {
+  let url = normalizeAbsoluteUrl(value, baseUrl);
+  if (!url) return DEFAULT_POSTER;
+  url = resolveThumbNum(url, seed);
+  url = upgradeThumbQuality(url);
+  return url || DEFAULT_POSTER;
+}
+
+function structuredDataFromPage($) {
+  return parseStructuredDataBlocks(
+    $('script[type="application/ld+json"]')
+      .toArray()
+      .map(element => $(element).text())
+  );
+}
+
+function sourceLabel(candidate) {
+  if (candidate.resolution) return `${candidate.resolution} MP4`;
+  return `${candidate.label || 'Direct'} MP4`;
+}
+
+class XnxxProvider extends Provider {
   constructor() {
     super('https://www.xnxx.com', 'xnxx', 48);
   }
@@ -90,37 +77,27 @@ class XnxxProvider extends Provider {
     return new XnxxProvider();
   }
 
-  /* =========================
-     FETCH (CACHED + DEDUPE)
-  ========================= */
   async fetchHtml(url) {
-
     const cached = htmlCache.get(url);
     if (cached !== undefined) return cached;
-
-    if (inFlight.has(url)) {
-      return inFlight.get(url);
-    }
+    if (inFlight.has(url)) return inFlight.get(url);
 
     const promise = (async () => {
-      try {
-        const html = await super.fetchHtml(url);
-
-        htmlCache.set(url, html);
-
-        return html;
-      } finally {
-        inFlight.delete(url);
+      const html = await super.fetchHtml(url, { cache: false });
+      if (/cf-chl|just a moment|captcha|access denied/i.test(html)) {
+        throw new Error('XNXX returned a challenge page');
       }
+      htmlCache.set(url, html);
+      return html;
     })();
 
     inFlight.set(url, promise);
-    return promise;
+    try {
+      return await promise;
+    } finally {
+      inFlight.delete(url);
+    }
   }
-
-  /* =========================
-     URL HANDLERS
-  ========================= */
 
   getInitialUrl() {
     return `${this.baseUrl}/todays-selection`;
@@ -132,21 +109,13 @@ class XnxxProvider extends Provider {
   }
 
   handleGenre(args) {
-    if (args.extra.genre === 'hits') {
-      return `${this.baseUrl}/hits`;
-    }
-
-    return this.handleSearch({
-      ...args,
-      extra: { search: args.extra.genre }
-    });
+    if (args.extra.genre === 'hits') return `${this.baseUrl}/hits`;
+    return this.handleSearch({ ...args, extra: { search: args.extra.genre } });
   }
 
   handlePagination(url, { extra: { skip, search } }) {
+    const page = Math.floor(Number(skip || 0) / this.limit);
 
-    const page = Math.floor(skip / 48);
-
-    // SEARCH
     if (search) {
       const formatted = encodeURIComponent(search).replace(/%20/g, '+');
       return page === 0
@@ -154,314 +123,213 @@ class XnxxProvider extends Provider {
         : `${this.baseUrl}/search/${formatted}/${page}`;
     }
 
-    // HITS
-    if (url.includes('hits')) {
-      return page === 0
-        ? `${this.baseUrl}/hits`
-        : `${this.baseUrl}/hits/${page}`;
+    if (url.includes('/hits')) {
+      return page === 0 ? `${this.baseUrl}/hits` : `${this.baseUrl}/hits/${page}`;
     }
 
-    // DEFAULT
     return page === 0
       ? `${this.baseUrl}/todays-selection`
       : `${this.baseUrl}/todays-selection/${page}`;
   }
 
-  /* =========================
-     CATALOG
-  ========================= */
   getCatalogMetas(html) {
     const $ = load(html);
     const metadatas = [];
     const seen = new Set();
 
-    $('div.thumb-block a').each((_, el) => {
-
-      const href = $(el).attr('href');
+    $('div.thumb-block a').each((_, element) => {
+      const href = $(element).attr('href');
       if (!href || !href.startsWith('/video')) return;
 
-      let id = new URL(href, this.baseUrl).href;
-
-
-// 🔥 CLEAN BAD URLS
-id = id
-  .split('?')[0]
-  .replace(/\/THUMBNUM.*/, '')
-  .replace(/\/$/, '');
-
+      const id = new URL(href, this.baseUrl).toString().split('?')[0].replace(/\/$/, '');
       if (seen.has(id)) return;
       seen.add(id);
 
-      const parent = $(el).closest('.thumb-block');
-const img = parent.find('img').first();
-
+      const parent = $(element).closest('.thumb-block');
+      const image = parent.find('img').first();
       let thumb =
-  img.attr('data-src') ||
-  img.attr('data-lazy-src') ||   // 🔥 NEW
-  img.attr('data-original') ||
-  img.attr('data-preview') ||
-  img.attr('data-thumb') ||
-  img.attr('src');
+        image.attr('data-src') ||
+        image.attr('data-lazy-src') ||
+        image.attr('data-original') ||
+        image.attr('data-preview') ||
+        image.attr('data-thumb') ||
+        image.attr('src');
 
-// ✅ srcset
-if (!thumb) {
-  const srcset = img.attr('data-srcset') || img.attr('srcset');
-  if (srcset) {
-    thumb = srcset.split(',')[0].split(' ')[0];
-  }
-}
-
-// ✅ parent-level lazy attrs (VERY COMMON EDGE)
-if (!thumb) {
-  thumb =
-    parent.attr('data-src') ||
-    parent.attr('data-lazy-src');
-}
-
-// ✅ style fallback
-if (!thumb) {
-  const style = $(el).attr('style') || parent.attr('style');
-  const match = style && style.match(/url\((.*?)\)/);
-  if (match) thumb = match[1];
-}
-
-// ✅ brute fallback
-if (!thumb) {
-  const htmlBlock = parent.html();
-  const match = htmlBlock && htmlBlock.match(/https?:\/\/[^"]+_t\.jpg/);
-  if (match) thumb = match[0];
-}
-
-// ❌ ignore placeholders
-if (thumb && thumb.includes('lightbox-blank')) {
-  thumb = null;
-}
-
-// ✅ normalize
-thumb = normalizeUrl(thumb);
-
-
-thumb = resolvePoster(thumb);
-
-if (thumb.includes('THUMBNUM') || /\.\d+\.jpg/.test(thumb)) {
-  thumb = resolveThumbNum(thumb);
-}
-
-thumb = upgradeThumbQuality(thumb);
-
-// 🔥 final safety
-thumb = thumb || DEFAULT_POSTER;
-
+      if (!thumb) {
+        const srcset = image.attr('data-srcset') || image.attr('srcset');
+        if (srcset) thumb = srcset.split(',')[0].trim().split(/\s+/)[0];
+      }
+      if (!thumb) thumb = parent.attr('data-src') || parent.attr('data-lazy-src');
+      if (!thumb) {
+        const style = $(element).attr('style') || parent.attr('style');
+        thumb = style?.match(/url\(["']?(.*?)["']?\)/)?.[1];
+      }
+      if (!thumb) {
+        thumb = parent.html()?.match(/https?:\/\/[^"']+_t\.jpg/)?.[0];
+      }
+      if (thumb?.includes('lightbox-blank')) thumb = null;
 
       const titleAnchor = parent.find('.thumb-under p > a').first();
-
-let titleRaw =
-  titleAnchor.text().trim() ||   // ✅ PRIMARY (real title)
-  titleAnchor.attr('title') ||   // fallback
-  img.attr('alt') ||
-  $(el).attr('title') ||
-  'Video';
-titleRaw = titleRaw.replace(/\s+/g, ' ').trim();
+      const title = (
+        titleAnchor.text().trim() ||
+        titleAnchor.attr('title') ||
+        image.attr('alt') ||
+        $(element).attr('title') ||
+        'Video'
+      )
+        .replace(/\s+/g, ' ')
+        .trim();
 
       metadatas.push(
-  new meta.MetaPreview(
-    id,
-    Provider.TYPE,
-    cleanTitle(titleRaw),
-    thumb,
-    {
-      posterShape: 'landscape'
-    }
-  )
-);
+        new meta.MetaPreview(
+          id,
+          Provider.TYPE,
+          cleanTitle(title),
+          normalizePoster(thumb, this.baseUrl, id),
+          { posterShape: 'landscape' }
+        )
+      );
     });
 
     return metadatas;
   }
 
-  /* =========================
-     METADATA (CACHED)
-  ========================= */
   async getMetadata(args) {
-
     const cached = metaCache.get(args.id);
     if (cached !== undefined) return cached.metaResponse;
 
     const html = await this.fetchHtml(args.id);
     const parsed = this.parseVideoPage({ id: args.id, html });
-
-    metaCache.set(args.id, parsed);
-
+    if (parsed?.metaResponse) metaCache.set(args.id, parsed);
     return parsed.metaResponse;
   }
 
-  /* =========================
-     PARSER
-  ========================= */
   parseVideoPage({ id, html }) {
-
     const $ = load(html);
+    const structured = structuredDataFromPage($);
+    const videoObject = findVideoObject(structured);
+    const structuredMedia = collectStructuredMediaUrls(structured);
+    const high = html.match(REGEX.videoHigh)?.[1];
+    const low = html.match(REGEX.videoLow)?.[1];
+    const hls = html.match(REGEX.videoHLS)?.[1];
 
-    let jsonContentUrl = null;
+    const directCandidates = selectDirectMp4Candidates(
+      [
+        { url: high, label: 'High', context: 'player high', priority: 0 },
+        ...structuredMedia.map((candidate, index) => ({
+          ...candidate,
+          label: 'JSON-LD',
+          priority: 10 + index,
+        })),
+        { url: low, label: 'Low', context: 'player low', priority: 50 },
+      ],
+      { baseUrl: id, allowKnownVideoPath: true }
+    );
 
-    try {
-      const json = JSON.parse(
-        $('script[type="application/ld+json"]').first().text()
-      );
-      jsonContentUrl = json?.contentUrl || null;
-    } catch (e) {}
+    const directMp4Streams = directCandidates.map(candidate => ({
+      type: Provider.TYPE,
+      url: candidate.url,
+      name: `XNXX ${sourceLabel(candidate)}`,
+      behaviorHints: { notWebReady: false },
+    }));
 
-    const videoMatch =
-      html.match(REGEX.videoHLS) ||
-      html.match(REGEX.videoHigh) ||
-      html.match(REGEX.videoLow);
+    const hlsCandidates = [hls, ...structuredMedia.map(candidate => candidate.url)]
+      .map(value => normalizeAbsoluteUrl(value, id))
+      .filter(value => value && isHls(value));
+    const videoPageUrl = hlsCandidates[0] || null;
 
-    const videoPageUrl = videoMatch ? videoMatch[1] : null;
-
-    const isBroken =
-      !videoPageUrl &&
-      !jsonContentUrl &&
-      !html.includes('html5player');
-
-    if (isBroken) {
-      logger.warn('Invalid video page');
-
+    const hasPlayer = directMp4Streams.length || videoPageUrl || html.includes('html5player');
+    if (!hasPlayer) {
       return {
-  metaResponse: new meta.MetaResponse(
-    id,
-    Provider.TYPE,
-    'Unavailable Video',
-    {
-      links: [],
-      description: '',
-      background: null,
-      poster: DEFAULT_POSTER,
-      posterShape: 'landscape', // 👈 ADD
-      genres: []
-    }
-  ),
-  videoPageUrl: null
-};
+        metaResponse: new meta.MetaResponse(id, Provider.TYPE, 'Unavailable Video', {
+          links: [],
+          description: '',
+          poster: DEFAULT_POSTER,
+          background: DEFAULT_POSTER,
+          posterShape: 'landscape',
+          genres: [],
+        }),
+        videoPageUrl: null,
+        directMp4Streams: [],
+      };
     }
 
-    /* TAGS */
     const links = [];
-    $('a[href*="/search/"]').each((_, e) => {
-      const $tag = $(e);
-
+    $('a[href*="/search/"]').each((_, element) => {
+      const tag = $(element);
+      const href = tag.attr('href');
+      if (!href) return;
       links.push(
-        new meta.MetaLink(
-          $tag.text(),
-          'Genre',
-          this.baseUrl + $tag.attr('href')
-        )
+        new meta.MetaLink(tag.text().trim(), 'Genre', new URL(href, this.baseUrl).toString())
       );
     });
 
-    /* META */
-    const title = $('meta[property="og:title"]').attr('content');
-    const description = $('meta[name="description"]').attr('content');
+    const title = $('meta[property="og:title"]').attr('content') || videoObject?.name;
+    const description =
+      $('meta[name="description"]').attr('content') || videoObject?.description || title;
     const ogImage = $('meta[property="og:image"]').attr('content');
     const keywords = $('meta[name="keywords"]').attr('content');
-
-    const thumbMatch = html.match(REGEX.thumb169);
-
-let background =
-  thumbMatch?.[1] ||
-  ogImage ||
-  $('video').attr('poster') || // 🔥 NEW
-  DEFAULT_POSTER;
-
-background = resolvePoster(background);
-
-    let poster = background;
-
-    const genres = keywords
-      ? keywords.split(',').map(g => g.trim())
-      : [];
-
-    const metaResponse = new meta.MetaResponse(
-  id,
-  Provider.TYPE,
-  cleanTitle(title || 'Video'),
-  {
-    links,
-    description,
-    background,
-    poster,
-    posterShape: 'landscape', // 👈 ADD
-    genres
-  }
-);
+    const thumb = html.match(REGEX.thumb169)?.[1];
+    const videoPoster = $('video').attr('poster');
+    const poster = normalizePoster(
+      thumb || ogImage || videoPoster || firstString(videoObject?.thumbnailUrl) || firstString(videoObject?.image),
+      this.baseUrl,
+      id
+    );
 
     return {
-      metaResponse,
-      videoPageUrl
+      metaResponse: new meta.MetaResponse(id, Provider.TYPE, cleanTitle(title || 'Video'), {
+        links,
+        description,
+        background: poster,
+        poster,
+        posterShape: 'landscape',
+        genres: keywords ? keywords.split(',').map(value => value.trim()).filter(Boolean) : [],
+      }),
+      videoPageUrl,
+      directMp4Streams,
     };
   }
 
-  /* =========================
-     STREAMS (OPTIMIZED)
-  ========================= */
   async processStreams({ id }) {
-
-    let cached = metaCache.get(id);
-    let metaData;
-
-    if (cached !== undefined) {
-      metaData = cached;
-    } else {
+    let parsed = metaCache.get(id);
+    if (parsed === undefined) {
       const html = await this.fetchHtml(id);
-      metaData = this.parseVideoPage({ id, html });
-
-      metaCache.set(id, metaData);
+      parsed = this.parseVideoPage({ id, html });
+      if (parsed?.metaResponse) metaCache.set(id, parsed);
     }
 
-    let streamsResponse = await super.getStreams(metaData);
+    if (parsed?.directMp4Streams?.length) {
+      return { streams: parsed.directMp4Streams };
+    }
 
-    if (streamsResponse?.streams?.length) {
-
-      streamsResponse.streams = streamsResponse.streams.map(s => {
-
-        const match = s.url?.match(/(\d{3,4})p/);
+    if (!parsed?.videoPageUrl) return { streams: [] };
+    const response = await super.getStreams({ videoPageUrl: parsed.videoPageUrl });
+    response.streams = (response.streams || [])
+      .map(stream => {
         const resolution =
-          s.resolution ||
-          (match ? match[1] + 'p' : null) ||
-          'unknown';
-
-        let finalUrl = s.url;
-
-        if (!s.url.startsWith('http') && metaData.videoPageUrl) {
-  const base = metaData.videoPageUrl.substring(
-    0,
-    metaData.videoPageUrl.lastIndexOf('/') + 1
-  );
-
-  finalUrl = base + s.url.replace(/^\/+/, '');
-}
-
+          stream.resolution || extractResolution(stream.name, stream.url) || 'unknown';
         return {
-          ...s,
-          url: finalUrl,
+          ...stream,
           name: `XNXX ${resolution}`,
-          quality: resolution
+          quality: resolution,
         };
-      });
-
-      streamsResponse.streams.sort((a, b) => {
-        const getNum = (r) => parseInt(r) || 0;
-        return getNum(b.quality) - getNum(a.quality);
-      });
-
-      return streamsResponse;
-    }
-
-    return { streams: [] };
-  }
-
-  transformStream(baseUrl, stream) {
-    return super.transformStream(baseUrl, stream);
+      })
+      .sort(
+        (left, right) =>
+          (Number.parseInt(right.quality, 10) || 0) -
+          (Number.parseInt(left.quality, 10) || 0)
+      );
+    return response;
   }
 }
 
-module.exports = XnxxProvider.create;
+const create = XnxxProvider.create;
+create._test = {
+  cleanTitle,
+  normalizePoster,
+  resolveThumbNum,
+  stableFrame,
+  structuredDataFromPage,
+};
+module.exports = create;

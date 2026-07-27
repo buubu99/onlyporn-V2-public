@@ -82,9 +82,11 @@ test('Phase 1 source fixes remain present', () => {
   assert.match(providerSource, /Math\.floor\(numericSkip \/ this\.limit\) \+ 1/);
   assert.doesNotMatch(porntrexSource, /this\.perPage/);
   assert.match(porntrexSource, /search\/\$\{encodeURIComponent\(keyword\)\}/);
-  assert.match(xvideosSource, /videoMatch \? videoMatch\[1\] : jsonContentUrl/);
+  assert.match(xvideosSource, /collectStructuredMediaUrls/);
+  assert.match(xvideosSource, /directMp4Streams/);
+  assert.match(xvideosSource, /videoPageUrl/);
   assert.doesNotMatch(
     xvideosSource.slice(xvideosSource.indexOf('async processStreams')),
-    /\$\('script\[type="application\/ld\+json"\]'/
+    /application\/ld\+json/
   );
 });

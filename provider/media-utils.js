@@ -15,6 +15,17 @@ function cleanMediaUrl(value) {
     .replace(/["'\\]+$/g, '');
 }
 
+function normalizeAbsoluteUrl(value, baseUrl) {
+  const cleaned = cleanMediaUrl(value);
+  if (!cleaned) return '';
+
+  try {
+    return new URL(cleaned, baseUrl).toString();
+  } catch {
+    return '';
+  }
+}
+
 function isPreviewMediaUrl(value) {
   const url = cleanMediaUrl(value);
   if (!url) return true;
@@ -29,7 +40,7 @@ function isPreviewMediaUrl(value) {
   try {
     const parsed = new URL(url);
     const host = parsed.hostname.toLowerCase();
-    const path = parsed.pathname.toLowerCase();
+    const path = decodeURIComponent(parsed.pathname).toLowerCase();
 
     if (host.startsWith('thumb-') || host.includes('.thumb.')) return true;
     if (PREVIEW_TOKEN_RE.test(path)) return true;
@@ -38,6 +49,10 @@ function isPreviewMediaUrl(value) {
   }
 
   return false;
+}
+
+function isPreviewMediaCandidate(value, context = '') {
+  return isPreviewMediaUrl(value) || PREVIEW_TOKEN_RE.test(String(context || ''));
 }
 
 function extractResolution(...values) {
@@ -64,15 +79,65 @@ function isPlayableMediaUrl(value) {
 
 function isLikelyFullVideoMp4(value, options = {}) {
   const url = cleanMediaUrl(value);
-  if (!isDirectMp4(url) || isPreviewMediaUrl(url)) return false;
+  const context = String(options.context || '');
 
-  if (extractResolution(url)) return true;
+  if (!isDirectMp4(url) || isPreviewMediaCandidate(url, context)) return false;
+
+  if (extractResolution(context, url)) return true;
 
   const lower = url.toLowerCase();
   const knownVideoPath =
     /\/(?:contents\/videos|videos?|media|files|uploads|download)\//i.test(lower);
 
   return Boolean(options.allowKnownVideoPath && knownVideoPath);
+}
+
+function resolutionNumber(value) {
+  const resolution = extractResolution(value);
+  return resolution ? Number.parseInt(resolution, 10) || 0 : 0;
+}
+
+function selectDirectMp4Candidates(candidates, options = {}) {
+  const {
+    baseUrl,
+    allowKnownVideoPath = true,
+    requireResolution = false,
+  } = options;
+
+  const byKey = new Map();
+
+  for (const rawCandidate of candidates || []) {
+    const candidate = typeof rawCandidate === 'string'
+      ? { url: rawCandidate }
+      : rawCandidate || {};
+    const url = normalizeAbsoluteUrl(candidate.url, baseUrl);
+    const context = [candidate.label, candidate.context].filter(Boolean).join(' ');
+
+    if (!url) continue;
+    if (!isLikelyFullVideoMp4(url, { allowKnownVideoPath, context })) continue;
+
+    const resolution = extractResolution(context, url);
+    if (requireResolution && !resolution) continue;
+
+    const priority = Number.isFinite(candidate.priority) ? candidate.priority : 100;
+    const key = resolution || url;
+    const existing = byKey.get(key);
+
+    if (!existing || priority < existing.priority) {
+      byKey.set(key, {
+        url,
+        resolution,
+        priority,
+        label: candidate.label || null,
+      });
+    }
+  }
+
+  return [...byKey.values()]
+    .sort((left, right) => {
+      const resolutionDelta = resolutionNumber(right.resolution) - resolutionNumber(left.resolution);
+      return resolutionDelta || left.priority - right.priority || left.url.localeCompare(right.url);
+    });
 }
 
 module.exports = {
@@ -82,5 +147,8 @@ module.exports = {
   isHls,
   isLikelyFullVideoMp4,
   isPlayableMediaUrl,
+  isPreviewMediaCandidate,
   isPreviewMediaUrl,
+  normalizeAbsoluteUrl,
+  selectDirectMp4Candidates,
 };

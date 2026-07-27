@@ -11,7 +11,7 @@ Has stable personal logging for the user and has no analytics to protect privacy
 Currently self-deployment ready...
 
 ## Testing
-You need `yarn`  
+You need `yarn`
 [testing.md#testing-in-stremio-app](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/testing.md#testing-in-stremio-app)
 
 https://github.com/Stremio/stremio-addon-sdk

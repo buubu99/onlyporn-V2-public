@@ -31,4 +31,4 @@ Live provider pages cannot be fully validated offline. After Render reports **Li
 
 ## Deployment and rollback
 
-Use `DEPLOY_TO_GITHUB_RENDER.txt`. The command creates a GitHub backup branch named `backup-v2.0.6-before-phase1` before replacing the working tree. Render should auto-deploy after the new commit reaches `main`.
+Phase 1 was deployed from a verified local ZIP through the GitHub `main` branch. The historical backup branch is `backup-v2.0.6-before-phase1`.

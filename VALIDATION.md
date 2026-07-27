@@ -73,3 +73,23 @@ Not executable in the offline build environment:
 - Playback through AIOStreams/Stremio.
 
 After deployment, verify all seven catalogs, search, page 2, metadata, and at least one stream per provider. Preserve the existing 2.0.6 Git commit so rollback is immediate if a provider has changed its live HTML or redirect behavior.
+
+## 2.2.0 Phase 2 validation — 2026-07-27
+
+Completed offline:
+
+- All JavaScript files passed `node --check`.
+- `package.json` parsed successfully and reports version `2.2.0`.
+- Combined release tests passed with `node --test provider/phase1.test.js provider/phase2.test.js`: 15 passed, 0 failed.
+- Phase 2 tests cover Eporner route generation, safe SpankBang JavaScript-literal parsing, shared preview rejection, direct-MP4 selection, relative URL resolution, JSON-LD arrays/`@graph`, deterministic XNXX poster frames, and source-level integration of the new provider paths.
+- Phase 1 cache, scoped-ID, HTTPS, hostname, redirect, and private-network protections remain covered by regression tests.
+- Repository scan found no `.env`, private key, password, API token, Git metadata, or deployment credential.
+- No npm dependency was added.
+
+Not executable in the offline build environment:
+
+- Live third-party provider requests.
+- Render build/deployment.
+- Playback through AIOStreams/Stremio.
+
+After deployment, verify manifest version `2.2.0`, all seven catalogs, Eporner sort differences, SpankBang metadata/playback, xHamster Load More uniqueness, XVideos/XNXX direct MP4 playback, and XNXX poster consistency. Preserve `backup-v2.1.0-before-phase2` until those checks pass.
