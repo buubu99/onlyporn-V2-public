@@ -9,6 +9,7 @@ const {
   isLikelyFullVideoMp4,
   normalizeAbsoluteUrl,
 } = require('./media-utils');
+const { isBlockedXhamsterHtml } = require('./challenge-detection');
 
 const META_TTL = 1000 * 60 * 10;
 const HTML_TTL = 1000 * 60 * 5;
@@ -214,11 +215,6 @@ function directMp4Label(candidate) {
   return resolution ? `${resolution}p MP4` : 'MP4';
 }
 
-function isBlockedXhamsterHtml(html) {
-  if (typeof html !== 'string' || html.length < 500) return true;
-  return /cf-chl|just a moment|captcha|access denied|verify you are human/i.test(html);
-}
-
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const pathMappings = {
@@ -351,26 +347,10 @@ getMode(catalogId = '') {
   }
 
   async handleCatalog(args) {
-    if (args.type !== Provider.TYPE || !this.activate(args.id)) return { metas: [] };
-
-    try {
-      const extra = args.extra || {};
-      let baseUrl = this.getInitialUrl(args.id);
-      if (extra.search) baseUrl = this.handleSearch(args);
-      else if (extra.genre) baseUrl = this.handleGenre(args);
-
-      const skip = Math.max(0, Number(extra.skip || 0) || 0);
-      const parsed = await this.fetchCatalog(baseUrl, extra.genre || '', skip);
-      const metas = parsed.map(item => ({
-        ...item,
-        id: this.toStremioId(item.id),
-      }));
-
-      return { metas };
-    } catch (error) {
-      logger.warn({ error: error.message }, 'xHamster catalog request failed');
-      return { metas: [] };
-    }
+    // Keep the proven Phase 1 single-page catalog path. Phase 2's multi-page
+    // aggregation caused Home rows to vanish when an upstream page was slow or
+    // challenged. Pagination still works through Provider.handleCatalog.
+    return super.handleCatalog(args);
   }
 
   async fetchCatalog(baseUrl, genreName, skip = 0) {

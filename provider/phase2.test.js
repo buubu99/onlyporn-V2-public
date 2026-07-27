@@ -153,7 +153,7 @@ test('Phase 2 provider integrations remain wired into the live code paths', () =
   assert.match(spankbang, /markFourKUrl\(videoPageUrl\)/);
 
   assert.match(xhamster, /async handleCatalog\(args\)/);
-  assert.match(xhamster, /await this\.fetchCatalog\(baseUrl, extra\.genre \|\| '', skip\)/);
+  assert.match(xhamster, /return super\.handleCatalog\(args\)/);
   assert.match(xhamster, /super\.fetchHtml\(url, \{ cache: false \}\)/);
   assert.match(xhamster, /isBlockedXhamsterHtml/);
 

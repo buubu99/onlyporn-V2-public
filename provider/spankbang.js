@@ -4,6 +4,7 @@ const { meta } = require('../model');
 const Provider = require('./provider');
 const BoundedTtlCache = require('./cache');
 const { parseAssignedObjectStringValues } = require('./js-literal');
+const { isBlockedSpankbangHtml } = require('./challenge-detection');
 const {
   cleanMediaUrl,
   extractResolution,
@@ -87,8 +88,8 @@ class SpankbangProvider extends Provider {
       },
     });
 
-    if (/cf-chl|Just a moment|captcha/i.test(html)) {
-      throw new Error('SpankBang returned a challenge page');
+    if (isBlockedSpankbangHtml(html)) {
+      throw new Error('SpankBang returned a verified challenge page');
     }
 
     return html;
@@ -424,5 +425,5 @@ class SpankbangProvider extends Provider {
 }
 
 const create = SpankbangProvider.create;
-create._test = { FOUR_K_MARKER, markFourKUrl, unmarkFourKUrl };
+create._test = { FOUR_K_MARKER, isBlockedSpankbangHtml, markFourKUrl, unmarkFourKUrl };
 module.exports = create;
