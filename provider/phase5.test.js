@@ -55,7 +55,7 @@ test('JAVHDPorn metadata uses JSON-LD and preserves player bootstrap values', ()
 test('JAVHDPorn player API request posts the decoded sources token and decrypts the result', async () => {
   const provider = createJavHdPorn();
   let captured;
-  provider.fetchJson = async (url, options) => {
+  provider.fetchSafariJson = async (url, options) => {
     captured = { url, options };
     return {
       status: true,

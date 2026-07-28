@@ -163,3 +163,9 @@ Live Render/AIOStreams playback remains the final validation because provider si
 Phase 5 adds `provider/phase5.test.js`. It validates the captured JAV HD Porn version-2 player bootstrap vector, catalog host filtering, JSON-LD metadata, encrypted player API response handling, advertisement rejection, protected relay allowlists, eight-catalog manifest wiring, and deterministic search/category/pagination routes.
 
 The HAR used during development is intentionally excluded from the package. The included fixture contains only minimal synthetic HTML and no browser cookies, analytics identifiers, or request headers.
+
+## Hotfix 2.5.1 validation
+
+Production diagnosis on the Singapore Render instance established the transport mismatch: Node/Axios returned HTTP 403 for `https://www.javhdporn.net/v3/category/censored/`, while `curl_cffi==0.15.0` with Safari impersonation returned HTTP 200, 76,683 response bytes, 44 `/video/` occurrences, and 22 parsed catalog entries. The hotfix adds an isolated persistent JAV HD Porn Safari session and uses it for page GETs, player-page HEAD/GET requests on approved JAV hosts, and the form-encoded `/api/play/` POST.
+
+Run `npm run test:hotfix251`, then `EXPECTED_VERSION=2.5.1 npm run validate:release`. After Render becomes live, request `/catalog/movie/javhdporn.json`; it must return a non-empty `metas` array and logs must show `JAVHDPorn Safari request succeeded`.

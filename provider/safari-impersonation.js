@@ -16,6 +16,7 @@ class SafariImpersonationClient {
     this.child = null;
     this.sequence = 0;
     this.pending = new Map();
+    this.cookieHeaders = new Map();
   }
 
   start() {
@@ -81,12 +82,21 @@ class SafariImpersonationClient {
       return;
     }
 
+    if (message.cookieHeader) {
+      this.cookieHeaders.set(pending.profile, message.cookieHeader);
+    }
+
     pending.resolve({
       data: Buffer.from(message.bodyBase64 || '', 'base64').toString('utf8'),
       status: message.status,
       headers: message.headers || {},
       finalUrl: message.finalUrl,
+      cookieHeader: message.cookieHeader || '',
     });
+  }
+
+  getCookieHeader(profile = 'spankbang') {
+    return this.cookieHeaders.get(String(profile || 'spankbang').toLowerCase()) || '';
   }
 
   async fetchText(url, options = {}) {
@@ -95,9 +105,13 @@ class SafariImpersonationClient {
 
     const id = ++this.sequence;
     const timeoutMs = Math.max(1000, Math.min(Number(options.timeoutMs || 30000), 45000));
+    const profile = String(options.profile || 'spankbang').toLowerCase();
     const payload = {
       id,
       url,
+      profile,
+      method: String(options.method || 'GET').toUpperCase(),
+      data: options.data,
       timeoutMs,
       maxBytes: options.maxBytes || 5 * 1024 * 1024,
       headers: options.headers || {},
@@ -110,7 +124,7 @@ class SafariImpersonationClient {
         if (this.child && !this.child.killed) this.child.kill('SIGKILL');
       }, timeoutMs + 2000);
 
-      this.pending.set(id, { resolve, reject, timer });
+      this.pending.set(id, { resolve, reject, timer, profile });
       this.child.stdin.write(`${JSON.stringify(payload)}\n`, error => {
         if (!error) return;
         const pending = this.pending.get(id);
@@ -120,6 +134,21 @@ class SafariImpersonationClient {
         reject(error);
       });
     });
+  }
+
+  async fetchJson(url, options = {}) {
+    const response = await this.fetchText(url, options);
+    try {
+      return {
+        ...response,
+        data: JSON.parse(response.data || 'null'),
+      };
+    } catch (error) {
+      const invalid = new Error(`Safari helper returned invalid JSON: ${error.message}`);
+      invalid.status = response.status;
+      invalid.headers = response.headers;
+      throw invalid;
+    }
   }
 }
 

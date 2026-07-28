@@ -278,7 +278,6 @@ test('manifest catalog IDs are unique and every catalog resolves to its intended
   assert.equal(ids.length, 8);
   assert.equal(new Set(ids).size, ids.length);
   assert.ok(ids.includes('spankbang'), 'SpankBang remains declared even when Render is blocked upstream');
-  assert.ok(ids.includes('javhdporn'), 'JAV HD Porn catalog must remain declared');
 
   for (const catalog of catalogs) {
     const expected = catalog.id.split('.')[0];

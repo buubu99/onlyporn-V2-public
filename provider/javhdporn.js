@@ -3,6 +3,7 @@ const logger = require('../logger');
 const mediaRelay = require('../media-relay');
 const { meta } = require('../model');
 const Provider = require('./provider');
+const safariImpersonation = require('./safari-impersonation');
 const { dex } = require('./javhdporn-player');
 const {
   cleanMediaUrl,
@@ -202,6 +203,81 @@ class JavHdPornProvider extends Provider {
     return `${this.baseUrl}/v3/category/censored/`;
   }
 
+  async fetchSafariResponse(url, options = {}) {
+    const safeUrl = await assertSafeHttpsUrl(url, {
+      allowedHosts: this.allowedPageHosts,
+    });
+    const response = await safariImpersonation.fetchText(safeUrl, {
+      profile: 'javhdporn',
+      method: options.method || 'GET',
+      data: options.data,
+      headers: options.headers || {},
+      timeoutMs: options.timeoutMs || 30_000,
+      maxBytes: options.maxBytes || 6 * 1024 * 1024,
+    });
+
+    logger.debug(
+      {
+        provider: this.name,
+        url: sanitizeUrlForLogs(response.finalUrl || safeUrl),
+        status: response.status,
+        cfRay: response.headers?.['cf-ray'],
+      },
+      'JAVHDPorn Safari request succeeded'
+    );
+    return response;
+  }
+
+  async fetchHtml(url, requestOptions = {}) {
+    const cacheKey = requestOptions.cacheKey || `jav-safari-html:${url}`;
+    if (requestOptions.cache !== false) {
+      const cached = this.htmlCache.get(cacheKey);
+      if (cached !== undefined) return cached;
+    }
+
+    const pendingKey = `jav-safari:text:${cacheKey}`;
+    if (this.pendingRequests.has(pendingKey)) {
+      return this.pendingRequests.get(pendingKey);
+    }
+
+    const operation = (async () => {
+      try {
+        const response = await this.fetchSafariResponse(url, requestOptions);
+        const html = String(response.data || '');
+        if (requestOptions.cache !== false) this.htmlCache.set(cacheKey, html);
+        return html;
+      } catch (error) {
+        logger.warn(
+          { provider: this.name, url: sanitizeUrlForLogs(url), error: error.message },
+          'JAVHDPorn Safari request failed'
+        );
+        throw error;
+      }
+    })();
+
+    this.pendingRequests.set(pendingKey, operation);
+    try {
+      return await operation;
+    } finally {
+      this.pendingRequests.delete(pendingKey);
+    }
+  }
+
+  async fetchSafariJson(url, options = {}) {
+    const safeUrl = await assertSafeHttpsUrl(url, {
+      allowedHosts: this.allowedPageHosts,
+    });
+    const response = await safariImpersonation.fetchJson(safeUrl, {
+      profile: 'javhdporn',
+      method: options.method || 'GET',
+      data: options.data,
+      headers: options.headers || {},
+      timeoutMs: options.timeoutMs || 30_000,
+      maxBytes: options.maxBytes || 2 * 1024 * 1024,
+    });
+    return response.data;
+  }
+
   handleSearch({ extra: { search } }) {
     const url = new URL(this.baseUrl);
     url.searchParams.set('s', cleanText(search));
@@ -376,7 +452,7 @@ class JavHdPornProvider extends Provider {
       sources,
       ver: bootstrap.version,
     }).toString();
-    const data = await this.fetchJson(`${this.baseUrl}/api/play/`, {
+    const data = await this.fetchSafariJson(`${this.baseUrl}/api/play/`, {
       method: 'POST',
       data: body,
       cache: false,
@@ -432,7 +508,10 @@ class JavHdPornProvider extends Provider {
       'User-Agent': PLAYBACK_USER_AGENT,
     };
 
-    if (typeof this.jar?.getCookieString === 'function') {
+    const safariCookie = safariImpersonation.getCookieHeader('javhdporn');
+    if (safariCookie) {
+      headers.Cookie = safariCookie;
+    } else if (typeof this.jar?.getCookieString === 'function') {
       try {
         const cookie = await this.jar.getCookieString(mediaUrl || this.baseUrl);
         if (cookie) headers.Cookie = cookie;
@@ -472,15 +551,24 @@ class JavHdPornProvider extends Provider {
         const safeUrl = await assertSafeHttpsUrl(item.url);
         const headers = await this.playbackHeaders(item.referer, safeUrl);
 
+        const candidateHost = new URL(safeUrl).hostname.toLowerCase();
+        const useSafari = this.allowedPageHosts.has(candidateHost);
+
         try {
-          const probe = await this.request(safeUrl, {
-            method: 'HEAD',
-            responseType: 'text',
-            allowedHosts: null,
-            cache: null,
-            retries: 0,
-            headers,
-          });
+          const probe = useSafari
+            ? await this.fetchSafariResponse(safeUrl, {
+                method: 'HEAD',
+                headers,
+                maxBytes: 1024,
+              })
+            : await this.request(safeUrl, {
+                method: 'HEAD',
+                responseType: 'text',
+                allowedHosts: null,
+                cache: null,
+                retries: 0,
+                headers,
+              });
           const contentType = String(probe.headers?.['content-type'] || '').toLowerCase();
           if (/mpegurl|application\/vnd\.apple/i.test(contentType)) {
             media.set(probe.finalUrl, { ...item, url: probe.finalUrl, kind: 'hls' });
@@ -494,10 +582,15 @@ class JavHdPornProvider extends Provider {
           // Some player/CDN routes reject HEAD while accepting a normal GET.
         }
 
-        const html = await this.fetchMediaText(safeUrl, {
-          cache: false,
-          headers,
-        });
+        const html = useSafari
+          ? String((await this.fetchSafariResponse(safeUrl, {
+              headers,
+              maxBytes: 6 * 1024 * 1024,
+            })).data || '')
+          : await this.fetchMediaText(safeUrl, {
+              cache: false,
+              headers,
+            });
         if (/sorry\s+streaming\s+service\s+is\s+unavailable/i.test(html)) continue;
         if (String(html).includes('#EXTM3U')) {
           media.set(safeUrl, { ...item, url: safeUrl, kind: 'hls' });

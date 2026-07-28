@@ -130,3 +130,11 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Added recursive player-page discovery for MP4/HLS sources, reserve-source handling, explicit unavailable-player rejection, and aggressive banner/preview-media filtering.
 - Extended the protected media relay to approved JAV HD Porn, PornFHD, and StorageXHD domain suffixes while retaining public-address and HTTPS validation.
 - Added request-body support and body-aware request deduplication to the central provider transport.
+
+## Hotfix 2.5.1
+
+- Production Render testing showed Node/Axios received HTTP 403 for the JAV HD Porn censored catalog while `curl_cffi` Safari impersonation returned HTTP 200 with 76,683 bytes and 44 `/video/` links.
+- Routes JAV HD Porn catalog, search, genres, pagination, metadata, video pages, and `/api/play/` POST requests through the persistent Safari helper.
+- Keeps separate SpankBang and JAV HD Porn Safari sessions so cookies and anti-bot state cannot cross providers.
+- Forwards the JAV HD Porn Safari-session cookies to protected media relay requests when available.
+- Preserves the working live catalog parser, which returned 22 metadata entries from the successful Safari response.

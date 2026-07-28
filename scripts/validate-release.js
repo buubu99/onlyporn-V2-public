@@ -107,6 +107,7 @@ const requiredFiles = [
   'provider/phase3.test.js',
   'provider/phase4.test.js',
   'provider/phase5.test.js',
+  'provider/hotfix-2.5.1.test.js',
   'provider/javhdporn-player.js',
   'provider/javhdporn.js',
   'provider/safari-impersonation.js',
