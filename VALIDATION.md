@@ -172,3 +172,9 @@ Run `npm run test:hotfix251`, then `EXPECTED_VERSION=2.5.1 npm run validate:rele
 ## Hotfix 2.5.2 validation
 
 Run `npm run test:hotfix252`, `npm run test:phase5`, then `EXPECTED_VERSION=2.5.2 npm run validate:release`. Live validation must show a non-empty SpankBang catalog without a bootstrap 403, a non-empty JAV HD Porn catalog, at least one decoded JWPlayer HLS source, relayed HLS playlists, and wrapped TikTok CDN segments returned as `video/mp2t`.
+
+## Hotfix 2.5.3 validation
+
+Run `npm run test:hotfix253`, `npm run test:phase4`, `npm run test:phase5`, then `EXPECTED_VERSION=2.5.3 npm run validate:release`. The focused tests verify byte-compatible SpankBang transport architecture, complete process separation, native browser API preservation in the JWPlayer sandbox, and live-style asynchronous setup capture.
+
+The release is not considered complete until Render returns a non-empty SpankBang catalog, a playable SpankBang stream, a non-empty JAV HD Porn catalog, a decoded JWPlayer source, and a relayed JAV HD Porn stream whose wrapped MPEG-TS segment is served as `video/mp2t`.

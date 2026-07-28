@@ -4,7 +4,7 @@ const BoundedTtlCache = require('./cache');
 const mediaRelay = require('../media-relay');
 const { meta } = require('../model');
 const Provider = require('./provider');
-const safariImpersonation = require('./safari-impersonation');
+const safariImpersonation = require('./javhdporn-safari-impersonation');
 const { dex } = require('./javhdporn-player');
 const {
   captureJwPlayerSources,
@@ -230,7 +230,6 @@ class JavHdPornProvider extends Provider {
       allowedHosts: this.allowedPageHosts,
     });
     const response = await safariImpersonation.fetchText(safeUrl, {
-      profile: 'javhdporn',
       method: options.method || 'GET',
       data: options.data,
       headers: options.headers || {},
@@ -291,7 +290,6 @@ class JavHdPornProvider extends Provider {
       allowedHosts: this.allowedPageHosts,
     });
     const response = await safariImpersonation.fetchJson(safeUrl, {
-      profile: 'javhdporn',
       method: options.method || 'GET',
       data: options.data,
       headers: options.headers || {},
@@ -569,7 +567,7 @@ class JavHdPornProvider extends Provider {
       'User-Agent': PLAYBACK_USER_AGENT,
     };
 
-    const safariCookie = safariImpersonation.getCookieHeader('javhdporn');
+    const safariCookie = safariImpersonation.getCookieHeader();
     if (safariCookie) {
       headers.Cookie = safariCookie;
     } else if (typeof this.jar?.getCookieString === 'function') {

@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Persistent curl_cffi Safari transport for SpankBang page requests.
+"""Persistent curl_cffi Safari transport dedicated to JAV HD Porn.
 
 The process reads one JSON object per line from stdin and writes one JSON
-response per line to stdout. A single Session is retained for cookies and
-Cloudflare state across catalog, metadata, and video-page requests.
+response per line to stdout. It handles only JAVHDPorn, so cookies and
+anti-bot state cannot cross provider boundaries.
 """
 
 from __future__ import annotations
@@ -11,25 +11,26 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import sys
 from typing import Any
 from urllib.parse import urlparse
 
 from curl_cffi import requests
 
-ALLOWED_HOSTS = {"spankbang.com", "www.spankbang.com"}
-HOME_URL = "https://spankbang.com/"
+ALLOWED_HOSTS = {
+    "javhdporn.net",
+    "www.javhdporn.net",
+    "video.javhdporn.net",
+}
+ALLOWED_HOST_PATTERN = re.compile(r"^video\d*\.javhdporn\.net$")
+HOME_URL = "https://www.javhdporn.net/"
 MAX_BYTES_HARD_LIMIT = 8 * 1024 * 1024
+MAX_BODY_CHARS = 256 * 1024
 
-session = requests.Session(impersonate=os.getenv("SPANKBANG_IMPERSONATE", "safari"))
-for cookie_name, cookie_value in {
-    "sb": "1",
-    "age_verified": "1",
-    "hasVisited": "1",
-}.items():
-    session.cookies.set(cookie_name, cookie_value, domain="spankbang.com", path="/")
-
-bootstrapped = False
+session = requests.Session(
+    impersonate=os.getenv("JAVHDPORN_IMPERSONATE", "safari")
+)
 
 
 def emit(payload: dict[str, Any]) -> None:
@@ -42,9 +43,10 @@ def validate_url(value: Any) -> str:
         raise ValueError("URL must be a string")
     parsed = urlparse(value)
     host = (parsed.hostname or "").lower().rstrip(".")
-    if parsed.scheme != "https" or host not in ALLOWED_HOSTS:
-        raise ValueError("URL host is not approved for Safari transport")
-    if parsed.username or parsed.password or (parsed.port not in (None, 443)):
+    allowed = host in ALLOWED_HOSTS or bool(ALLOWED_HOST_PATTERN.fullmatch(host))
+    if parsed.scheme != "https" or not allowed:
+        raise ValueError("URL host is not approved for JAVHDPorn Safari transport")
+    if parsed.username or parsed.password or parsed.port not in (None, 443):
         raise ValueError("URL contains disallowed credentials or port")
     return value
 
@@ -53,10 +55,14 @@ def safe_headers(raw: Any) -> dict[str, str]:
     if not isinstance(raw, dict):
         return {}
     allowed = {
+        "accept",
         "accept-language",
         "cache-control",
+        "content-type",
+        "origin",
         "pragma",
         "referer",
+        "x-requested-with",
     }
     output: dict[str, str] = {}
     for key, value in raw.items():
@@ -66,24 +72,22 @@ def safe_headers(raw: Any) -> dict[str, str]:
     return output
 
 
-def ensure_bootstrap(timeout_seconds: float) -> None:
-    """Prime the persistent session using the exact successful Safari request shape."""
-    global bootstrapped
-    if bootstrapped:
-        return
+def safe_body(value: Any) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ValueError("Request body must be a string")
+    if len(value) > MAX_BODY_CHARS:
+        raise ValueError("Request body is too large")
+    return value
 
-    response = session.get(HOME_URL, timeout=timeout_seconds, allow_redirects=True)
-    validate_url(str(response.url))
-    if not 200 <= response.status_code < 300:
-        raise RuntimeError(f"SpankBang bootstrap returned HTTP {response.status_code}")
-    if str(response.headers.get("cf-mitigated", "")).lower() == "challenge":
-        raise RuntimeError("SpankBang bootstrap returned a Cloudflare challenge")
-    bootstrapped = True
+
+def cookie_header() -> str:
+    values = session.cookies.get_dict()
+    return "; ".join(f"{name}={value}" for name, value in values.items())
 
 
 def handle(message: dict[str, Any]) -> dict[str, Any]:
-    global bootstrapped
-
     request_id = message.get("id")
     url = validate_url(message.get("url"))
     timeout_ms = max(1000, min(int(message.get("timeoutMs", 30000)), 45000))
@@ -92,19 +96,19 @@ def handle(message: dict[str, Any]) -> dict[str, Any]:
         1024,
         min(int(message.get("maxBytes", 5 * 1024 * 1024)), MAX_BYTES_HARD_LIMIT),
     )
-
-    parsed = urlparse(url)
-    is_home = parsed.path in ("", "/") and not parsed.query
-    if not is_home:
-        ensure_bootstrap(timeout_seconds)
+    method = str(message.get("method") or "GET").upper()
+    if method not in {"GET", "POST", "HEAD"}:
+        raise ValueError("Safari transport method is not allowed")
 
     headers = safe_headers(message.get("headers"))
-    if not is_home and not any(key.lower() == "referer" for key in headers):
+    if not any(key.lower() == "referer" for key in headers):
         headers["Referer"] = HOME_URL
 
-    response = session.get(
+    response = session.request(
+        method,
         url,
         headers=headers or None,
+        data=safe_body(message.get("data")) if method == "POST" else None,
         timeout=timeout_seconds,
         allow_redirects=True,
     )
@@ -115,21 +119,24 @@ def handle(message: dict[str, Any]) -> dict[str, Any]:
         raise ValueError(f"Response exceeded {max_bytes} bytes")
 
     selected_headers = {}
-    for name in ("content-type", "server", "cf-ray", "cf-mitigated", "location"):
+    for name in (
+        "content-type",
+        "server",
+        "cf-ray",
+        "cf-mitigated",
+        "location",
+    ):
         value = response.headers.get(name)
         if value is not None:
             selected_headers[name] = str(value)
 
-    ok = 200 <= response.status_code < 300
-    if is_home and ok and str(response.headers.get("cf-mitigated", "")).lower() != "challenge":
-        bootstrapped = True
-
     return {
         "id": request_id,
-        "ok": ok,
+        "ok": 200 <= response.status_code < 300,
         "status": int(response.status_code),
         "finalUrl": final_url,
         "headers": selected_headers,
+        "cookieHeader": cookie_header(),
         "bodyBase64": base64.b64encode(body).decode("ascii"),
     }
 
@@ -141,7 +148,7 @@ for line in sys.stdin:
         if not isinstance(message, dict):
             raise ValueError("Request must be a JSON object")
         emit(handle(message))
-    except Exception as exc:  # Return a bounded error without cookies or body data.
+    except Exception as exc:
         request_id = None
         try:
             request_id = message.get("id") if isinstance(message, dict) else None

@@ -44,17 +44,22 @@ function pngWrappedTransportStream(packetCount = 3) {
   };
 }
 
-test('SpankBang skips the blocked homepage bootstrap while Safari sessions stay isolated', () => {
-  const helper = fs.readFileSync(
+test('SpankBang and JAVHDPorn use completely separate Safari helpers', () => {
+  const spankHelper = fs.readFileSync(
     path.join(ROOT, 'scripts', 'safari_fetch_helper.py'),
     'utf8'
   );
+  const javHelper = fs.readFileSync(
+    path.join(ROOT, 'scripts', 'javhdporn_safari_fetch_helper.py'),
+    'utf8'
+  );
 
-  assert.match(helper, /"spankbang":\s*\{[\s\S]*?"bootstrap": False/);
-  assert.match(helper, /"javhdporn":\s*\{[\s\S]*?"bootstrap": False/);
-  assert.match(helper, /sessions:\s*dict\[str, requests\.Session\]/);
-  assert.match(helper, /allowed_host_patterns/);
-  assert.match(helper, /video\\d\*\\\.javhdporn/);
+  assert.match(spankHelper, /Persistent curl_cffi Safari transport for SpankBang/);
+  assert.match(spankHelper, /ensure_bootstrap\(timeout_seconds\)/);
+  assert.doesNotMatch(spankHelper, /javhdporn/i);
+  assert.match(javHelper, /Persistent curl_cffi Safari transport dedicated to JAV HD Porn/);
+  assert.match(javHelper, /video\\d\*\\.javhdporn/);
+  assert.doesNotMatch(javHelper, /spankbang/i);
 });
 
 test('JAVHDPorn accepts numbered player hosts but rejects lookalike domains', () => {
@@ -245,11 +250,11 @@ test('JAVHDPorn wrapped segment handler returns video/mp2t instead of image/png'
   assert.deepEqual(response.body, transport);
 });
 
-test('OnlyPorn hotfix release reports version 2.5.2', () => {
+test('OnlyPorn retains the v2.5.2 relay behavior in v2.5.3', () => {
   const packageInfo = JSON.parse(
     fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')
   );
-  assert.equal(packageInfo.version, '2.5.2');
+  assert.equal(packageInfo.version, '2.5.3');
   assert.equal(packageInfo.dependencies.jsdom, '22.1.0');
   assert.equal(packageInfo.dependencies.jquery, '3.7.1');
   assert.match(packageInfo.scripts['test:release'], /hotfix-2\.5\.2\.test\.js/);

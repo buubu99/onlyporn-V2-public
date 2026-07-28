@@ -223,7 +223,7 @@ test('SpankBang production package pins Safari curl_cffi transport', () => {
   assert.match(packageInfo.scripts['install:python'], /install-python-deps\.js/);
   assert.match(installerSource, /'-m', 'venv'/);
   assert.match(providerSource, /safariImpersonation\.fetchText/);
-  assert.match(helperSource, /requests\.Session\(impersonate=config\["impersonate"\]\)/);
-  assert.match(helperSource, /"spankbang":\s*\{[\s\S]*?"bootstrap": False/);
-  assert.match(helperSource, /"allowed_hosts":\s*\{[^}]*spankbang\.com/);
+  assert.match(helperSource, /requests\.Session\(impersonate=.*safari/);
+  assert.match(helperSource, /ensure_bootstrap\(timeout_seconds\)/);
+  assert.match(helperSource, /ALLOWED_HOSTS\s*=\s*\{[^}]*spankbang\.com/);
 });

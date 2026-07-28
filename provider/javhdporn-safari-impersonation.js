@@ -5,24 +5,24 @@ const readline = require('node:readline');
 const logger = require('../logger');
 
 const ROOT = path.resolve(__dirname, '..');
-const HELPER = path.join(ROOT, 'scripts', 'safari_fetch_helper.py');
+const HELPER = path.join(ROOT, 'scripts', 'javhdporn_safari_fetch_helper.py');
 const VENV_PYTHON = process.platform === 'win32'
   ? path.join(ROOT, '.python-venv', 'Scripts', 'python.exe')
   : path.join(ROOT, '.python-venv', 'bin', 'python');
 const MAX_STDERR_CHARS = 500;
 
-class SafariImpersonationClient {
+class JavHdPornSafariClient {
   constructor() {
     this.child = null;
     this.sequence = 0;
     this.pending = new Map();
+    this.cookieHeader = '';
   }
 
   start() {
     if (this.child && !this.child.killed) return;
 
     const python = process.env.PYTHON_BIN || (fs.existsSync(VENV_PYTHON) ? VENV_PYTHON : 'python3');
-
     const child = spawn(python, ['-u', HELPER], {
       cwd: ROOT,
       env: process.env,
@@ -35,14 +35,19 @@ class SafariImpersonationClient {
 
     child.stderr.on('data', chunk => {
       const message = String(chunk || '').trim().slice(0, MAX_STDERR_CHARS);
-      if (message) logger.warn({ helper: 'safari', error: message }, 'Safari helper stderr');
+      if (message) {
+        logger.warn(
+          { helper: 'javhdporn-safari', error: message },
+          'JAVHDPorn Safari helper stderr'
+        );
+      }
     });
 
     child.on('error', error => this.onExit(child, error));
     child.on('exit', (code, signal) => {
       this.onExit(
         child,
-        new Error(`Safari helper exited (${code ?? 'null'}/${signal ?? 'none'})`)
+        new Error(`JAVHDPorn Safari helper exited (${code ?? 'null'}/${signal ?? 'none'})`)
       );
     });
   }
@@ -64,7 +69,7 @@ class SafariImpersonationClient {
     try {
       message = JSON.parse(line);
     } catch {
-      logger.warn({ helper: 'safari' }, 'Safari helper returned invalid JSON');
+      logger.warn({ helper: 'javhdporn-safari' }, 'JAVHDPorn Safari helper returned invalid JSON');
       return;
     }
 
@@ -81,23 +86,31 @@ class SafariImpersonationClient {
       return;
     }
 
+    if (message.cookieHeader) this.cookieHeader = message.cookieHeader;
     pending.resolve({
       data: Buffer.from(message.bodyBase64 || '', 'base64').toString('utf8'),
       status: message.status,
       headers: message.headers || {},
       finalUrl: message.finalUrl,
+      cookieHeader: message.cookieHeader || '',
     });
+  }
+
+  getCookieHeader() {
+    return this.cookieHeader;
   }
 
   async fetchText(url, options = {}) {
     this.start();
-    if (!this.child?.stdin?.writable) throw new Error('Safari helper is unavailable');
+    if (!this.child?.stdin?.writable) throw new Error('JAVHDPorn Safari helper is unavailable');
 
     const id = ++this.sequence;
     const timeoutMs = Math.max(1000, Math.min(Number(options.timeoutMs || 30000), 45000));
     const payload = {
       id,
       url,
+      method: String(options.method || 'GET').toUpperCase(),
+      data: options.data,
       timeoutMs,
       maxBytes: options.maxBytes || 5 * 1024 * 1024,
       headers: options.headers || {},
@@ -106,7 +119,7 @@ class SafariImpersonationClient {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`Safari helper timed out after ${timeoutMs}ms`));
+        reject(new Error(`JAVHDPorn Safari helper timed out after ${timeoutMs}ms`));
         if (this.child && !this.child.killed) this.child.kill('SIGKILL');
       }, timeoutMs + 2000);
 
@@ -121,6 +134,18 @@ class SafariImpersonationClient {
       });
     });
   }
+
+  async fetchJson(url, options = {}) {
+    const response = await this.fetchText(url, options);
+    try {
+      return { ...response, data: JSON.parse(response.data || 'null') };
+    } catch (error) {
+      const invalid = new Error(`JAVHDPorn Safari helper returned invalid JSON: ${error.message}`);
+      invalid.status = response.status;
+      invalid.headers = response.headers;
+      throw invalid;
+    }
+  }
 }
 
-module.exports = new SafariImpersonationClient();
+module.exports = new JavHdPornSafariClient();

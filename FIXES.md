@@ -145,3 +145,11 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Added isolated JWPlayer configuration capture for encrypted `data-config` pages.
 - Added `streamhls.click` playlist relay and strict TikTok CDN segment relay.
 - Added PNG-container removal and MPEG-TS validation for JAV HD Porn HLS segments.
+
+## Hotfix 2.5.3
+
+- Restored the exact isolated v2.4.2 SpankBang Safari helper, persistent session, age cookies, homepage bootstrap, and Referer flow.
+- Moved JAV HD Porn to a completely separate Python helper and Node client.
+- Replaced the incompatible production JWPlayer browser stubs with the minimal Render-proven JSDOM environment.
+- Retained dynamic player hosts, encrypted configuration capture, HLS relay rewriting, and PNG-wrapped MPEG-TS decoding.
+- Added explicit live production gates so fixture-only success cannot be reported as a completed provider repair.
