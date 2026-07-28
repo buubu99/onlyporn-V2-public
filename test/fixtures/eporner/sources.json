@@ -1,0 +1,10 @@
+{
+  "sources": {
+    "mp4": {
+      "1080": {"src": "https://cdn.example/videos/fixture-1080p.mp4", "labelShort": "1080p"},
+      "720": {"src": "https://cdn.example/videos/fixture-720p.mp4", "labelShort": "720p"},
+      "preview": {"src": "https://cdn.example/previews/fixture-2160p.t.mp4", "labelShort": "2160p preview"}
+    },
+    "hls": {"auto": {"src": "https://cdn.example/master.m3u8"}}
+  }
+}

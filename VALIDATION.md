@@ -93,3 +93,19 @@ Not executable in the offline build environment:
 - Playback through AIOStreams/Stremio.
 
 After deployment, verify manifest version `2.2.0`, all seven catalogs, Eporner sort differences, SpankBang metadata/playback, xHamster Load More uniqueness, XVideos/XNXX direct MP4 playback, and XNXX poster consistency. Preserve `backup-v2.1.0-before-phase2` until those checks pass.
+
+## 2.3.0 Phase 3 validation — 2026-07-27
+
+Phase 3 adds a dependency-backed offline fixture suite and a release-validation gate.
+
+Static validation completed in the packaging environment:
+
+- All 36 JavaScript files passed `node --check`.
+- The release validator inspected 69 repository files.
+- No trailing whitespace, `.env`, private key, Git metadata, or deployment credential was included.
+- `package.json` parses and reports version `2.3.0`.
+- Fixture assets are included for all six provider implementations plus HLS master-playlist resolution.
+
+The packaging environment could not retrieve npm dependencies from its package gateway, so the dependency-backed Phase 3 fixture suite could not be executed there. The deployment command intentionally runs `npm install` and `npm run validate:release` before creating the Git commit. Any test failure stops the script before GitHub or Render is changed.
+
+After Render becomes Live, run the included live smoke test. SpankBang is retained in the manifest but is currently a known empty catalog on Render because direct tests from both Singapore and Oregon received upstream Cloudflare HTTP 403 responses.

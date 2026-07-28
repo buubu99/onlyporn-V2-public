@@ -16,9 +16,7 @@ const manifest = {
     'https://cdni.pornpics.com/1280/5/188/87261714/87261714_013_3f11.jpg',
 
   resources: ['catalog', 'stream', 'meta'],
-
   types: ['movie'],
-
   catalogs,
 
   behaviorHints: {
@@ -28,33 +26,33 @@ const manifest = {
 
 const builder = new addonBuilder(manifest);
 
-builder.defineCatalogHandler(function (args, cb) {
-  return loadProvider(args.id)
+builder.defineCatalogHandler(args =>
+  loadProvider(args.id)
     .handleCatalog(args)
-    .catch(err => {
-  console.error(err)
-  return { metas: [] }
-});
-});
+    .catch(error => {
+      logger.error({ error: error.message, catalogId: args.id }, 'Catalog handler failed');
+      return { metas: [] };
+    })
+);
 
-builder.defineStreamHandler(function (args) {
-  return loadProvider(args.id)
+builder.defineStreamHandler(args =>
+  loadProvider(args.id)
     .handleStream(args)
-    .catch(err => {
-  console.error(err)
-  return { streams: [] }
-});
-});
+    .catch(error => {
+      logger.error({ error: error.message, contentId: args.id }, 'Stream handler failed');
+      return { streams: [] };
+    })
+);
 
-builder.defineMetaHandler(function (args) {
-  return loadProvider(args.id)
+builder.defineMetaHandler(args =>
+  loadProvider(args.id)
     .handleMeta(args)
-    .catch(err => {
-  console.error(err)
-  return { meta: {} }
-});
-});
+    .catch(error => {
+      logger.error({ error: error.message, contentId: args.id }, 'Metadata handler failed');
+      return { meta: {} };
+    })
+);
 
-console.info({ version: manifest.version });
+logger.info({ version: manifest.version, catalogs: manifest.catalogs.length }, 'OnlyPorn manifest loaded');
 
 module.exports = builder.getInterface();

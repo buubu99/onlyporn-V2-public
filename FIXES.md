@@ -80,3 +80,19 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Corrected root-relative and protocol-relative media URL handling.
 - Made XNXX poster-frame selection deterministic.
 - Added eight Phase 2 regression tests; the combined Phase 1 and Phase 2 suite contains 15 passing tests.
+
+## 2.2.1 — Catalog visibility hotfix
+
+- Restored xHamster to the proven single-page catalog path after Phase 2 aggregation caused rows to disappear during upstream challenge or latency events.
+- Narrowed challenge detection so ordinary pages are not rejected merely for containing generic words such as `captcha` or `access denied` in scripts.
+- Retained strict detection of verified Cloudflare challenge documents.
+
+## 2.3.0 — Phase 3 verification and operations
+
+- Added provider fixtures and complete parser/metadata/stream regression tests.
+- Added deterministic route and pagination tests for all providers.
+- Added HLS variant ordering and relative-URL resolution tests.
+- Added retry recovery and concurrent-request deduplication tests.
+- Added a release validator and live deployment smoke-test command.
+- Made production logging configurable through environment values.
+- Corrected optional local launch/install support by loading `opn`.

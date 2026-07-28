@@ -1,6 +1,7 @@
 const express = require('express');
 const fs = require('fs');
 const path = require('path');
+const open = require('opn');
 const landingTemplate = require('stremio-addon-sdk/src/landingTemplate');
 const getRouter = require('stremio-addon-sdk/src/getRouter');
 const { addonEnabled } = require('../catalog');

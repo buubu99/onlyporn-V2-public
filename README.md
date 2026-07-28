@@ -15,3 +15,12 @@ You need `yarn`
 [testing.md#testing-in-stremio-app](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/testing.md#testing-in-stremio-app)
 
 https://github.com/Stremio/stremio-addon-sdk
+
+## 2.3.0 verification commands
+
+```bash
+npm run validate:release
+npm run smoke:live -- https://onlyporn-v2-public-k143.onrender.com 2.3.0
+```
+
+The release validator runs syntax, packaging, secret-file, whitespace, manifest, and all regression tests before deployment. The live smoke test checks the Render manifest, catalog output, metadata completeness, duplicate IDs, and page-2 repetition. SpankBang remains in the manifest, but Render requests are currently blocked upstream by Cloudflare in both tested Render regions.
