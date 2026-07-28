@@ -12,6 +12,7 @@ const entries = new BoundedTtlCache({ maxEntries: MAX_ENTRIES, ttlMs: ENTRY_TTL_
 const PROVIDER_SUFFIXES = {
   eporner: ['eporner.com'],
   xvideos: ['xvideos.com', 'xvideos-cdn.com'],
+  xnxx: ['xnxx.com', 'xnxx-cdn.com'],
 };
 
 const SAFE_REQUEST_HEADERS = new Set([

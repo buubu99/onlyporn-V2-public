@@ -153,3 +153,7 @@ Packaging validation completed for 2.4.1:
 - The full Cheerio-backed fixture suite remains part of `npm run validate:release` and is executed after normal dependency installation by the deployment script.
 
 Live Render/AIOStreams playback remains the final validation because provider signatures, CDN redirects, and player behavior are external runtime dependencies.
+
+## v2.4.2
+
+- Added XNXX THUMBNUM canonicalization and protected media relay regression coverage.

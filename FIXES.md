@@ -117,3 +117,7 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Routed XVideos HLS through Render, normalized playlist responses to HTTP 200 with the HLS MIME type, and rewrote variant/segment/key/map URIs.
 - Preserved Range support for MP4 files and HLS segments while deliberately ignoring Range and conditional caching for playlists.
 - Added six focused hotfix regression tests.
+
+## v2.4.2
+
+- Completed XNXX malformed URL repair and protected HLS/MP4 media relay.

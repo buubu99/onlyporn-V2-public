@@ -1,5 +1,6 @@
 const { load } = require('cheerio');
 const logger = require('../logger');
+const mediaRelay = require('../media-relay');
 const { meta } = require('../model');
 const Provider = require('./provider');
 const BoundedTtlCache = require('./cache');
@@ -18,10 +19,13 @@ const {
 const { resolveTemplateFrame, stableFrame } = require('./poster-utils');
 
 const DEFAULT_POSTER = 'https://thumb-cdn77.xnxx-cdn.com/default.jpg';
+const PLAYBACK_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36';
 const HTML_TTL = 1000 * 60 * 5;
 const META_TTL = 1000 * 60 * 5;
 const htmlCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: HTML_TTL });
 const metaCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: META_TTL });
+const resolvedPageCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: META_TTL });
 const inFlight = new Map();
 
 const REGEX = {
@@ -63,6 +67,45 @@ function structuredDataFromPage($) {
   );
 }
 
+function xnxxPageCandidates(value, baseUrl = 'https://www.xnxx.com') {
+  let parsed;
+  try {
+    parsed = new URL(value, baseUrl);
+  } catch {
+    return [];
+  }
+
+  parsed.search = '';
+  parsed.hash = '';
+  parsed.pathname = parsed.pathname.replace(/\/{2,}/g, '/').replace(/\/$/, '');
+  const candidates = [];
+  const add = pathname => {
+    const candidate = new URL(parsed.toString());
+    candidate.pathname = pathname.replace(/\/{2,}/g, '/').replace(/\/$/, '');
+    const result = candidate.toString().replace(/\/$/, '');
+    if (!candidates.includes(result)) candidates.push(result);
+  };
+
+  if (/\/THUMBNUM(?:\/|$)/i.test(parsed.pathname)) {
+    // XNXX catalog HTML can expose a thumbnail-frame template as the page href.
+    // A valid current route uses frame 0 in that position. Keep conservative
+    // fallbacks for older layouts, but never request the literal template.
+    add(parsed.pathname.replace(/\/THUMBNUM\//i, '/0/'));
+    add(parsed.pathname.replace(/\/THUMBNUM\//i, '/1/'));
+    add(parsed.pathname.replace(/\/THUMBNUM\//i, '/'));
+    add(parsed.pathname.replace(/\/\d+\/THUMBNUM\//i, '/'));
+    add(parsed.pathname.replace(/\/THUMBNUM(?:\/.*)?$/i, ''));
+  } else {
+    add(parsed.pathname);
+  }
+
+  return candidates;
+}
+
+function normalizeXnxxPageUrl(value, baseUrl) {
+  return xnxxPageCandidates(value, baseUrl)[0] || '';
+}
+
 function sourceLabel(candidate) {
   if (candidate.resolution) return `${candidate.resolution} MP4`;
   return `${candidate.label || 'Direct'} MP4`;
@@ -83,12 +126,39 @@ class XnxxProvider extends Provider {
     if (inFlight.has(url)) return inFlight.get(url);
 
     const promise = (async () => {
-      const html = await super.fetchHtml(url, { cache: false });
-      if (/cf-chl|just a moment|captcha|access denied/i.test(html)) {
-        throw new Error('XNXX returned a challenge page');
+      const candidates = xnxxPageCandidates(url, this.baseUrl);
+      let lastError;
+
+      for (let index = 0; index < candidates.length; index += 1) {
+        const candidate = candidates[index];
+        try {
+          const html = await super.fetchHtml(candidate, { cache: false });
+          if (/cf-chl|just a moment|captcha|access denied/i.test(html)) {
+            throw new Error('XNXX returned a challenge page');
+          }
+
+          const hasVideoEvidence =
+            /html5player\.|setVideo(?:Url|HLS)|["']VideoObject["']|<video\b/i.test(html);
+          if (candidates.length > 1 && index < candidates.length - 1 && !hasVideoEvidence) {
+            lastError = new Error('XNXX candidate returned a page without a video player');
+            continue;
+          }
+
+          htmlCache.set(url, html);
+          htmlCache.set(candidate, html);
+          resolvedPageCache.set(url, candidate);
+          resolvedPageCache.set(candidate, candidate);
+          if (candidate !== url) {
+            logger.info({ provider: this.name }, 'XNXX repaired malformed catalog URL');
+          }
+          return html;
+        } catch (error) {
+          lastError = error;
+          if (error.response?.status !== 404 && !/HTTP 404/.test(error.message)) throw error;
+        }
       }
-      htmlCache.set(url, html);
-      return html;
+
+      throw lastError || new Error('XNXX page request failed');
     })();
 
     inFlight.set(url, promise);
@@ -139,11 +209,29 @@ class XnxxProvider extends Provider {
 
     $('div.thumb-block a').each((_, element) => {
       const href = $(element).attr('href');
-      if (!href || !href.startsWith('/video')) return;
+      if (!href) return;
 
-      const id = new URL(href, this.baseUrl).toString().split('?')[0].replace(/\/$/, '');
-      if (seen.has(id)) return;
-      seen.add(id);
+      let rawId;
+      try {
+        const parsed = new URL(href, this.baseUrl);
+        if (
+          parsed.protocol !== 'https:' ||
+          !this.allowedPageHosts.has(parsed.hostname.toLowerCase()) ||
+          !parsed.pathname.startsWith('/video')
+        ) {
+          return;
+        }
+        parsed.search = '';
+        parsed.hash = '';
+        rawId = parsed.toString().replace(/\/$/, '');
+      } catch {
+        return;
+      }
+
+      const canonicalId = normalizeXnxxPageUrl(rawId, this.baseUrl);
+      if (!canonicalId || seen.has(canonicalId)) return;
+      seen.add(canonicalId);
+      const id = /\/THUMBNUM(?:\/|$)/i.test(rawId) ? rawId : canonicalId;
 
       const parent = $(element).closest('.thumb-block');
       const image = parent.find('img').first();
@@ -199,7 +287,8 @@ class XnxxProvider extends Provider {
     if (cached !== undefined) return cached.metaResponse;
 
     const html = await this.fetchHtml(args.id);
-    const parsed = this.parseVideoPage({ id: args.id, html });
+    const resolvedId = resolvedPageCache.get(args.id) || normalizeXnxxPageUrl(args.id, this.baseUrl);
+    const parsed = this.parseVideoPage({ id: resolvedId || args.id, html });
     if (parsed?.metaResponse) metaCache.set(args.id, parsed);
     return parsed.metaResponse;
   }
@@ -226,9 +315,19 @@ class XnxxProvider extends Provider {
       { baseUrl: id, allowKnownVideoPath: true }
     );
 
+    const playbackHeaders = {
+      Referer: id,
+      Origin: this.baseUrl,
+      'User-Agent': PLAYBACK_USER_AGENT,
+    };
     const directMp4Streams = directCandidates.map(candidate => ({
       type: Provider.TYPE,
-      url: candidate.url,
+      url: mediaRelay.register({
+        url: candidate.url,
+        headers: playbackHeaders,
+        provider: this.name,
+        kind: 'mp4',
+      }),
       name: `XNXX ${sourceLabel(candidate)}`,
       behaviorHints: { notWebReady: false },
     }));
@@ -295,7 +394,8 @@ class XnxxProvider extends Provider {
     let parsed = metaCache.get(id);
     if (parsed === undefined) {
       const html = await this.fetchHtml(id);
-      parsed = this.parseVideoPage({ id, html });
+      const resolvedId = resolvedPageCache.get(id) || normalizeXnxxPageUrl(id, this.baseUrl);
+      parsed = this.parseVideoPage({ id: resolvedId || id, html });
       if (parsed?.metaResponse) metaCache.set(id, parsed);
     }
 
@@ -304,23 +404,53 @@ class XnxxProvider extends Provider {
     }
 
     if (!parsed?.videoPageUrl) return { streams: [] };
-    const response = await super.getStreams({ videoPageUrl: parsed.videoPageUrl });
-    response.streams = (response.streams || [])
-      .map(stream => {
-        const resolution =
-          stream.resolution || extractResolution(stream.name, stream.url) || 'unknown';
-        return {
-          ...stream,
-          name: `XNXX ${resolution}`,
-          quality: resolution,
-        };
-      })
-      .sort(
-        (left, right) =>
-          (Number.parseInt(right.quality, 10) || 0) -
-          (Number.parseInt(left.quality, 10) || 0)
-      );
-    return response;
+
+    const requestHeaders = {
+      Referer: resolvedPageCache.get(id) || normalizeXnxxPageUrl(id, this.baseUrl) || id,
+      Origin: this.baseUrl,
+      'User-Agent': PLAYBACK_USER_AGENT,
+    };
+
+    try {
+      const content = await this.fetchMediaText(parsed.videoPageUrl, {
+        cache: false,
+        headers: requestHeaders,
+      });
+      if (!content.includes('#EXTM3U')) return { streams: [] };
+
+      const parsedVariants = this.parseM3u8(content);
+      const sourceStreams = parsedVariants.length
+        ? parsedVariants.map(stream => this.transformStream(parsed.videoPageUrl, stream))
+        : [{ type: Provider.TYPE, url: parsed.videoPageUrl, name: 'HLS' }];
+
+      return {
+        streams: sourceStreams
+          .map(stream => {
+            const resolution =
+              stream.resolution || extractResolution(stream.name, stream.url) || 'HLS';
+            return {
+              ...stream,
+              url: mediaRelay.register({
+                url: stream.url,
+                headers: requestHeaders,
+                provider: this.name,
+                kind: 'hls',
+              }),
+              name: `XNXX ${resolution}`,
+              quality: resolution,
+              behaviorHints: { notWebReady: false },
+            };
+          })
+          .sort(
+            (left, right) =>
+              (Number.parseInt(right.quality, 10) || 0) -
+              (Number.parseInt(left.quality, 10) || 0)
+          ),
+      };
+    } catch (error) {
+      logger.warn({ provider: this.name, error: error.message }, 'XNXX HLS request failed');
+      return { streams: [] };
+    }
   }
 }
 
@@ -328,8 +458,10 @@ const create = XnxxProvider.create;
 create._test = {
   cleanTitle,
   normalizePoster,
+  normalizeXnxxPageUrl,
   resolveThumbNum,
   stableFrame,
   structuredDataFromPage,
+  xnxxPageCandidates,
 };
 module.exports = create;

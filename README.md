@@ -2,9 +2,9 @@
 
 A self-hosted Stremio addon fork with Eporner, Porntrex, SpankBang, XVideos, XNXX, and xHamster providers.
 
-## Current release: 2.4.1
+## Current release: 2.4.2
 
-This release keeps the Phase 4 provider recovery and adds an internal, allowlisted media relay for the remaining Eporner and XVideos playback failures.
+This release keeps the Phase 4 provider recovery, preserves the Eporner and XVideos media relay fixes, and completes XNXX malformed-link and protected HLS/MP4 playback handling.
 
 - Eporner signed MP4 playback stays on the Render egress IP and preserves provider cookies/headers.
 - XVideos HLS playlists are normalized to HTTP 200, the correct MIME type, and absolute relayed segment/key URLs.
