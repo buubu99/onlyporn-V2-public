@@ -2,19 +2,17 @@
 
 A self-hosted Stremio addon fork with Eporner, Porntrex, SpankBang, XVideos, XNXX, xHamster, and JAV HD Porn providers.
 
-## Current release: 2.5.3
+## Current release: 2.5.5
 
-Phase 5 preserves the fully working v2.4.2 provider recovery and adds JAV HD Porn as the seventh provider and eighth catalog.
+OnlyPorn v2.5.5 corrects two live-production regressions confirmed on Render:
 
-- JAV HD Porn catalog, search, categories, pagination, JSON-LD metadata, actors, runtime, and tags.
-- HAR-derived version-2 player bootstrap decoding and `/api/play/` POST transport.
-- A minimal live-compatible JWPlayer sandbox that preserves native JSDOM browser APIs.
-- Safari `curl_cffi` transport for JAV HD Porn catalog, metadata, search, pagination, and player API requests on Render.
-- Dynamic numbered player-host support plus isolated JWPlayer `data-config` capture for protected HLS discovery.
-- Protected Render relay for `streamhls.click` playlists and PNG-wrapped TikTok CDN MPEG-TS segments.
-- SpankBang restored to the exact isolated Phase 4 Safari helper and bootstrap sequence; JAV HD Porn uses a separate helper process.
+- SpankBang homepage bootstrap is now best effort. A Cloudflare challenge on `/` no longer aborts a real catalog or video route that returns HTTP 200.
+- JAV HD Porn now decrypts the inner `reserve[i].data` player values returned by `/api/play/` and evaluates reserve players before the primary player.
+- Reserve player discovery can select the working `video1.javhdporn.net` → `streamhls.click` path when the primary player resolves to a Render-blocked Maxstream CDN.
+- HLS candidates rejected by the protected relay are dropped instead of being exposed as raw, unsupported Stremio links.
+- The existing protected HLS playlist rewriting and PNG-wrapped TikTok MPEG-TS decoding remain unchanged.
 
-See `HOTFIX_2.5.3.md` and `DEPLOY_2.5.3.md`.
+See `HOTFIX_2.5.5.md` and `DEPLOY_2.5.5.md`.
 
 ## Runtime
 
@@ -24,13 +22,12 @@ See `HOTFIX_2.5.3.md` and `DEPLOY_2.5.3.md`.
 ## Commands
 
 ```bash
-npm run test:hotfix253
+npm run test:hotfix255
+npm run test:phase4
 npm run test:phase5
 npm run validate:release
-npm run smoke:live -- https://onlyporn-v2-public-k143.onrender.com 2.5.3
+npm run smoke:live -- https://onlyporn-v2-public-k143.onrender.com 2.5.5
 npm start
 ```
 
-The release validator checks JavaScript and Python syntax, packaging, secret-bearing files, whitespace, catalog descriptors, and all provider regression tests. The live smoke test expects eight catalogs.
-### v2.5.4
-JAVHDPorn JWPlayer capture now uses a marked child-process protocol so live player console output cannot hide the decoded HLS result.
+The release validator checks JavaScript and Python syntax, packaging, secret-bearing files, whitespace, catalog descriptors, and all provider regression tests. Live Render verification remains required because Cloudflare and media-CDN behavior are external runtime dependencies.

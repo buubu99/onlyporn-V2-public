@@ -7,20 +7,86 @@ const { captureJwPlayerSources } = require('./javhdporn-jw-config');
 
 const ROOT = path.resolve(__dirname, '..');
 
-test('SpankBang restores the exact isolated v2.4.2 Safari transport shape', () => {
-  const helper = fs.readFileSync(path.join(ROOT, 'scripts', 'safari_fetch_helper.py'), 'utf8');
-  const client = fs.readFileSync(path.join(ROOT, 'provider', 'safari-impersonation.js'), 'utf8');
-  const provider = fs.readFileSync(path.join(ROOT, 'provider', 'spankbang.js'), 'utf8');
 
-  assert.match(helper, /Persistent curl_cffi Safari transport for SpankBang page requests/);
-  assert.match(helper, /session = requests\.Session\(impersonate=os\.getenv\("SPANKBANG_IMPERSONATE", "safari"\)\)/);
-  assert.match(helper, /ensure_bootstrap\(timeout_seconds\)/);
-  assert.match(helper, /response = session\.get\(HOME_URL/);
-  assert.match(helper, /headers\["Referer"\] = HOME_URL/);
-  assert.doesNotMatch(helper, /PROFILES|javhdporn/i);
-  assert.match(client, /scripts', 'safari_fetch_helper\.py/);
-  assert.doesNotMatch(client, /profile/);
-  assert.match(provider, /require\('\.\/safari-impersonation'\)/);
+function versionAtLeast(actual, minimum) {
+  const current = actual.split('.').map(Number);
+  const required = minimum.split('.').map(Number);
+
+  if (
+    current.length !== 3 ||
+    required.length !== 3 ||
+    current.some(value => !Number.isInteger(value)) ||
+    required.some(value => !Number.isInteger(value))
+  ) {
+    return false;
+  }
+
+  for (let index = 0; index < 3; index += 1) {
+    if (current[index] > required[index]) return true;
+    if (current[index] < required[index]) return false;
+  }
+
+  return true;
+}
+
+test('SpankBang keeps isolated transport while soft-failing a challenged homepage', () => {
+  const helper = fs.readFileSync(
+    path.join(ROOT, 'scripts', 'safari_fetch_helper.py'),
+    'utf8'
+  );
+  const client = fs.readFileSync(
+    path.join(ROOT, 'provider', 'safari-impersonation.js'),
+    'utf8'
+  );
+  const provider = fs.readFileSync(
+    path.join(ROOT, 'provider', 'spankbang.js'),
+    'utf8'
+  );
+
+  assert.match(
+    helper,
+    /Persistent curl_cffi Safari transport for SpankBang page requests/
+  );
+  assert.match(
+    helper,
+    /session = requests\.Session\(impersonate=os\.getenv\("SPANKBANG_IMPERSONATE", "safari"\)\)/
+  );
+  assert.match(
+    helper,
+    /probe_session = requests\.Session\(/
+  );
+  assert.match(
+    helper,
+    /response = probe_session\.get\(\s*HOME_URL,/
+  );
+  assert.match(
+    helper,
+    /response = session\.get\(\s*url,/
+  );
+  assert.match(
+    helper,
+    /if 200 <= response\.status_code < 300 and not challenged:/
+  );
+  assert.match(
+    helper,
+    /headers\["Referer"\] = HOME_URL/
+  );
+  assert.doesNotMatch(
+    helper,
+    /PROFILES|javhdporn/i
+  );
+  assert.match(
+    client,
+    /scripts', 'safari_fetch_helper\.py/
+  );
+  assert.doesNotMatch(
+    client,
+    /profile/
+  );
+  assert.match(
+    provider,
+    /require\('\.\/safari-impersonation'\)/
+  );
 });
 
 test('JAVHDPorn has a separate process, helper, and cookie store', () => {
@@ -94,7 +160,10 @@ test('live-compatible JWPlayer sandbox captures setup after browser feature chec
 
 test('OnlyPorn retains the 2.5.3 transport regression coverage', () => {
   const packageInfo = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-  assert.equal(packageInfo.version, '2.5.4');
+  assert.ok(
+    versionAtLeast(packageInfo.version, '2.5.4'),
+    `Expected version 2.5.4 or newer, detected ${packageInfo.version}`,
+  );
   assert.match(packageInfo.scripts['test:release'], /hotfix-2\.5\.3\.test\.js/);
   assert.equal(packageInfo.dependencies.jsdom, '22.1.0');
   assert.equal(packageInfo.dependencies.jquery, '3.7.1');

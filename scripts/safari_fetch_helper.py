@@ -67,18 +67,40 @@ def safe_headers(raw: Any) -> dict[str, str]:
 
 
 def ensure_bootstrap(timeout_seconds: float) -> None:
-    """Prime the persistent session using the exact successful Safari request shape."""
-    global bootstrapped
+    """Best-effort homepage warmup; the requested route remains authoritative."""
+    global bootstrapped, session
     if bootstrapped:
         return
 
-    response = session.get(HOME_URL, timeout=timeout_seconds, allow_redirects=True)
-    validate_url(str(response.url))
-    if not 200 <= response.status_code < 300:
-        raise RuntimeError(f"SpankBang bootstrap returned HTTP {response.status_code}")
-    if str(response.headers.get("cf-mitigated", "")).lower() == "challenge":
-        raise RuntimeError("SpankBang bootstrap returned a Cloudflare challenge")
-    bootstrapped = True
+    try:
+        # Use a throwaway session so a homepage challenge cannot poison the
+        # persistent session that will request the real catalog/video route.
+        probe_session = requests.Session(
+            impersonate=os.getenv("SPANKBANG_IMPERSONATE", "safari")
+        )
+        for cookie_name, cookie_value in {
+            "sb": "1",
+            "age_verified": "1",
+            "hasVisited": "1",
+        }.items():
+            probe_session.cookies.set(
+                cookie_name, cookie_value, domain="spankbang.com", path="/"
+            )
+
+        response = probe_session.get(
+            HOME_URL, timeout=timeout_seconds, allow_redirects=True
+        )
+        validate_url(str(response.url))
+        challenged = (
+            str(response.headers.get("cf-mitigated", "")).lower() == "challenge"
+        )
+        if 200 <= response.status_code < 300 and not challenged:
+            session = probe_session
+            bootstrapped = True
+    except Exception:
+        # Cloudflare may challenge the homepage while allowing the real catalog/video route.
+        # Continue with the untouched persistent session.
+        return
 
 
 def handle(message: dict[str, Any]) -> dict[str, Any]:
@@ -120,8 +142,11 @@ def handle(message: dict[str, Any]) -> dict[str, Any]:
         if value is not None:
             selected_headers[name] = str(value)
 
-    ok = 200 <= response.status_code < 300
-    if is_home and ok and str(response.headers.get("cf-mitigated", "")).lower() != "challenge":
+    challenged = str(response.headers.get("cf-mitigated", "")).lower() == "challenge"
+    ok = 200 <= response.status_code < 300 and not challenged
+    if ok:
+        # A successful real route proves the persistent session is usable even when
+        # the homepage warmup was challenged.
         bootstrapped = True
 
     return {

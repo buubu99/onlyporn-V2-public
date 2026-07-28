@@ -156,3 +156,10 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 ## 2.5.4
 - Made the JAVHDPorn JWPlayer decoder child protocol immune to console-output pollution.
 - The decoder now emits one marked result and exits immediately after writing it.
+
+## Hotfix 2.5.5
+
+- Made SpankBang homepage bootstrap best effort so a Cloudflare challenge on `/` cannot block a working catalog or video route.
+- Added second-layer decryption for JAV HD Porn `reserve[i].data` player values.
+- Prioritized reserve players before the primary player after live testing showed the primary Maxstream CDN returned HTTP 403 from Render while reserve player zero resolved to `streamhls.click`.
+- Removed raw JAV HLS fallback behavior; candidates rejected by the protected relay are now omitted.

@@ -139,6 +139,37 @@ function collectStrings(value, output = [], context = '') {
   return output;
 }
 
+function decodeReservePlayers(reserve, bootstrap, videoPageUrl) {
+  const values = Array.isArray(reserve) ? reserve : [reserve];
+  const output = [];
+
+  values.forEach((item, index) => {
+    if (typeof item === 'string') {
+      const direct = normalizeSourceValue(item, videoPageUrl);
+      if (direct) output.push({ value: direct, context: `reserve[${index}]` });
+      return;
+    }
+    if (!item || typeof item !== 'object' || typeof item.data !== 'string') return;
+
+    const decrypted = dex(
+      bootstrap.videoId,
+      item.data,
+      false,
+      bootstrap.version
+    );
+    const url = normalizeSourceValue(decrypted, videoPageUrl);
+    if (!url) return;
+
+    const locale = cleanText(item.lo);
+    output.push({
+      value: url,
+      context: locale ? `reserve[${index}] ${locale}` : `reserve[${index}]`,
+    });
+  });
+
+  return output;
+}
+
 function extractPlayerCandidates(html, pageUrl) {
   const $ = load(String(html || ''));
   const candidates = [];
@@ -491,30 +522,40 @@ class JavHdPornProvider extends Provider {
       return [];
     }
 
-    const decoded = [];
+    const primaryCandidates = [];
+    const reserveCandidates = [];
     if (typeof data.data === 'string') {
       const decrypted = dex(bootstrap.videoId, data.data, false, bootstrap.version);
       const primary = normalizeSourceValue(decrypted, videoPageUrl) ? decrypted : data.data;
-      if (primary) decoded.push({ value: primary, context: data.lo || 'primary' });
+      if (primary) primaryCandidates.push({ value: primary, context: data.lo || 'primary' });
     } else if (data.data && typeof data.data === 'object') {
-      collectStrings(data.data, decoded, data.lo || 'primary');
+      collectStrings(data.data, primaryCandidates, data.lo || 'primary');
     }
     if (typeof data.reserve === 'string' && data.reserve) {
+      const reserveText = dex(bootstrap.videoId, data.reserve, false, bootstrap.version);
       try {
-        const reserveText = dex(bootstrap.videoId, data.reserve, false, bootstrap.version);
         const reserve = JSON.parse(reserveText);
-        collectStrings(reserve, decoded, 'reserve');
+        reserveCandidates.push(
+          ...decodeReservePlayers(reserve, bootstrap, videoPageUrl)
+        );
       } catch (error) {
-        const reserveText = dex(bootstrap.videoId, data.reserve, false, bootstrap.version);
         if (normalizeSourceValue(reserveText, videoPageUrl)) {
-          decoded.push({ value: reserveText, context: 'reserve' });
+          reserveCandidates.push({ value: reserveText, context: 'reserve' });
         }
         logger.debug({ provider: this.name, error: error.message }, 'JAVHDPorn reserve player data was not JSON');
       }
     }
 
+    // Reserve players are evaluated first because production testing showed the
+    // primary player can resolve to a Render-blocked CDN while reserve[0]
+    // resolves to the working streamhls/TikTok relay path.
+    const decoded = [...reserveCandidates, ...primaryCandidates];
     logger.debug(
-      { provider: this.name, decodedCandidates: decoded.length },
+      {
+        provider: this.name,
+        decodedCandidates: decoded.length,
+        reservePlayers: reserveCandidates.length,
+      },
       'JAVHDPorn player API decoded'
     );
     return decoded;
@@ -710,16 +751,16 @@ class JavHdPornProvider extends Provider {
         name,
         behaviorHints: { notWebReady: false },
       };
-    } catch {
-      return {
-        type: Provider.TYPE,
-        url: candidate.url,
-        name,
-        behaviorHints: {
-          notWebReady: candidate.kind === 'hls',
-          proxyHeaders: { request: headers },
+    } catch (error) {
+      logger.debug(
+        {
+          provider: this.name,
+          url: sanitizeUrlForLogs(candidate.url),
+          error: error.message,
         },
-      };
+        'JAVHDPorn media candidate was rejected by the protected relay'
+      );
+      return null;
     }
   }
 
@@ -735,7 +776,9 @@ class JavHdPornProvider extends Provider {
         { provider: this.name, mediaCandidates: media.length },
         'JAVHDPorn media discovery completed'
       );
-      const streams = await Promise.all(media.map(candidate => this.streamFromMedia(candidate)));
+      const streams = (await Promise.all(
+        media.map(candidate => this.streamFromMedia(candidate))
+      )).filter(Boolean);
       streams.sort((left, right) =>
         (Number.parseInt(extractResolution(right.name), 10) || 0) -
         (Number.parseInt(extractResolution(left.name), 10) || 0)
@@ -759,6 +802,7 @@ create._test = {
   isoDurationToRuntime,
   normalizePoster,
   normalizeSourceValue,
+  decodeReservePlayers,
   isJavPlayerHost,
 };
 module.exports = create;

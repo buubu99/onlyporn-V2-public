@@ -111,6 +111,7 @@ const requiredFiles = [
   'provider/hotfix-2.5.2.test.js',
   'provider/hotfix-2.5.3.test.js',
   'provider/hotfix-2.5.4.test.js',
+  'provider/hotfix-2.5.5.test.js',
   'provider/javhdporn-jw-config.js',
   'provider/javhdporn-safari-impersonation.js',
   'provider/javhdporn-player.js',

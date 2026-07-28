@@ -8,6 +8,28 @@ const { captureJwPlayerSources } = require('./javhdporn-jw-config');
 
 const ROOT = path.resolve(__dirname, '..');
 
+
+function versionAtLeast(actual, minimum) {
+  const current = actual.split('.').map(Number);
+  const required = minimum.split('.').map(Number);
+
+  if (
+    current.length !== 3 ||
+    required.length !== 3 ||
+    current.some(value => !Number.isInteger(value)) ||
+    required.some(value => !Number.isInteger(value))
+  ) {
+    return false;
+  }
+
+  for (let index = 0; index < 3; index += 1) {
+    if (current[index] > required[index]) return true;
+    if (current[index] < required[index]) return false;
+  }
+
+  return true;
+}
+
 function read(relativePath) {
   return fs.readFileSync(path.join(ROOT, relativePath), 'utf8');
 }
@@ -52,6 +74,9 @@ test('JWPlayer capture emits a marked result and exits immediately', () => {
 
 test('OnlyPorn hotfix release reports version 2.5.4', () => {
   const pkg = require('../package.json');
-  assert.equal(pkg.version, '2.5.4');
+  assert.ok(
+    versionAtLeast(pkg.version, '2.5.4'),
+    `Expected version 2.5.4 or newer, detected ${pkg.version}`,
+  );
   assert.match(pkg.scripts['test:release'], /hotfix-2\.5\.4\.test\.js/);
 });

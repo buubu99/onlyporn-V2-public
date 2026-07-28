@@ -181,3 +181,10 @@ The release is not considered complete until Render returns a non-empty SpankBan
 ## 2.5.4 validation
 - Added a regression test with JSON-shaped console noise before and after JWPlayer setup.
 - Requires full release validation and live Render confirmation of `jwSources > 0`.
+
+## 2.5.5 validation
+
+- The focused suite uses the captured SAMA-251 reserve ciphertext to verify all four second-layer player URLs, including `video1.javhdporn.net` and `hugstream.xyz`.
+- It verifies SpankBang no longer throws when the homepage warmup is challenged.
+- It verifies a blocked Maxstream candidate is not returned raw and a relay-compatible `streamhls.click` reserve candidate remains available.
+- Live acceptance requires a non-empty SpankBang catalog and an OnlyPorn `/media/` JAV stream URL.
