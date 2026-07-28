@@ -121,3 +121,12 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 ## v2.4.2
 
 - Completed XNXX malformed URL repair and protected HLS/MP4 media relay.
+
+## Phase 5 — v2.5.0
+
+- Added the JAV HD Porn provider and eighth catalog with search, category filters, pagination, landscape posters, and opaque provider-scoped IDs.
+- Added JSON-LD metadata extraction for runtime, release year, actors, descriptions, tags, and provider links.
+- Implemented the site's versioned RC4-compatible player bootstrap decoder and form-encoded `/api/play/` request path without executing obfuscated browser JavaScript.
+- Added recursive player-page discovery for MP4/HLS sources, reserve-source handling, explicit unavailable-player rejection, and aggressive banner/preview-media filtering.
+- Extended the protected media relay to approved JAV HD Porn, PornFHD, and StorageXHD domain suffixes while retaining public-address and HTTPS validation.
+- Added request-body support and body-aware request deduplication to the central provider transport.

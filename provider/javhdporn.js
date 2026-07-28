@@ -1,0 +1,595 @@
+const { load } = require('cheerio');
+const logger = require('../logger');
+const mediaRelay = require('../media-relay');
+const { meta } = require('../model');
+const Provider = require('./provider');
+const { dex } = require('./javhdporn-player');
+const {
+  cleanMediaUrl,
+  extractResolution,
+  isDirectMp4,
+  isHls,
+  isPreviewMediaCandidate,
+  normalizeAbsoluteUrl,
+} = require('./media-utils');
+const {
+  findVideoObject,
+  firstString,
+  parseStructuredDataBlocks,
+} = require('./structured-data');
+const { assertSafeHttpsUrl, sanitizeUrlForLogs } = require('./url-security');
+
+const PLAYBACK_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36';
+const DEFAULT_POSTER = 'https://pics.pornfhd.com/404.jpeg';
+const MAX_PLAYER_PAGES = 12;
+const MAX_PLAYER_DEPTH = 3;
+
+const GENRE_ROUTES = new Map([
+  ['Latest', '/v3/category/censored/'],
+  ['Censored', '/v3/category/censored/'],
+  ['Most Viewed', '/v3/category/censored/filter/most-viewed/'],
+  ['English Subtitle', '/v2/category/censored/english-subtitle/'],
+  ['Chinese Subtitle', '/v4/category/chinese-subtitle/'],
+  ['Subtitle Indonesia', '/category/subtitle-indonesia/'],
+  ['Uncensored', '/v2/category/uncensored/'],
+  ['FC2 PPV', '/v1/category/uncensored/fc2-ppv/'],
+  ['Tokyo Hot', '/category/uncensored/tokyo-hot/'],
+  ['Amateur', '/category/amateur/'],
+]);
+
+function cleanText(value) {
+  return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function cleanTitle(value) {
+  return cleanText(value)
+    .replace(/\s*[-|–]\s*JAV\s*HD\s*Porn\s*$/i, '')
+    .trim();
+}
+
+function normalizePoster(value, baseUrl) {
+  const url = normalizeAbsoluteUrl(value, baseUrl);
+  if (!url || /^data:/i.test(url)) return DEFAULT_POSTER;
+  return url;
+}
+
+function structuredDataFromPage($) {
+  return parseStructuredDataBlocks(
+    $('script[type="application/ld+json"]')
+      .toArray()
+      .map(element => $(element).text())
+  );
+}
+
+function isoDurationToRuntime(value) {
+  const match = String(value || '').match(
+    /^P(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+(?:\.\d+)?)S)?)?$/i
+  );
+  if (!match) return '';
+  const minutes =
+    (Number(match[1] || 0) * 24 * 60) +
+    (Number(match[2] || 0) * 60) +
+    Number(match[3] || 0) +
+    Math.ceil(Number(match[4] || 0) / 60);
+  return minutes > 0 ? `${minutes} min` : '';
+}
+
+function normalizeSourceValue(value, baseUrl) {
+  if (typeof value !== 'string') return '';
+  const cleaned = cleanMediaUrl(value).replace(/^['"]|['"]$/g, '');
+  if (!cleaned || /^(?:javascript|data|blob):/i.test(cleaned)) return '';
+  const looksLikeUrl =
+    /^(?:https?:)?\/\//i.test(cleaned) ||
+    /^\.?\//.test(cleaned) ||
+    /\.(?:html?|php|m3u8|mp4)(?:[?#]|$)/i.test(cleaned);
+  if (!looksLikeUrl) return '';
+  if (cleaned.startsWith('//')) return `https:${cleaned}`;
+  return normalizeAbsoluteUrl(cleaned, baseUrl);
+}
+
+function isFallbackPlayerUrl(value) {
+  const lower = String(value || '').toLowerCase();
+  return (
+    /\/(?:black|white|ban|blocked|unavailable)\.html(?:[?#]|$)/i.test(lower) ||
+    lower.includes('streaming-service-is-unavailable')
+  );
+}
+
+function isAdvertisementMedia(value, context = '') {
+  const text = `${value} ${context}`.toLowerCase();
+  return (
+    isPreviewMediaCandidate(value, context) ||
+    /(?:^|[\/_-])(?:ad|ads|advert|banner|preroll|promo)(?:[\/_-]|$)/i.test(text) ||
+    /(?:300x250|728x90|970x90|medium\.mp4|overlay-preview)/i.test(text)
+  );
+}
+
+function isLikelyPlayerPage(value, context = '') {
+  if (isHls(value) || isDirectMp4(value)) return true;
+  const text = `${value} ${context}`.toLowerCase();
+  return (
+    /(?:iframe|player api|reserve|embed)/i.test(context) ||
+    /(?:^|[.\/_-])(?:player|embed|video|stream|watch|play)(?:[.\/_-]|$)/i.test(text) ||
+    /\.(?:html?|php)(?:[?#]|$)/i.test(value)
+  );
+}
+
+function collectStrings(value, output = [], context = '') {
+  if (typeof value === 'string') {
+    output.push({ value, context });
+    return output;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => collectStrings(item, output, `${context}[${index}]`));
+    return output;
+  }
+  if (!value || typeof value !== 'object') return output;
+  for (const [key, item] of Object.entries(value)) {
+    collectStrings(item, output, context ? `${context}.${key}` : key);
+  }
+  return output;
+}
+
+function extractPlayerCandidates(html, pageUrl) {
+  const $ = load(String(html || ''));
+  const candidates = [];
+  const add = (value, context) => {
+    const url = normalizeSourceValue(value, pageUrl);
+    if (
+      !url ||
+      isFallbackPlayerUrl(url) ||
+      isAdvertisementMedia(url, context) ||
+      !isLikelyPlayerPage(url, context)
+    ) return;
+    candidates.push({ url, context });
+  };
+
+  $('iframe[src], video[src], source[src]').each((_, element) => {
+    const tag = element.tagName || element.name || 'element';
+    add($(element).attr('src'), `${tag} src`);
+  });
+  $('a[href]').each((_, element) => {
+    const href = $(element).attr('href');
+    if (/(?:embed|player|stream|watch|play)|\.(?:m3u8|mp4)(?:[?#]|$)/i.test(href || '')) {
+      add(href, 'player anchor');
+    }
+  });
+
+  const scripts = $('script')
+    .toArray()
+    .map(element => $(element).html() || '')
+    .join('\n');
+  const combined = `${String(html || '')}\n${scripts}`;
+
+  const patterns = [
+    /(?:file|src|url|hls|playlist|contentUrl|embedUrl)\s*[:=]\s*['"]([^'"]+)['"]/gi,
+    /(?:setVideoHLS|setVideoUrlHigh|setVideoUrlLow)\s*\(\s*['"]([^'"]+)['"]/gi,
+    /((?:https?:)?\/\/[^\s'"<>\\]+(?:\.m3u8|\.mp4)(?:\?[^\s'"<>\\]*)?)/gi,
+  ];
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(combined)) !== null) add(match[1], 'player script');
+  }
+
+  const structured = structuredDataFromPage($);
+  for (const object of structured) {
+    for (const key of ['contentUrl', 'embedUrl']) {
+      const values = Array.isArray(object?.[key]) ? object[key] : [object?.[key]];
+      values.forEach(value => add(value, `json-ld ${key}`));
+    }
+  }
+
+  const unique = new Map();
+  for (const candidate of candidates) {
+    if (!unique.has(candidate.url)) unique.set(candidate.url, candidate);
+  }
+  return [...unique.values()];
+}
+
+class JavHdPornProvider extends Provider {
+  constructor() {
+    super('https://www.javhdporn.net', 'javhdporn', 24, {
+      allowedPageHosts: ['javhdporn.net', 'video.javhdporn.net'],
+    });
+  }
+
+  static create() {
+    return new JavHdPornProvider();
+  }
+
+  getInitialUrl() {
+    return `${this.baseUrl}/v3/category/censored/`;
+  }
+
+  handleSearch({ extra: { search } }) {
+    const url = new URL(this.baseUrl);
+    url.searchParams.set('s', cleanText(search));
+    return url.toString();
+  }
+
+  handleGenre({ extra: { genre } }) {
+    const route = GENRE_ROUTES.get(cleanText(genre)) || GENRE_ROUTES.get('Latest');
+    return new URL(route, this.baseUrl).toString();
+  }
+
+  handlePagination(url, { extra: { skip, search } }) {
+    const page = Number(this.page(skip));
+    if (page <= 1) return url;
+
+    const parsed = new URL(url, this.baseUrl);
+    if (search || parsed.searchParams.has('s')) {
+      parsed.searchParams.set('paged', String(page));
+      return parsed.toString();
+    }
+
+    parsed.pathname = `${parsed.pathname.replace(/\/?$/, '/') }page/${page}/`.replace(/\/{2,}/g, '/');
+    return parsed.toString();
+  }
+
+  getCatalogMetas(html, pageUrl = this.baseUrl) {
+    const $ = load(html);
+    const results = [];
+    const seen = new Set();
+
+    $('article.thumb-block, .thumb-block.loop-video, .loop-video').each((_, element) => {
+      const root = $(element);
+      const anchor = root.find('a[href*="/video/"]').first();
+      const href = anchor.attr('href');
+      if (!href) return;
+
+      let id;
+      try {
+        const parsed = new URL(href, pageUrl);
+        if (
+          parsed.protocol !== 'https:' ||
+          !this.allowedPageHosts.has(parsed.hostname.toLowerCase()) ||
+          !parsed.pathname.startsWith('/video/')
+        ) return;
+        parsed.search = '';
+        parsed.hash = '';
+        id = parsed.toString();
+      } catch {
+        return;
+      }
+      if (seen.has(id)) return;
+      seen.add(id);
+
+      const image = root.find('img').first();
+      const poster = normalizePoster(
+        image.attr('data-lazy-src') ||
+          image.attr('data-src') ||
+          image.attr('data-wpsrc') ||
+          image.attr('src'),
+        pageUrl
+      );
+      const title = cleanTitle(
+        anchor.attr('title') ||
+          image.attr('alt') ||
+          root.find('h2, h3, .title, .video-title').first().text() ||
+          anchor.text() ||
+          'JAV video'
+      );
+      const description = cleanText(
+        root.find('.duration, .video-duration, .thumb-duration').first().text()
+      );
+
+      results.push(
+        new meta.MetaPreview(id, Provider.TYPE, title, poster, {
+          posterShape: 'landscape',
+          description,
+          videoPageUrl: id,
+        })
+      );
+    });
+
+    return results.slice(0, this.limit);
+  }
+
+  metadataFromPage(id, html) {
+    const $ = load(html);
+    const structured = structuredDataFromPage($);
+    const videoObject = findVideoObject(structured);
+    const article = structured.find(object => String(object?.['@type']).toLowerCase() === 'article');
+
+    const title = cleanTitle(
+      videoObject?.name ||
+        article?.headline ||
+        $('meta[property="og:title"]').attr('content') ||
+        $('h1').first().text() ||
+        'JAV HD Porn video'
+    );
+    const poster = normalizePoster(
+      firstString(videoObject?.thumbnailUrl) ||
+        firstString(videoObject?.image) ||
+        $('meta[property="og:image"]').attr('content') ||
+        $('#video-player img').attr('data-lazy-src') ||
+        $('#video-player img').attr('src'),
+      id
+    );
+    const keywords = [
+      ...(Array.isArray(videoObject?.keywords) ? videoObject.keywords : [videoObject?.keywords]),
+      ...(Array.isArray(article?.keywords) ? article.keywords : [article?.keywords]),
+      ...(Array.isArray(article?.articleSection) ? article.articleSection : [article?.articleSection]),
+    ]
+      .map(cleanText)
+      .filter(Boolean);
+    const actors = (Array.isArray(videoObject?.actor) ? videoObject.actor : [videoObject?.actor])
+      .map(actorValue => cleanText(actorValue?.name || actorValue))
+      .filter(Boolean);
+
+    const links = [];
+    $('a[href*="/tag/"], a[href*="/pornstar/"], a[href*="/studio/"]').each((_, element) => {
+      const name = cleanText($(element).text());
+      const href = $(element).attr('href');
+      if (!name || !href) return;
+      links.push(new meta.MetaLink(name, href.includes('/pornstar/') ? 'Actor' : 'Genre', new URL(href, id).toString()));
+    });
+
+    const response = new meta.MetaResponse(id, Provider.TYPE, title, {
+      links,
+      description: cleanText(videoObject?.description || $('meta[name="description"]').attr('content') || title),
+      poster,
+      background: poster,
+      posterShape: 'landscape',
+      genres: [...new Set(keywords)],
+      extra: {
+        playerVideoId: $('#video-player-area').attr('data-video-id') || '',
+        playerMpu: $('#video-player').attr('data-mpu') || '',
+        playerVersion: $('#video-player').attr('data-ver') || '1',
+      },
+    });
+
+    const runtime = isoDurationToRuntime(videoObject?.duration);
+    if (runtime) response.runtime = runtime;
+    const date = videoObject?.uploadDate || videoObject?.datePublished || article?.datePublished;
+    if (date) response.releaseInfo = String(date).slice(0, 4);
+    if (actors.length) response.cast = actors;
+
+    return response;
+  }
+
+  async getMetadata({ id }) {
+    const html = await this.fetchHtml(id);
+    return this.metadataFromPage(id, html);
+  }
+
+  playerBootstrap(html) {
+    const $ = load(html);
+    return {
+      videoId: cleanText($('#video-player-area').attr('data-video-id')),
+      mpu: cleanText($('#video-player').attr('data-mpu')),
+      version: cleanText($('#video-player').attr('data-ver')) || '1',
+    };
+  }
+
+  async requestPlayerSources(videoPageUrl, bootstrap) {
+    const sources = dex(
+      bootstrap.videoId,
+      bootstrap.mpu,
+      true,
+      bootstrap.version
+    );
+    if (!sources) return [];
+
+    const body = new URLSearchParams({
+      sources,
+      ver: bootstrap.version,
+    }).toString();
+    const data = await this.fetchJson(`${this.baseUrl}/api/play/`, {
+      method: 'POST',
+      data: body,
+      cache: false,
+      cacheKey: `jav-play:${bootstrap.videoId}:${bootstrap.version}`,
+      headers: {
+        Referer: videoPageUrl,
+        Origin: this.baseUrl,
+        'X-Requested-With': 'XMLHttpRequest',
+        'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
+      },
+    });
+
+    if (!data || data.status === false || data.status === 0 || data.status === '0') {
+      logger.warn({ provider: this.name }, 'JAVHDPorn player API reported unavailable media');
+      return [];
+    }
+
+    const decoded = [];
+    if (typeof data.data === 'string') {
+      const decrypted = dex(bootstrap.videoId, data.data, false, bootstrap.version);
+      const primary = normalizeSourceValue(decrypted, videoPageUrl) ? decrypted : data.data;
+      if (primary) decoded.push({ value: primary, context: data.lo || 'primary' });
+    } else if (data.data && typeof data.data === 'object') {
+      collectStrings(data.data, decoded, data.lo || 'primary');
+    }
+    if (typeof data.reserve === 'string' && data.reserve) {
+      try {
+        const reserveText = dex(bootstrap.videoId, data.reserve, false, bootstrap.version);
+        const reserve = JSON.parse(reserveText);
+        collectStrings(reserve, decoded, 'reserve');
+      } catch (error) {
+        const reserveText = dex(bootstrap.videoId, data.reserve, false, bootstrap.version);
+        if (normalizeSourceValue(reserveText, videoPageUrl)) {
+          decoded.push({ value: reserveText, context: 'reserve' });
+        }
+        logger.debug({ provider: this.name, error: error.message }, 'JAVHDPorn reserve player data was not JSON');
+      }
+    }
+
+    logger.debug(
+      { provider: this.name, decodedCandidates: decoded.length },
+      'JAVHDPorn player API decoded'
+    );
+    return decoded;
+  }
+
+  async playbackHeaders(referer, mediaUrl = referer) {
+    const headers = {
+      Referer: referer || `${this.baseUrl}/`,
+      Origin: (() => {
+        try { return new URL(referer || this.baseUrl).origin; } catch { return this.baseUrl; }
+      })(),
+      'User-Agent': PLAYBACK_USER_AGENT,
+    };
+
+    if (typeof this.jar?.getCookieString === 'function') {
+      try {
+        const cookie = await this.jar.getCookieString(mediaUrl || this.baseUrl);
+        if (cookie) headers.Cookie = cookie;
+      } catch {
+        // Cookie forwarding is best effort.
+      }
+    }
+    return headers;
+  }
+
+  async discoverMedia(initial, videoPageUrl) {
+    const queue = [];
+    for (const item of initial) {
+      const url = normalizeSourceValue(item.value, videoPageUrl);
+      if (url && !isFallbackPlayerUrl(url) && !isAdvertisementMedia(url, item.context)) {
+        queue.push({ url, context: item.context || 'player API', referer: videoPageUrl, depth: 0 });
+      }
+    }
+
+    const visited = new Set();
+    const media = new Map();
+
+    while (queue.length && visited.size < MAX_PLAYER_PAGES) {
+      const item = queue.shift();
+      if (!item || visited.has(item.url)) continue;
+      visited.add(item.url);
+
+      if (isHls(item.url) || isDirectMp4(item.url)) {
+        if (!isAdvertisementMedia(item.url, item.context)) {
+          media.set(item.url, { ...item, kind: isHls(item.url) ? 'hls' : 'mp4' });
+        }
+        continue;
+      }
+      if (item.depth >= MAX_PLAYER_DEPTH) continue;
+
+      try {
+        const safeUrl = await assertSafeHttpsUrl(item.url);
+        const headers = await this.playbackHeaders(item.referer, safeUrl);
+
+        try {
+          const probe = await this.request(safeUrl, {
+            method: 'HEAD',
+            responseType: 'text',
+            allowedHosts: null,
+            cache: null,
+            retries: 0,
+            headers,
+          });
+          const contentType = String(probe.headers?.['content-type'] || '').toLowerCase();
+          if (/mpegurl|application\/vnd\.apple/i.test(contentType)) {
+            media.set(probe.finalUrl, { ...item, url: probe.finalUrl, kind: 'hls' });
+            continue;
+          }
+          if (/video\/mp4/i.test(contentType)) {
+            media.set(probe.finalUrl, { ...item, url: probe.finalUrl, kind: 'mp4' });
+            continue;
+          }
+        } catch {
+          // Some player/CDN routes reject HEAD while accepting a normal GET.
+        }
+
+        const html = await this.fetchMediaText(safeUrl, {
+          cache: false,
+          headers,
+        });
+        if (/sorry\s+streaming\s+service\s+is\s+unavailable/i.test(html)) continue;
+        if (String(html).includes('#EXTM3U')) {
+          media.set(safeUrl, { ...item, url: safeUrl, kind: 'hls' });
+          continue;
+        }
+
+        for (const candidate of extractPlayerCandidates(html, safeUrl)) {
+          if (!visited.has(candidate.url)) {
+            queue.push({
+              url: candidate.url,
+              context: candidate.context,
+              referer: safeUrl,
+              depth: item.depth + 1,
+            });
+          }
+        }
+      } catch (error) {
+        logger.debug(
+          { provider: this.name, url: sanitizeUrlForLogs(item.url), error: error.message },
+          'JAVHDPorn player candidate was not readable'
+        );
+      }
+    }
+
+    return [...media.values()];
+  }
+
+  async streamFromMedia(candidate) {
+    const headers = await this.playbackHeaders(candidate.referer, candidate.url);
+    const resolution = extractResolution(candidate.context, candidate.url);
+    const name = `JAV HD Porn ${resolution || (candidate.kind === 'hls' ? 'HLS' : 'MP4')}`;
+
+    try {
+      return {
+        type: Provider.TYPE,
+        url: mediaRelay.register({
+          url: candidate.url,
+          headers,
+          provider: this.name,
+          kind: candidate.kind,
+        }),
+        name,
+        behaviorHints: { notWebReady: false },
+      };
+    } catch {
+      return {
+        type: Provider.TYPE,
+        url: candidate.url,
+        name,
+        behaviorHints: {
+          notWebReady: candidate.kind === 'hls',
+          proxyHeaders: { request: headers },
+        },
+      };
+    }
+  }
+
+  async processStreams({ id }) {
+    try {
+      const html = await this.fetchHtml(id, { cache: false });
+      const bootstrap = this.playerBootstrap(html);
+      if (!bootstrap.videoId || !bootstrap.mpu) return { streams: [] };
+
+      const apiSources = await this.requestPlayerSources(id, bootstrap);
+      const media = await this.discoverMedia(apiSources, id);
+      logger.debug(
+        { provider: this.name, mediaCandidates: media.length },
+        'JAVHDPorn media discovery completed'
+      );
+      const streams = await Promise.all(media.map(candidate => this.streamFromMedia(candidate)));
+      streams.sort((left, right) =>
+        (Number.parseInt(extractResolution(right.name), 10) || 0) -
+        (Number.parseInt(extractResolution(left.name), 10) || 0)
+      );
+      return { streams };
+    } catch (error) {
+      logger.warn({ provider: this.name, error: error.message }, 'JAVHDPorn stream extraction failed');
+      return { streams: [] };
+    }
+  }
+}
+
+const create = JavHdPornProvider.create;
+create._test = {
+  GENRE_ROUTES,
+  cleanTitle,
+  extractPlayerCandidates,
+  isAdvertisementMedia,
+  isFallbackPlayerUrl,
+  isLikelyPlayerPage,
+  isoDurationToRuntime,
+  normalizePoster,
+  normalizeSourceValue,
+};
+module.exports = create;

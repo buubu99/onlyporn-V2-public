@@ -169,10 +169,12 @@ class Provider {
       checkDns = true,
       cache,
       cacheKey,
+      data,
     } = options;
 
     const normalizedMethod = method.toUpperCase();
-    const key = cacheKey || `${normalizedMethod}:${url}`;
+    const requestBodyKey = data == null ? '' : `:${typeof data === 'string' ? data : JSON.stringify(data)}`;
+    const key = cacheKey || `${normalizedMethod}:${url}${requestBodyKey}`;
     if (cache) {
       const cached = cache.get(key);
       if (cached !== undefined) {
@@ -188,6 +190,7 @@ class Provider {
     const operation = (async () => {
       let currentUrl = url;
       let currentMethod = normalizedMethod;
+      let currentData = data;
       let redirects = 0;
       let lastError;
 
@@ -212,6 +215,7 @@ class Provider {
             timeout,
             maxRedirects: 0,
             responseType,
+            data: currentMethod === 'GET' || currentMethod === 'HEAD' ? undefined : currentData,
             validateStatus: () => true,
           });
 
@@ -223,6 +227,7 @@ class Provider {
             currentUrl = new URL(location, currentUrl).toString();
             if (response.status === 303 || ((response.status === 301 || response.status === 302) && currentMethod !== 'GET' && currentMethod !== 'HEAD')) {
               currentMethod = 'GET';
+              currentData = undefined;
             }
             redirects += 1;
             attempt -= 1;
@@ -280,7 +285,7 @@ class Provider {
       responseType: 'text',
       allowedHosts: this.allowedPageHosts,
       cache: rest.cache === false ? null : this.htmlCache,
-      cacheKey: `html:${url}`,
+      cacheKey: rest.cacheKey || `html:${url}`,
     });
 
     return typeof result.data === 'string' ? result.data : String(result.data || '');
@@ -294,7 +299,7 @@ class Provider {
       responseType: 'text',
       allowedHosts: null,
       cache: rest.cache || null,
-      cacheKey: `media:${url}`,
+      cacheKey: rest.cacheKey || `media:${url}`,
     });
     return typeof result.data === 'string' ? result.data : String(result.data || '');
   }
@@ -307,7 +312,7 @@ class Provider {
       responseType: 'json',
       allowedHosts: rest.allowedHosts === undefined ? this.allowedPageHosts : rest.allowedHosts,
       cache: rest.cache === false ? null : this.jsonCache,
-      cacheKey: `json:${url}`,
+      cacheKey: rest.cacheKey || `json:${url}`,
     });
     return result.data;
   }

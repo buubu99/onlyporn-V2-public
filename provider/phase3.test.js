@@ -275,9 +275,10 @@ test('central request layer retries recoverable failures and deduplicates concur
 
 test('manifest catalog IDs are unique and every catalog resolves to its intended provider', () => {
   const ids = catalogs.map(catalog => catalog.id);
-  assert.equal(ids.length, 7);
+  assert.equal(ids.length, 8);
   assert.equal(new Set(ids).size, ids.length);
   assert.ok(ids.includes('spankbang'), 'SpankBang remains declared even when Render is blocked upstream');
+  assert.ok(ids.includes('javhdporn'), 'JAV HD Porn catalog must remain declared');
 
   for (const catalog of catalogs) {
     const expected = catalog.id.split('.')[0];

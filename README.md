@@ -1,16 +1,18 @@
 # OnlyPorn
 
-A self-hosted Stremio addon fork with Eporner, Porntrex, SpankBang, XVideos, XNXX, and xHamster providers.
+A self-hosted Stremio addon fork with Eporner, Porntrex, SpankBang, XVideos, XNXX, xHamster, and JAV HD Porn providers.
 
-## Current release: 2.4.2
+## Current release: 2.5.0
 
-This release keeps the Phase 4 provider recovery, preserves the Eporner and XVideos media relay fixes, and completes XNXX malformed-link and protected HLS/MP4 playback handling.
+Phase 5 preserves the fully working v2.4.2 provider recovery and adds JAV HD Porn as the seventh provider and eighth catalog.
 
-- Eporner signed MP4 playback stays on the Render egress IP and preserves provider cookies/headers.
-- XVideos HLS playlists are normalized to HTTP 200, the correct MIME type, and absolute relayed segment/key URLs.
-- SpankBang Safari `curl_cffi` playback remains unchanged and operational.
+- JAV HD Porn catalog, search, categories, pagination, JSON-LD metadata, actors, runtime, and tags.
+- HAR-derived version-2 player bootstrap decoding and `/api/play/` POST transport.
+- Recursive MP4/HLS discovery with advertisement and unavailable-player rejection.
+- Protected Render media relay support for approved JAV HD Porn and PornFHD media hosts.
+- Existing SpankBang Safari impersonation and Eporner/XVideos/XNXX playback relays remain unchanged.
 
-See `HOTFIX_2.4.1.md` for the diagnosis and implementation details and `DEPLOY_2.4.1.md` for deployment.
+See `PHASE5_RELEASE.md` and `DEPLOY_2.5.0.md`.
 
 ## Runtime
 
@@ -20,9 +22,10 @@ See `HOTFIX_2.4.1.md` for the diagnosis and implementation details and `DEPLOY_2
 ## Commands
 
 ```bash
+npm run test:phase5
 npm run validate:release
-npm run smoke:live -- https://onlyporn-v2-public-k143.onrender.com 2.4.1
+npm run smoke:live -- https://onlyporn-v2-public-k143.onrender.com 2.5.0
 npm start
 ```
 
-The release validator checks JavaScript and Python syntax, packaging, secret-bearing files, whitespace, catalog descriptors, and provider regression tests. The live smoke test requires all seven catalogs to return data unless an explicit `KNOWN_EMPTY_CATALOGS` override is supplied.
+The release validator checks JavaScript and Python syntax, packaging, secret-bearing files, whitespace, catalog descriptors, and all provider regression tests. The live smoke test expects eight catalogs.

@@ -13,6 +13,7 @@ const PROVIDER_SUFFIXES = {
   eporner: ['eporner.com'],
   xvideos: ['xvideos.com', 'xvideos-cdn.com'],
   xnxx: ['xnxx.com', 'xnxx-cdn.com'],
+  javhdporn: ['javhdporn.net', 'pornfhd.com', 'storagexhd.com'],
 };
 
 const SAFE_REQUEST_HEADERS = new Set([

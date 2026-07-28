@@ -5,6 +5,7 @@ const xhamsterCatalogs = require('./xhamster');
 const { catalogs: epornerCatalogs } = require('./eporner');
 const xvideosCatalog = require('./xvideos.json');
 const xnxxCatalog = require('./xnxx.json');
+const javhdpornCatalog = require('./javhdporn.json');
 
 function randomize(catalogs) {
   const arr = catalogs.map((_e, i) => i);
@@ -18,6 +19,7 @@ const catalogNames = [
   'eporner',
   'xvideos',
   'xnxx',
+  'javhdporn',
 ];
 
 const catalogs = [
@@ -26,7 +28,8 @@ const catalogs = [
   ...xhamsterCatalogs,
   porntrexCatalog,
   xvideosCatalog,
-  xnxxCatalog
+  xnxxCatalog,
+  javhdpornCatalog
 ];
 
 const addonEnabled = (id) => {

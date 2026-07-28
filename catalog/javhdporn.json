@@ -1,0 +1,26 @@
+{
+  "type": "movie",
+  "name": "OnlyPorn: JAV HD Porn",
+  "id": "javhdporn",
+  "posterShape": "landscape",
+  "extra": [
+    { "name": "search" },
+    {
+      "name": "genre",
+      "options": [
+        "Latest",
+        "Censored",
+        "Most Viewed",
+        "English Subtitle",
+        "Chinese Subtitle",
+        "Subtitle Indonesia",
+        "Uncensored",
+        "FC2 PPV",
+        "Tokyo Hot",
+        "Amateur"
+      ]
+    },
+    { "name": "skip" }
+  ],
+  "extraSupported": ["search", "genre", "skip"]
+}

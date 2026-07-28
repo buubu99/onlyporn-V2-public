@@ -157,3 +157,9 @@ Live Render/AIOStreams playback remains the final validation because provider si
 ## v2.4.2
 
 - Added XNXX THUMBNUM canonicalization and protected media relay regression coverage.
+
+## Phase 5 validation — v2.5.0
+
+Phase 5 adds `provider/phase5.test.js`. It validates the captured JAV HD Porn version-2 player bootstrap vector, catalog host filtering, JSON-LD metadata, encrypted player API response handling, advertisement rejection, protected relay allowlists, eight-catalog manifest wiring, and deterministic search/category/pagination routes.
+
+The HAR used during development is intentionally excluded from the package. The included fixture contains only minimal synthetic HTML and no browser cookies, analytics identifiers, or request headers.
