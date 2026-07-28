@@ -1,5 +1,6 @@
 const { load } = require('cheerio');
 const logger = require('../logger');
+const mediaRelay = require('../media-relay');
 const { meta } = require('../model');
 const Provider = require('./provider');
 const BoundedTtlCache = require('./cache');
@@ -296,20 +297,21 @@ class XvideosProvider extends Provider {
       { baseUrl: id, allowKnownVideoPath: true }
     );
 
+    const playbackHeaders = {
+      Referer: id,
+      Origin: this.baseUrl,
+      'User-Agent': PLAYBACK_USER_AGENT,
+    };
     const directMp4Streams = directCandidates.map(candidate => ({
       type: Provider.TYPE,
-      url: candidate.url,
+      url: mediaRelay.register({
+        url: candidate.url,
+        headers: playbackHeaders,
+        provider: this.name,
+        kind: 'mp4',
+      }),
       name: `XVideos ${sourceLabel(candidate)}`,
-      behaviorHints: {
-        notWebReady: true,
-        proxyHeaders: {
-          request: {
-            Referer: id,
-            Origin: this.baseUrl,
-            'User-Agent': PLAYBACK_USER_AGENT,
-          },
-        },
-      },
+      behaviorHints: { notWebReady: false },
     }));
 
     const hlsCandidates = [
@@ -412,13 +414,15 @@ class XvideosProvider extends Provider {
               stream.resolution || extractResolution(stream.name, stream.url) || 'HLS';
             return {
               ...stream,
+              url: mediaRelay.register({
+                url: stream.url,
+                headers: requestHeaders,
+                provider: this.name,
+                kind: 'hls',
+              }),
               name: `XVideos ${resolution}`,
               quality: resolution,
-              behaviorHints: {
-                ...(stream.behaviorHints || {}),
-                notWebReady: true,
-                proxyHeaders: { request: requestHeaders },
-              },
+              behaviorHints: { notWebReady: false },
             };
           })
           .sort(

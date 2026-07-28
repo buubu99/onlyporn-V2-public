@@ -5,6 +5,7 @@ const open = require('opn');
 const landingTemplate = require('stremio-addon-sdk/src/landingTemplate');
 const getRouter = require('stremio-addon-sdk/src/getRouter');
 const { addonEnabled } = require('../catalog');
+const mediaRelay = require('../media-relay');
 
 function serveHTTP(addonInterface, opts = {}) {
     if (addonInterface.constructor.name !== 'AddonInterface') {
@@ -12,7 +13,18 @@ function serveHTTP(addonInterface, opts = {}) {
     }
 
     const app = express();
+    app.set('trust proxy', true);
     const router = getRouter(addonInterface);
+
+    app.use((req, _res, next) => {
+        const forwardedProto = String(req.headers['x-forwarded-proto'] || '').split(',')[0].trim();
+        const protocol = forwardedProto || req.protocol || 'http';
+        const host = req.get('host');
+        if (host) mediaRelay.setPublicBase(`${protocol}://${host}`);
+        next();
+    });
+
+    app.all('/media/:token/:filename?', mediaRelay.handleRequest);
 
     app.use('/:resource/:type/:id/:extra?.json', (req, res, next) => {
         const { resource, type, id } = req.params;

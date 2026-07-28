@@ -1,6 +1,7 @@
 require('dotenv').config();
 const { load } = require('cheerio');
 const logger = require('../logger');
+const mediaRelay = require('../media-relay');
 const { meta } = require('../model');
 const Provider = require('./provider');
 const {
@@ -186,17 +187,32 @@ class EpornerProvider extends Provider {
     }
   }
 
-  playbackHints(videoPageUrl) {
-    return {
-      notWebReady: true,
-      proxyHeaders: {
-        request: {
-          Referer: videoPageUrl || `${this.baseUrl}/`,
-          Origin: this.baseUrl,
-          'User-Agent': PLAYBACK_USER_AGENT,
-        },
-      },
+  async playbackHeaders(videoPageUrl, mediaUrl = videoPageUrl) {
+    const headers = {
+      Referer: videoPageUrl || `${this.baseUrl}/`,
+      Origin: this.baseUrl,
+      'User-Agent': PLAYBACK_USER_AGENT,
     };
+
+    if (typeof this.jar?.getCookieString === 'function') {
+      try {
+        const cookie = await this.jar.getCookieString(mediaUrl || this.baseUrl);
+        if (cookie) headers.Cookie = cookie;
+      } catch {
+        // Cookie forwarding is a best-effort compatibility enhancement.
+      }
+    }
+
+    return headers;
+  }
+
+  async relaySource(url, videoPageUrl, kind) {
+    return mediaRelay.register({
+      url,
+      headers: await this.playbackHeaders(videoPageUrl, url),
+      provider: this.name,
+      kind,
+    });
   }
 
   async selectSources(sources, videoPageUrl = `${this.baseUrl}/`) {
@@ -216,12 +232,14 @@ class EpornerProvider extends Provider {
 
     if (direct.length) {
       return {
-        streams: direct.map(candidate => ({
-          url: candidate.url,
-          name: `${candidate.resolution || extractResolution(candidate.label) || 'MP4'} MP4`.replace('MP4 MP4', 'MP4'),
-          type: Provider.TYPE,
-          behaviorHints: this.playbackHints(videoPageUrl),
-        })),
+        streams: await Promise.all(
+          direct.map(async candidate => ({
+            url: await this.relaySource(candidate.url, videoPageUrl, 'mp4'),
+            name: `${candidate.resolution || extractResolution(candidate.label) || 'MP4'} MP4`.replace('MP4 MP4', 'MP4'),
+            type: Provider.TYPE,
+            behaviorHints: { notWebReady: false },
+          }))
+        ),
       };
     }
 
@@ -236,22 +254,33 @@ class EpornerProvider extends Provider {
     if (!hlsCandidates.length) return { streams: [] };
 
     const masterUrl = hlsCandidates[0];
-    const behaviorHints = this.playbackHints(videoPageUrl);
+    const playbackHeaders = await this.playbackHeaders(videoPageUrl, masterUrl);
     try {
       const content = await this.fetchMediaText(masterUrl, {
         cache: false,
-        headers: behaviorHints.proxyHeaders.request,
+        headers: playbackHeaders,
       });
       if (!content.includes('#EXTM3U')) return { streams: [] };
 
-      const variants = this.parseM3u8(content).map(stream => ({
-        ...this.transformStream(masterUrl, stream),
-        behaviorHints,
-      }));
+      const variants = await Promise.all(
+        this.parseM3u8(content).map(async stream => {
+          const transformed = this.transformStream(masterUrl, stream);
+          return {
+            ...transformed,
+            url: await this.relaySource(transformed.url, videoPageUrl, 'hls'),
+            behaviorHints: { notWebReady: false },
+          };
+        })
+      );
       return {
         streams: variants.length
           ? variants
-          : [{ type: Provider.TYPE, url: masterUrl, name: 'HLS', behaviorHints }],
+          : [{
+              type: Provider.TYPE,
+              url: await this.relaySource(masterUrl, videoPageUrl, 'hls'),
+              name: 'HLS',
+              behaviorHints: { notWebReady: false },
+            }],
       };
     } catch (error) {
       logger.warn({ error: error.message }, 'Eporner HLS request failed');

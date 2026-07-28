@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const Provider = require('./provider');
+const mediaRelay = require('../media-relay');
 const { catalogs, catalogNames } = require('../catalog');
 const { loadProvider } = require('./index');
 
@@ -15,6 +16,7 @@ const createXvideos = require('./xvideos');
 const createXnxx = require('./xnxx');
 
 const FIXTURE_ROOT = path.join(__dirname, '..', 'test', 'fixtures');
+mediaRelay.setPublicBase('https://onlyporn.example');
 
 function fixture(...parts) {
   return fs.readFileSync(path.join(FIXTURE_ROOT, ...parts), 'utf8');
@@ -124,7 +126,8 @@ test('saved video fixtures preserve metadata and prefer genuine direct MP4 strea
   });
   assert.equal(xvideosParsed.metaResponse.name, 'Fixture Video');
   assert.equal(xvideosParsed.directMp4Streams[0].name, 'XVideos 1080p MP4');
-  assert.equal(xvideosParsed.videoPageUrl, 'https://cdn.example/xv-master.m3u8');
+  assert.equal(xvideosParsed.videoPageUrl, 'https://hls-fixture.xvideos-cdn.com/xv-master.m3u8');
+  assert.match(xvideosParsed.directMp4Streams[0].url, /^https:\/\/onlyporn\.example\/media\//);
 
   const xnxx = createXnxx();
   const xnxxParsed = xnxx.parseVideoPage({

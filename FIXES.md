@@ -104,3 +104,16 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Repaired malformed XVideos catalog links containing `/THUMBNUM/`, added 404-only canonical URL retries, and forced Referer-aware protected playback for direct MP4 and HLS streams.
 - Rebuilt Porntrex source extraction for current KVS page shapes, including assigned flashvars objects, quoted source keys, HTML sources, Open Graph, JSON-LD, and safe media fallbacks.
 - Added Phase 4 regression tests and Python-aware release validation.
+
+
+## Phase 4 R2 validation correction
+
+- XVideos catalog parsing now accepts both relative and same-origin absolute HTTPS video hrefs while rejecting external hosts and non-HTTPS URLs. This preserves malformed `THUMBNUM` template context so canonical retry candidates can be attempted.
+
+## 2.4.1 — Eporner and XVideos playback relay hotfix
+
+- Added an opaque, short-lived, allowlisted media relay served by OnlyPorn before the Stremio addon router.
+- Routed Eporner MP4/HLS through Render so signed CDN URLs, cookies, and request headers remain in the same provider context instead of redirecting to `na.mp4`.
+- Routed XVideos HLS through Render, normalized playlist responses to HTTP 200 with the HLS MIME type, and rewrote variant/segment/key/map URIs.
+- Preserved Range support for MP4 files and HLS segments while deliberately ignoring Range and conditional caching for playlists.
+- Added six focused hotfix regression tests.

@@ -4,11 +4,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const Provider = require('./provider');
+const mediaRelay = require('../media-relay');
 const createEporner = require('./eporner');
 const createPorntrex = require('./porntrex');
 const createXvideos = require('./xvideos');
 
 const ROOT = path.resolve(__dirname, '..');
+mediaRelay.setPublicBase('https://onlyporn.example');
 
 test('XVideos builds canonical candidates from THUMBNUM catalog templates', () => {
   const malformed =
@@ -54,7 +56,7 @@ test('XVideos preserves template context and retries canonical candidates on 404
       error.response = { status: 404 };
       throw error;
     }
-    return '<html><script>html5player.setVideoUrlHigh(\'https://cdn.example/videos/fixture-1080p.mp4\');</script></html>';
+    return '<html><script>html5player.setVideoUrlHigh(\'https://video-cdn77.xvideos-cdn.com/videos/fixture-1080p.mp4\');</script></html>';
   };
 
   try {
@@ -79,16 +81,14 @@ test('XVideos direct MP4 streams force protected playback headers', () => {
       <meta property="og:title" content="Fixture">
       <meta property="og:image" content="https://thumb-cdn77.xvideos-cdn.com/x.jpg">
       </head><body><script>
-      html5player.setVideoUrlHigh('https://cdn.example/videos/fixture-1080p.mp4');
+      html5player.setVideoUrlHigh('https://video-cdn77.xvideos-cdn.com/videos/fixture-1080p.mp4');
       </script></body></html>`,
   });
 
   assert.equal(parsed.directMp4Streams.length, 1);
   const hints = parsed.directMp4Streams[0].behaviorHints;
-  assert.equal(hints.notWebReady, true);
-  assert.equal(hints.proxyHeaders.request.Referer, 'https://www.xvideos.com/video.test123/fixture');
-  assert.equal(hints.proxyHeaders.request.Origin, 'https://www.xvideos.com');
-  assert.match(hints.proxyHeaders.request['User-Agent'], /Mozilla\/5\.0/);
+  assert.equal(hints.notWebReady, false);
+  assert.match(parsed.directMp4Streams[0].url, /^https:\/\/onlyporn\.example\/media\//);
 });
 
 test('XVideos fetches HLS playlists with protected page headers', async () => {
@@ -98,10 +98,10 @@ test('XVideos fetches HLS playlists with protected page headers', async () => {
     <meta property="og:title" content="HLS Fixture">
     <meta property="og:image" content="https://thumb-cdn77.xvideos-cdn.com/x.jpg">
     </head><body><script>
-    html5player.setVideoHLS('https://cdn.example/xvideos/master.m3u8');
+    html5player.setVideoHLS('https://hls-cdn77.xvideos-cdn.com/xvideos/master.m3u8');
     </script></body></html>`;
   provider.fetchMediaText = async (url, options) => {
-    assert.equal(url, 'https://cdn.example/xvideos/master.m3u8');
+    assert.equal(url, 'https://hls-cdn77.xvideos-cdn.com/xvideos/master.m3u8');
     assert.equal(options.headers.Referer, page);
     assert.equal(options.headers.Origin, 'https://www.xvideos.com');
     return '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=1280x720\n720/index.m3u8';
@@ -112,9 +112,8 @@ test('XVideos fetches HLS playlists with protected page headers', async () => {
 
   const response = await provider.processStreams({ id: page });
   assert.equal(response.streams.length, 1);
-  assert.equal(response.streams[0].url, 'https://cdn.example/xvideos/720/index.m3u8');
-  assert.equal(response.streams[0].behaviorHints.notWebReady, true);
-  assert.equal(response.streams[0].behaviorHints.proxyHeaders.request.Referer, page);
+  assert.match(response.streams[0].url, /^https:\/\/onlyporn\.example\/media\//);
+  assert.equal(response.streams[0].behaviorHints.notWebReady, false);
 });
 
 test('Eporner prefers H264 and forces Referer-aware proxy playback', async () => {
@@ -124,12 +123,12 @@ test('Eporner prefers H264 and forces Referer-aware proxy playback', async () =>
     {
       mp4: {
         av1: {
-          src: 'https://cdn.example/videos/fixture-1080p-av1.mp4',
+          src: 'https://vid-cdn.eporner.com/videos/fixture-1080p-av1.mp4',
           labelShort: '1080p',
           codec: 'av1',
         },
         h264: {
-          src: 'https://cdn.example/videos/fixture-1080p-h264.mp4',
+          src: 'https://vid-cdn.eporner.com/videos/fixture-1080p-h264.mp4',
           labelShort: '1080p',
           codec: 'h264',
         },
@@ -139,18 +138,16 @@ test('Eporner prefers H264 and forces Referer-aware proxy playback', async () =>
   );
 
   assert.equal(response.streams.length, 1);
-  assert.match(response.streams[0].url, /h264/);
+  assert.match(response.streams[0].url, /^https:\/\/onlyporn\.example\/media\//);
   const hints = response.streams[0].behaviorHints;
-  assert.equal(hints.notWebReady, true);
-  assert.equal(hints.proxyHeaders.request.Referer, page);
-  assert.equal(hints.proxyHeaders.request.Origin, 'https://www.eporner.com');
+  assert.equal(hints.notWebReady, false);
 });
 
 test('Eporner fetches HLS playlists with Referer-aware headers', async () => {
   const provider = createEporner();
   const page = 'https://www.eporner.com/video-hls/fixture/';
   provider.fetchMediaText = async (url, options) => {
-    assert.equal(url, 'https://cdn.example/eporner/master.m3u8');
+    assert.equal(url, 'https://vid-cdn.eporner.com/eporner/master.m3u8');
     assert.equal(options.headers.Referer, page);
     assert.equal(options.headers.Origin, 'https://www.eporner.com');
     return '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=1280x720\n720/index.m3u8';
@@ -160,11 +157,11 @@ test('Eporner fetches HLS playlists with Referer-aware headers', async () => {
   ];
 
   const response = await provider.selectSources(
-    { hls: { auto: { src: 'https://cdn.example/eporner/master.m3u8' } } },
+    { hls: { auto: { src: 'https://vid-cdn.eporner.com/eporner/master.m3u8' } } },
     page
   );
-  assert.equal(response.streams[0].url, 'https://cdn.example/eporner/720/index.m3u8');
-  assert.equal(response.streams[0].behaviorHints.proxyHeaders.request.Referer, page);
+  assert.match(response.streams[0].url, /^https:\/\/onlyporn\.example\/media\//);
+  assert.equal(response.streams[0].behaviorHints.notWebReady, false);
 });
 
 test('Porntrex parses modern flashvars variables with quoted source keys', async () => {

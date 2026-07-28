@@ -2,16 +2,15 @@
 
 A self-hosted Stremio addon fork with Eporner, Porntrex, SpankBang, XVideos, XNXX, and xHamster providers.
 
-## Current release: 2.4.0
+## Current release: 2.4.1
 
-This release adds:
+This release keeps the Phase 4 provider recovery and adds an internal, allowlisted media relay for the remaining Eporner and XVideos playback failures.
 
-- Persistent Safari `curl_cffi` transport for SpankBang Cloudflare access.
-- Referer-aware protected playback and H.264 preference for Eporner.
-- XVideos `/THUMBNUM/` catalog URL repair and protected playback headers.
-- Modern KVS source extraction for Porntrex.
+- Eporner signed MP4 playback stays on the Render egress IP and preserves provider cookies/headers.
+- XVideos HLS playlists are normalized to HTTP 200, the correct MIME type, and absolute relayed segment/key URLs.
+- SpankBang Safari `curl_cffi` playback remains unchanged and operational.
 
-See `PHASE4_RELEASE.md` for the implementation details and `DEPLOY_2.4.0.md` for the existing Render-service deployment procedure.
+See `HOTFIX_2.4.1.md` for the diagnosis and implementation details and `DEPLOY_2.4.1.md` for deployment.
 
 ## Runtime
 
@@ -22,7 +21,7 @@ See `PHASE4_RELEASE.md` for the implementation details and `DEPLOY_2.4.0.md` for
 
 ```bash
 npm run validate:release
-npm run smoke:live -- https://onlyporn-v2-public-k143.onrender.com 2.4.0
+npm run smoke:live -- https://onlyporn-v2-public-k143.onrender.com 2.4.1
 npm start
 ```
 

@@ -136,3 +136,20 @@ Packaging validation completed for the 2.4.0 ZIP:
 - The Phase 1, Phase 2, and catalog-hotfix suites completed with 19 passing tests and no failures in the available offline environment.
 - Targeted pure-logic checks passed for XVideos canonical retry order, Eporner codec selection and protected HLS headers, Porntrex literal decoding, the Python helper bootstrap/allowlist protocol, and the Node-to-Python JSON transport.
 - The full Cheerio-backed Phase 3/Phase 4 fixture suites require the normal Node dependency installation and remain part of `npm run validate:release` on Render.
+
+## 2.4.1 playback-relay validation — 2026-07-28
+
+Production logs established two separate remaining failures after 2.4.0:
+
+- Eporner signed media requests were redirected to `static.eporner.com/na.mp4` after the stream moved from Render extraction to the AIOStreams egress path.
+- XVideos HLS playlists reached AIOStreams, but were served as partial `text/plain` responses; the client repeatedly fetched the playlist without requesting segments.
+
+Packaging validation completed for 2.4.1:
+
+- 41 JavaScript files and one Python helper passed syntax validation.
+- The release validator inspected 78 repository files and found no forbidden secret files or trailing whitespace.
+- Six focused media-relay tests passed, covering host allowlists, opaque token storage, HLS URI rewriting, MIME/status normalization, Eporner cookie/header preservation, XVideos relay integration, and route ordering.
+- The available Phase 1, Phase 2, catalog-hotfix, and 2.4.1 focused suites completed with 25 passing tests and no failures.
+- The full Cheerio-backed fixture suite remains part of `npm run validate:release` and is executed after normal dependency installation by the deployment script.
+
+Live Render/AIOStreams playback remains the final validation because provider signatures, CDN redirects, and player behavior are external runtime dependencies.
