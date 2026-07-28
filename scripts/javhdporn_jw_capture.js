@@ -10,10 +10,11 @@ const MAX_INPUT_BYTES = 3 * 1024 * 1024;
 const MAX_SCRIPT_BYTES = 1024 * 1024;
 const MAX_HTML_BYTES = 1024 * 1024;
 const WAIT_MS = 2500;
+const RESULT_PREFIX = '__ONLYPORN_JW_RESULT__:';
 
 function send(payload, status = 0) {
-  process.stdout.write(`${JSON.stringify(payload)}\n`);
-  process.exitCode = status;
+  const line = `${RESULT_PREFIX}${JSON.stringify(payload)}\n`;
+  process.stdout.write(line, () => process.exit(status));
 }
 
 function safeString(value) {
@@ -62,6 +63,26 @@ function collectSources(config) {
   return output;
 }
 
+function quietConsole() {
+  const noop = () => {};
+  return {
+    log: noop,
+    info: noop,
+    warn: noop,
+    error: noop,
+    debug: noop,
+    trace: noop,
+    clear: noop,
+    dir: noop,
+    table: noop,
+    group: noop,
+    groupEnd: noop,
+    time: noop,
+    timeEnd: noop,
+    assert: noop,
+  };
+}
+
 async function main() {
   let raw = '';
   for await (const chunk of process.stdin) {
@@ -96,8 +117,8 @@ async function main() {
   let capturedConfig = null;
   let executionWarning = '';
 
-  // Keep the same minimal browser shape that captured the live player on Render.
-  window.console = console;
+  const sandboxConsole = quietConsole();
+  window.console = sandboxConsole;
   window.gtag = () => {};
   window.open = () => null;
   window.fetch = global.fetch;
@@ -153,7 +174,7 @@ async function main() {
   }
   jwplayer.key = '';
   window.jwplayer = jwplayer;
-  context.console = console;
+  context.console = sandboxConsole;
   context.jwplayer = jwplayer;
   context.$ = jquery;
   context.jQuery = jquery;

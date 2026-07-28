@@ -7,6 +7,7 @@ const { load } = require('cheerio');
 const ROOT = path.resolve(__dirname, '..');
 const CAPTURE_SCRIPT = path.join(ROOT, 'scripts', 'javhdporn_jw_capture.js');
 const MAX_OUTPUT_BYTES = 1024 * 1024;
+const RESULT_PREFIX = '__ONLYPORN_JW_RESULT__:';
 
 function isJavPlayerHost(hostname) {
   return /^video\d*\.javhdporn\.net$/i.test(String(hostname || '').toLowerCase());
@@ -82,10 +83,17 @@ function captureJwPlayerSources({ html, script, playerUrl, timeoutMs = 14_000 })
       if (settled) return;
       let payload;
       try {
-        const line = stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) || '';
-        payload = JSON.parse(line);
+        const line = stdout
+          .split(/\r?\n/)
+          .find(value => value.startsWith(RESULT_PREFIX));
+        if (!line) throw new Error('result marker missing');
+        payload = JSON.parse(line.slice(RESULT_PREFIX.length));
       } catch {
-        finish(new Error(`JAVHDPorn JWPlayer decoder returned invalid JSON${stderr ? `: ${stderr}` : ''}`));
+        const stdoutTail = stdout.trim().slice(-500);
+        const details = [stderr, stdoutTail].filter(Boolean).join(' | ');
+        finish(new Error(
+          `JAVHDPorn JWPlayer decoder returned no protocol result${details ? `: ${details}` : ''}`
+        ));
         return;
       }
 

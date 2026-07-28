@@ -254,7 +254,7 @@ test('OnlyPorn retains the v2.5.2 relay behavior in v2.5.3', () => {
   const packageInfo = JSON.parse(
     fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')
   );
-  assert.equal(packageInfo.version, '2.5.3');
+  assert.equal(packageInfo.version, '2.5.4');
   assert.equal(packageInfo.dependencies.jsdom, '22.1.0');
   assert.equal(packageInfo.dependencies.jquery, '3.7.1');
   assert.match(packageInfo.scripts['test:release'], /hotfix-2\.5\.2\.test\.js/);

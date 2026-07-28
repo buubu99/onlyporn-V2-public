@@ -153,3 +153,6 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Replaced the incompatible production JWPlayer browser stubs with the minimal Render-proven JSDOM environment.
 - Retained dynamic player hosts, encrypted configuration capture, HLS relay rewriting, and PNG-wrapped MPEG-TS decoding.
 - Added explicit live production gates so fixture-only success cannot be reported as a completed provider repair.
+## 2.5.4
+- Made the JAVHDPorn JWPlayer decoder child protocol immune to console-output pollution.
+- The decoder now emits one marked result and exits immediately after writing it.

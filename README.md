@@ -32,3 +32,5 @@ npm start
 ```
 
 The release validator checks JavaScript and Python syntax, packaging, secret-bearing files, whitespace, catalog descriptors, and all provider regression tests. The live smoke test expects eight catalogs.
+### v2.5.4
+JAVHDPorn JWPlayer capture now uses a marked child-process protocol so live player console output cannot hide the decoded HLS result.

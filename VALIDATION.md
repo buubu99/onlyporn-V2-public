@@ -178,3 +178,6 @@ Run `npm run test:hotfix252`, `npm run test:phase5`, then `EXPECTED_VERSION=2.5.
 Run `npm run test:hotfix253`, `npm run test:phase4`, `npm run test:phase5`, then `EXPECTED_VERSION=2.5.3 npm run validate:release`. The focused tests verify byte-compatible SpankBang transport architecture, complete process separation, native browser API preservation in the JWPlayer sandbox, and live-style asynchronous setup capture.
 
 The release is not considered complete until Render returns a non-empty SpankBang catalog, a playable SpankBang stream, a non-empty JAV HD Porn catalog, a decoded JWPlayer source, and a relayed JAV HD Porn stream whose wrapped MPEG-TS segment is served as `video/mp2t`.
+## 2.5.4 validation
+- Added a regression test with JSON-shaped console noise before and after JWPlayer setup.
+- Requires full release validation and live Render confirmation of `jwSources > 0`.

@@ -92,9 +92,9 @@ test('live-compatible JWPlayer sandbox captures setup after browser feature chec
   ]);
 });
 
-test('OnlyPorn hotfix release reports version 2.5.3', () => {
+test('OnlyPorn retains the 2.5.3 transport regression coverage', () => {
   const packageInfo = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
-  assert.equal(packageInfo.version, '2.5.3');
+  assert.equal(packageInfo.version, '2.5.4');
   assert.match(packageInfo.scripts['test:release'], /hotfix-2\.5\.3\.test\.js/);
   assert.equal(packageInfo.dependencies.jsdom, '22.1.0');
   assert.equal(packageInfo.dependencies.jquery, '3.7.1');
