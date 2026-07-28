@@ -17,10 +17,13 @@ const {
 } = require('./structured-data');
 
 const DEFAULT_POSTER = 'https://thumb-cdn77.xvideos-cdn.com/default.jpg';
+const PLAYBACK_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36';
 const HTML_TTL = 1000 * 60 * 5;
 const META_TTL = 1000 * 60 * 5;
 const htmlCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: HTML_TTL });
 const metaCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: META_TTL });
+const resolvedPageCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: META_TTL });
 const inFlight = new Map();
 
 const REGEX = {
@@ -58,6 +61,42 @@ function structuredDataFromPage($) {
   );
 }
 
+
+function xvideosPageCandidates(value, baseUrl = 'https://www.xvideos.com') {
+  let parsed;
+  try {
+    parsed = new URL(value, baseUrl);
+  } catch {
+    return [];
+  }
+
+  parsed.search = '';
+  parsed.hash = '';
+  parsed.pathname = parsed.pathname.replace(/\/{2,}/g, '/').replace(/\/$/, '');
+  const candidates = [];
+  const add = pathname => {
+    const candidate = new URL(parsed.toString());
+    candidate.pathname = pathname.replace(/\/{2,}/g, '/').replace(/\/$/, '');
+    const result = candidate.toString().replace(/\/$/, '');
+    if (!candidates.includes(result)) candidates.push(result);
+  };
+
+  if (/\/THUMBNUM(?:\/|$)/i.test(parsed.pathname)) {
+    // Current catalog HTML can embed a thumbnail template inside the href.
+    // Try only repaired candidates; never send the literal template upstream.
+    add(parsed.pathname.replace(/\/THUMBNUM(?:\/.*)?$/i, ''));
+    add(parsed.pathname.replace(/\/THUMBNUM\//i, '/'));
+    add(parsed.pathname.replace(/\/\d+\/THUMBNUM\//i, '/'));
+  } else {
+    add(parsed.pathname);
+  }
+  return candidates;
+}
+
+function normalizeXvideosPageUrl(value, baseUrl) {
+  return xvideosPageCandidates(value, baseUrl)[0] || '';
+}
+
 function sourceLabel(candidate) {
   if (candidate.resolution) return `${candidate.resolution} MP4`;
   return `${candidate.label || 'Direct'} MP4`;
@@ -78,12 +117,39 @@ class XvideosProvider extends Provider {
     if (inFlight.has(url)) return inFlight.get(url);
 
     const promise = (async () => {
-      const html = await super.fetchHtml(url, { cache: false });
-      if (/cf-chl|just a moment|captcha|access denied/i.test(html)) {
-        throw new Error('XVideos returned a challenge page');
+      const candidates = xvideosPageCandidates(url, this.baseUrl);
+      let lastError;
+
+      for (let index = 0; index < candidates.length; index += 1) {
+        const candidate = candidates[index];
+        try {
+          const html = await super.fetchHtml(candidate, { cache: false });
+          if (/cf-chl|just a moment|captcha|access denied/i.test(html)) {
+            throw new Error('XVideos returned a challenge page');
+          }
+
+          const hasVideoEvidence =
+            /html5player\.|setVideo(?:Url|HLS)|["']VideoObject["']|<video\b/i.test(html);
+          if (candidates.length > 1 && index < candidates.length - 1 && !hasVideoEvidence) {
+            lastError = new Error('XVideos candidate returned a page without a video player');
+            continue;
+          }
+
+          htmlCache.set(url, html);
+          htmlCache.set(candidate, html);
+          resolvedPageCache.set(url, candidate);
+          resolvedPageCache.set(candidate, candidate);
+          if (candidate !== url) {
+            logger.info({ provider: this.name }, 'XVideos repaired malformed catalog URL');
+          }
+          return html;
+        } catch (error) {
+          lastError = error;
+          if (error.response?.status !== 404 && !/HTTP 404/.test(error.message)) throw error;
+        }
       }
-      htmlCache.set(url, html);
-      return html;
+
+      throw lastError || new Error('XVideos page request failed');
     })();
 
     inFlight.set(url, promise);
@@ -125,11 +191,34 @@ class XvideosProvider extends Provider {
 
     $('div.thumb-block a').each((_, element) => {
       const href = $(element).attr('href');
-      if (!href || !href.startsWith('/video')) return;
+      if (!href) return;
 
-      const id = new URL(href, this.baseUrl).toString().split('?')[0].replace(/\/$/, '');
-      if (seen.has(id)) return;
-      seen.add(id);
+      let rawId;
+      try {
+        const parsed = new URL(href, this.baseUrl);
+        if (
+          parsed.protocol !== 'https:' ||
+          !this.allowedPageHosts.has(parsed.hostname.toLowerCase()) ||
+          !parsed.pathname.startsWith('/video')
+        ) {
+          return;
+        }
+        parsed.search = '';
+        parsed.hash = '';
+        rawId = parsed.toString().replace(/\/$/, '');
+      } catch {
+        return;
+      }
+
+      const canonicalId = normalizeXvideosPageUrl(rawId, this.baseUrl);
+      if (!canonicalId) return;
+      if (seen.has(canonicalId)) return;
+      seen.add(canonicalId);
+
+      // Preserve malformed template IDs long enough for fetchHtml() to try every
+      // canonical candidate. The public Stremio ID is opaque, so THUMBNUM is not
+      // exposed as a direct request URL.
+      const id = /\/THUMBNUM(?:\/|$)/i.test(rawId) ? rawId : canonicalId;
 
       const parent = $(element).closest('div.thumb-block');
       const image = parent.find('img').first();
@@ -179,7 +268,8 @@ class XvideosProvider extends Provider {
     if (cached !== undefined) return cached.metaResponse;
 
     const html = await this.fetchHtml(args.id);
-    const parsed = this.parseVideoPage({ id: args.id, html });
+    const resolvedId = resolvedPageCache.get(args.id) || normalizeXvideosPageUrl(args.id, this.baseUrl);
+    const parsed = this.parseVideoPage({ id: resolvedId || args.id, html });
     if (parsed?.metaResponse) metaCache.set(args.id, parsed);
     return parsed.metaResponse;
   }
@@ -210,7 +300,16 @@ class XvideosProvider extends Provider {
       type: Provider.TYPE,
       url: candidate.url,
       name: `XVideos ${sourceLabel(candidate)}`,
-      behaviorHints: { notWebReady: false },
+      behaviorHints: {
+        notWebReady: true,
+        proxyHeaders: {
+          request: {
+            Referer: id,
+            Origin: this.baseUrl,
+            'User-Agent': PLAYBACK_USER_AGENT,
+          },
+        },
+      },
     }));
 
     const hlsCandidates = [
@@ -277,7 +376,8 @@ class XvideosProvider extends Provider {
     let parsed = metaCache.get(id);
     if (parsed === undefined) {
       const html = await this.fetchHtml(id);
-      parsed = this.parseVideoPage({ id, html });
+      const resolvedId = resolvedPageCache.get(id) || normalizeXvideosPageUrl(id, this.baseUrl);
+      parsed = this.parseVideoPage({ id: resolvedId || id, html });
       if (parsed?.metaResponse) metaCache.set(id, parsed);
     }
 
@@ -286,26 +386,60 @@ class XvideosProvider extends Provider {
     }
 
     if (!parsed?.videoPageUrl) return { streams: [] };
-    const response = await super.getStreams({ videoPageUrl: parsed.videoPageUrl });
-    response.streams = (response.streams || [])
-      .map(stream => {
-        const resolution =
-          stream.resolution || extractResolution(stream.name, stream.url) || 'unknown';
-        return {
-          ...stream,
-          name: `XVideos ${resolution}`,
-          quality: resolution,
-        };
-      })
-      .sort(
-        (left, right) =>
-          (Number.parseInt(right.quality, 10) || 0) -
-          (Number.parseInt(left.quality, 10) || 0)
-      );
-    return response;
+
+    const requestHeaders = {
+      Referer: resolvedPageCache.get(id) || normalizeXvideosPageUrl(id, this.baseUrl) || id,
+      Origin: this.baseUrl,
+      'User-Agent': PLAYBACK_USER_AGENT,
+    };
+
+    try {
+      const content = await this.fetchMediaText(parsed.videoPageUrl, {
+        cache: false,
+        headers: requestHeaders,
+      });
+      if (!content.includes('#EXTM3U')) return { streams: [] };
+
+      const parsedVariants = this.parseM3u8(content);
+      const sourceStreams = parsedVariants.length
+        ? parsedVariants.map(stream => this.transformStream(parsed.videoPageUrl, stream))
+        : [{ type: Provider.TYPE, url: parsed.videoPageUrl, name: 'HLS' }];
+
+      return {
+        streams: sourceStreams
+          .map(stream => {
+            const resolution =
+              stream.resolution || extractResolution(stream.name, stream.url) || 'HLS';
+            return {
+              ...stream,
+              name: `XVideos ${resolution}`,
+              quality: resolution,
+              behaviorHints: {
+                ...(stream.behaviorHints || {}),
+                notWebReady: true,
+                proxyHeaders: { request: requestHeaders },
+              },
+            };
+          })
+          .sort(
+            (left, right) =>
+              (Number.parseInt(right.quality, 10) || 0) -
+              (Number.parseInt(left.quality, 10) || 0)
+          ),
+      };
+    } catch (error) {
+      logger.warn({ provider: this.name, error: error.message }, 'XVideos HLS request failed');
+      return { streams: [] };
+    }
   }
 }
 
 const create = XvideosProvider.create;
-create._test = { cleanTitle, normalizePoster, structuredDataFromPage };
+create._test = {
+  cleanTitle,
+  normalizePoster,
+  normalizeXvideosPageUrl,
+  structuredDataFromPage,
+  xvideosPageCandidates,
+};
 module.exports = create;

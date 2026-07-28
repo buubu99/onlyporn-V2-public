@@ -109,3 +109,30 @@ Static validation completed in the packaging environment:
 The packaging environment could not retrieve npm dependencies from its package gateway, so the dependency-backed Phase 3 fixture suite could not be executed there. The deployment command intentionally runs `npm install` and `npm run validate:release` before creating the Git commit. Any test failure stops the script before GitHub or Render is changed.
 
 After Render becomes Live, run the included live smoke test. SpankBang is retained in the manifest but is currently a known empty catalog on Render because direct tests from both Singapore and Oregon received upstream Cloudflare HTTP 403 responses.
+
+## 2.4.0 Phase 4 validation — 2026-07-28
+
+Phase 4 targets the failures captured from the live 2.3.0 deployment:
+
+- SpankBang catalog HTTP 403 from ordinary Node requests.
+- Eporner anti-hotlink placeholder playback.
+- XVideos metadata HTTP 404 caused by `/THUMBNUM/` in a catalog URL.
+- Porntrex pages yielding no genuine stream candidates.
+
+The release includes offline regression coverage for:
+
+- XVideos canonical page-ID repair and protected direct-MP4 playback headers.
+- Eporner H.264 preference and video-page Referer propagation.
+- Porntrex modern `flashvars`/quoted-key source extraction and stream ordering.
+- Permanent SpankBang `curl_cffi==0.15.0` Safari transport packaging.
+
+Production evidence already established that Safari impersonation returns HTTP 200 for the SpankBang homepage and trending catalog from the live Singapore Render instance. Full catalog-to-playback verification must still be performed after deploying version 2.4.0 because provider HTML, CDN authorization, and AIOStreams proxy behavior are external runtime dependencies.
+
+Packaging validation completed for the 2.4.0 ZIP:
+
+- 39 JavaScript files passed `node --check`.
+- The Python Safari helper passed AST syntax validation.
+- The release validator inspected 76 source files and found no trailing whitespace, forbidden secret-bearing files, or missing release components.
+- The Phase 1, Phase 2, and catalog-hotfix suites completed with 19 passing tests and no failures in the available offline environment.
+- Targeted pure-logic checks passed for XVideos canonical retry order, Eporner codec selection and protected HLS headers, Porntrex literal decoding, the Python helper bootstrap/allowlist protocol, and the Node-to-Python JSON transport.
+- The full Cheerio-backed Phase 3/Phase 4 fixture suites require the normal Node dependency installation and remain part of `npm run validate:release` on Render.

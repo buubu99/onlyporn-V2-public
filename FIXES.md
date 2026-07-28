@@ -96,3 +96,11 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Added a release validator and live deployment smoke-test command.
 - Made production logging configurable through environment values.
 - Corrected optional local launch/install support by loading `opn`.
+
+## 2.4.0 — SpankBang, Eporner, XVideos, and Porntrex recovery
+
+- Added a persistent `curl_cffi==0.15.0` Safari-impersonation helper for SpankBang page requests; the helper is installed permanently during package `postinstall` and is restricted to approved SpankBang HTTPS hosts.
+- Added Eporner Referer/Origin/User-Agent proxy headers, forced protected playback, and H.264/AVC preference over AV1/HEVC/VP9 at equal resolution.
+- Repaired malformed XVideos catalog links containing `/THUMBNUM/`, added 404-only canonical URL retries, and forced Referer-aware protected playback for direct MP4 and HLS streams.
+- Rebuilt Porntrex source extraction for current KVS page shapes, including assigned flashvars objects, quoted source keys, HTML sources, Open Graph, JSON-LD, and safe media fallbacks.
+- Added Phase 4 regression tests and Python-aware release validation.

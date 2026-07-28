@@ -1,26 +1,29 @@
 # OnlyPorn
-The Hotfixed Version of the Original Onlyporn Addon authored by Mast3rCh1ef in his Original Repo:(https://github.com/Mast3rCh1ef/onlyporn)
 
-This build contains four major websites as its provider for streams directly from their domains...which are...
-Eporner, Porntrex, Spankbang, Xvideos, XNXX and Xhamster.
+A self-hosted Stremio addon fork with Eporner, Porntrex, SpankBang, XVideos, XNXX, and xHamster providers.
 
-Supports Playback upto 4k depending on the video...
+## Current release: 2.4.0
 
-Has stable personal logging for the user and has no analytics to protect privacy...
+This release adds:
 
-Currently self-deployment ready...
+- Persistent Safari `curl_cffi` transport for SpankBang Cloudflare access.
+- Referer-aware protected playback and H.264 preference for Eporner.
+- XVideos `/THUMBNUM/` catalog URL repair and protected playback headers.
+- Modern KVS source extraction for Porntrex.
 
-## Testing
-You need `yarn`
-[testing.md#testing-in-stremio-app](https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/testing.md#testing-in-stremio-app)
+See `PHASE4_RELEASE.md` for the implementation details and `DEPLOY_2.4.0.md` for the existing Render-service deployment procedure.
 
-https://github.com/Stremio/stremio-addon-sdk
+## Runtime
 
-## 2.3.0 verification commands
+- Node.js 20.x
+- Python 3 with `curl_cffi==0.15.0`, installed automatically in a project-local virtual environment by `postinstall`
+
+## Commands
 
 ```bash
 npm run validate:release
-npm run smoke:live -- https://onlyporn-v2-public-k143.onrender.com 2.3.0
+npm run smoke:live -- https://onlyporn-v2-public-k143.onrender.com 2.4.0
+npm start
 ```
 
-The release validator runs syntax, packaging, secret-file, whitespace, manifest, and all regression tests before deployment. The live smoke test checks the Render manifest, catalog output, metadata completeness, duplicate IDs, and page-2 repetition. SpankBang remains in the manifest, but Render requests are currently blocked upstream by Cloudflare in both tested Render regions.
+The release validator checks JavaScript and Python syntax, packaging, secret-bearing files, whitespace, catalog descriptors, and provider regression tests. The live smoke test requires all seven catalogs to return data unless an explicit `KNOWN_EMPTY_CATALOGS` override is supplied.

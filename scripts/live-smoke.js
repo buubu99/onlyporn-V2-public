@@ -6,7 +6,7 @@ const baseInput = process.argv[2] || process.env.LIVE_BASE_URL || 'https://onlyp
 const expectedVersion = process.argv[3] || process.env.EXPECTED_VERSION || packageInfo.version;
 const baseUrl = new URL(baseInput);
 const knownEmpty = new Set(
-  String(process.env.KNOWN_EMPTY_CATALOGS || 'spankbang')
+  String(process.env.KNOWN_EMPTY_CATALOGS || '')
     .split(',')
     .map(value => value.trim())
     .filter(Boolean)
@@ -61,7 +61,7 @@ function providerName(catalogId) {
 
   for (const catalog of catalogs) {
     const id = catalog.id;
-    const firstUrl = endpoint(`/catalog/movie/${encodeURIComponent(id)}.json?phase3=${Date.now()}`);
+    const firstUrl = endpoint(`/catalog/movie/${encodeURIComponent(id)}.json?phase4=${Date.now()}`);
     try {
       const first = await getJson(firstUrl);
       const firstMetas = Array.isArray(first.metas) ? first.metas : [];
@@ -85,7 +85,7 @@ function providerName(catalogId) {
       let pageNote = '';
       if (limit) {
         const secondUrl = endpoint(
-          `/catalog/movie/${encodeURIComponent(id)}/skip=${limit}.json?phase3=${Date.now()}`
+          `/catalog/movie/${encodeURIComponent(id)}/skip=${limit}.json?phase4=${Date.now()}`
         );
         const second = await getJson(secondUrl);
         const secondMetas = Array.isArray(second.metas) ? second.metas : [];

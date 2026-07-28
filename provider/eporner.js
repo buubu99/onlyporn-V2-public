@@ -16,6 +16,16 @@ const {
 } = require('./eporner-routing');
 const { firstString } = require('./structured-data');
 
+const PLAYBACK_USER_AGENT =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36';
+
+function codecPenalty(...values) {
+  const text = values.filter(Boolean).join(' ').toLowerCase();
+  if (/\b(?:av1|av01|hevc|h265|h\.265|vp9|vp09)\b/.test(text)) return 1000;
+  if (/\b(?:h264|h\.264|avc|avc1)\b/.test(text)) return 0;
+  return 100;
+}
+
 function firstJsonLdObject($) {
   let result = null;
   $('script[type="application/ld+json"]').each((_, element) => {
@@ -162,21 +172,40 @@ class EpornerProvider extends Provider {
     const url = `${this.baseUrl}/xhr/video/${encodeURIComponent(videoId)}?hash=${encodeURIComponent(hash)}&domain=www.eporner.com&pixelRatio=2&playerWidth=0&playerHeight=0&fallback=false&embed=false&supportedFormats=hls,dash,h265,vp9,av1,mp4`;
 
     try {
-      const data = await this.fetchJson(url, { cache: false });
-      return await this.selectSources(data?.sources || {});
+      const data = await this.fetchJson(url, {
+        cache: false,
+        headers: {
+          Referer: metadata.id,
+          Origin: this.baseUrl,
+        },
+      });
+      return await this.selectSources(data?.sources || {}, metadata.id);
     } catch (error) {
       logger.warn({ error: error.message }, 'Eporner source request failed');
       return { streams: [] };
     }
   }
 
-  async selectSources(sources) {
+  playbackHints(videoPageUrl) {
+    return {
+      notWebReady: true,
+      proxyHeaders: {
+        request: {
+          Referer: videoPageUrl || `${this.baseUrl}/`,
+          Origin: this.baseUrl,
+          'User-Agent': PLAYBACK_USER_AGENT,
+        },
+      },
+    };
+  }
+
+  async selectSources(sources, videoPageUrl = `${this.baseUrl}/`) {
     const mp4Candidates = Object.entries(sources?.mp4 || {}).map(
-      ([label, value], priority) => ({
+      ([label, value], index) => ({
         url: value?.src,
         label: value?.labelShort || value?.label || label,
-        context: label,
-        priority,
+        context: [label, value?.codec, value?.type, value?.format].filter(Boolean).join(' '),
+        priority: codecPenalty(label, value?.codec, value?.type, value?.format) + index,
       })
     );
 
@@ -191,7 +220,7 @@ class EpornerProvider extends Provider {
           url: candidate.url,
           name: `${candidate.resolution || extractResolution(candidate.label) || 'MP4'} MP4`.replace('MP4 MP4', 'MP4'),
           type: Provider.TYPE,
-          behaviorHints: { notWebReady: false },
+          behaviorHints: this.playbackHints(videoPageUrl),
         })),
       };
     }
@@ -205,7 +234,29 @@ class EpornerProvider extends Provider {
       .filter(value => value && isHls(value));
 
     if (!hlsCandidates.length) return { streams: [] };
-    return super.getStreams({ videoPageUrl: hlsCandidates[0] });
+
+    const masterUrl = hlsCandidates[0];
+    const behaviorHints = this.playbackHints(videoPageUrl);
+    try {
+      const content = await this.fetchMediaText(masterUrl, {
+        cache: false,
+        headers: behaviorHints.proxyHeaders.request,
+      });
+      if (!content.includes('#EXTM3U')) return { streams: [] };
+
+      const variants = this.parseM3u8(content).map(stream => ({
+        ...this.transformStream(masterUrl, stream),
+        behaviorHints,
+      }));
+      return {
+        streams: variants.length
+          ? variants
+          : [{ type: Provider.TYPE, url: masterUrl, name: 'HLS', behaviorHints }],
+      };
+    } catch (error) {
+      logger.warn({ error: error.message }, 'Eporner HLS request failed');
+      return { streams: [] };
+    }
   }
 }
 

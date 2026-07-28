@@ -1,21 +1,24 @@
 {
   "name": "OnlyPorn",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Use your TV remote to its full potential!",
   "license": "MIT",
   "scripts": {
     "start": "node server.js",
+    "install:python": "node scripts/install-python-deps.js",
+    "postinstall": "npm run install:python",
     "web": "LOG_ENABLED=true LOG_LEVEL=info yarn start -- --launch",
     "app": "LOG_ENABLED=true LOG_LEVEL=info yarn start -- --install",
     "test": "LOG_ENABLED=true LOG_LEVEL=info node --test",
     "dev": "LOG_ENABLED=true LOG_LEVEL=info nodemon server.js",
     "test:phase1": "node --test provider/phase1.test.js",
     "test:phase2": "node --test provider/phase2.test.js",
-    "test:release": "node --test provider/phase1.test.js provider/phase2.test.js provider/catalog-hotfix.test.js provider/phase3.test.js",
+    "test:release": "node --test provider/phase1.test.js provider/phase2.test.js provider/catalog-hotfix.test.js provider/phase3.test.js provider/phase4.test.js",
     "test:hotfix": "node --test provider/catalog-hotfix.test.js",
     "test:phase3": "node --test provider/phase3.test.js",
     "validate:release": "node scripts/validate-release.js && npm run test:release",
-    "smoke:live": "node scripts/live-smoke.js"
+    "smoke:live": "node scripts/live-smoke.js",
+    "test:phase4": "node --test provider/phase4.test.js"
   },
   "dependencies": {
     "axios": "^1.13.6",

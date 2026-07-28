@@ -5,6 +5,8 @@ const Provider = require('./provider');
 const BoundedTtlCache = require('./cache');
 const { parseAssignedObjectStringValues } = require('./js-literal');
 const { isBlockedSpankbangHtml } = require('./challenge-detection');
+const safariImpersonation = require('./safari-impersonation');
+const { assertSafeHttpsUrl, sanitizeUrlForLogs } = require('./url-security');
 const {
   cleanMediaUrl,
   extractResolution,
@@ -74,25 +76,42 @@ class SpankbangProvider extends Provider {
   }
 
   async fetchHtml(url) {
-    const html = await super.fetchHtml(url, {
-      cache: false,
-      headers: {
-        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Cache-Control': 'no-cache',
-        Pragma: 'no-cache',
-        Referer: 'https://spankbang.com/',
-        Origin: 'https://spankbang.com',
-        Cookie: 'sb=1; age_verified=1; hasVisited=1;',
-        'Upgrade-Insecure-Requests': '1',
-      },
+    const safeUrl = await assertSafeHttpsUrl(url, {
+      allowedHosts: this.allowedPageHosts,
     });
 
-    if (isBlockedSpankbangHtml(html)) {
-      throw new Error('SpankBang returned a verified challenge page');
-    }
+    try {
+      const response = await safariImpersonation.fetchText(safeUrl, {
+        timeoutMs: 30_000,
+        maxBytes: 6 * 1024 * 1024,
+      });
 
-    return html;
+      const html = response.data;
+      if (isBlockedSpankbangHtml(html)) {
+        throw new Error('SpankBang returned a verified challenge page');
+      }
+
+      logger.debug(
+        {
+          provider: this.name,
+          url: sanitizeUrlForLogs(response.finalUrl || safeUrl),
+          status: response.status,
+          cfRay: response.headers?.['cf-ray'],
+        },
+        'SpankBang Safari request succeeded'
+      );
+      return html;
+    } catch (error) {
+      logger.warn(
+        {
+          provider: this.name,
+          url: sanitizeUrlForLogs(safeUrl),
+          error: error.message,
+        },
+        'SpankBang Safari request failed'
+      );
+      throw error;
+    }
   }
 
   handleGenre({ extra }) {

@@ -7,8 +7,18 @@ const path = require('node:path');
 const ROOT = path.resolve(__dirname, '..');
 const packageInfo = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
 const EXPECTED_VERSION = process.env.EXPECTED_VERSION || packageInfo.version;
-const TEXT_EXTENSIONS = new Set(['.js', '.json', '.md', '.mjs', '.yml', '.yaml', '.html', '.txt']);
-const SKIP_DIRECTORIES = new Set(['.git', 'node_modules']);
+const TEXT_EXTENSIONS = new Set([
+  '.js',
+  '.json',
+  '.md',
+  '.mjs',
+  '.py',
+  '.yml',
+  '.yaml',
+  '.html',
+  '.txt',
+]);
+const SKIP_DIRECTORIES = new Set(['.git', '.python-venv', '__pycache__', 'node_modules']);
 const errors = [];
 const files = [];
 
@@ -36,6 +46,23 @@ for (const file of files.filter(file => path.extname(file) === '.js')) {
     execFileSync(process.execPath, ['--check', file], { stdio: 'pipe' });
   } catch (error) {
     errors.push(`JavaScript syntax failed: ${relative(file)}\n${String(error.stderr || error.message)}`);
+  }
+}
+
+const python = process.env.PYTHON_BIN || 'python3';
+for (const file of files.filter(file => path.extname(file) === '.py')) {
+  try {
+    execFileSync(
+      python,
+      [
+        '-c',
+        'import ast,pathlib,sys; p=pathlib.Path(sys.argv[1]); ast.parse(p.read_text(encoding="utf-8"), filename=str(p))',
+        file,
+      ],
+      { stdio: 'pipe' }
+    );
+  } catch (error) {
+    errors.push(`Python syntax failed: ${relative(file)}\n${String(error.stderr || error.message)}`);
   }
 }
 
@@ -78,7 +105,12 @@ const requiredFiles = [
   'provider/phase2.test.js',
   'provider/catalog-hotfix.test.js',
   'provider/phase3.test.js',
+  'provider/phase4.test.js',
+  'provider/safari-impersonation.js',
+  'requirements.txt',
+  'scripts/install-python-deps.js',
   'scripts/live-smoke.js',
+  'scripts/safari_fetch_helper.py',
   'test/fixtures/hls/master.m3u8',
 ];
 for (const required of requiredFiles) {
@@ -91,6 +123,8 @@ if (errors.length) {
   process.exit(1);
 }
 
+const jsCount = files.filter(file => path.extname(file) === '.js').length;
+const pyCount = files.filter(file => path.extname(file) === '.py').length;
 console.log(`Release validation passed for OnlyPorn ${packageInfo.version}.`);
-console.log(`${files.filter(file => path.extname(file) === '.js').length} JavaScript files passed syntax checks.`);
+console.log(`${jsCount} JavaScript files and ${pyCount} Python files passed syntax checks.`);
 console.log(`${files.length} repository files inspected; no forbidden secret files or trailing whitespace found.`);
