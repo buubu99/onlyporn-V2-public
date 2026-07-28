@@ -71,10 +71,10 @@ test('JAV HD Porn playback headers forward Safari-session cookies', async () => 
   }
 });
 
-test('OnlyPorn hotfix release reports version 2.5.1', () => {
+test('OnlyPorn retains the 2.5.1 Safari transport regression coverage', () => {
   const packageInfo = JSON.parse(
     fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')
   );
-  assert.equal(packageInfo.version, '2.5.1');
+  assert.match(packageInfo.version, /^2\.5\.[1-9]\d*$/);
   assert.match(packageInfo.scripts['test:release'], /hotfix-2\.5\.1\.test\.js/);
 });

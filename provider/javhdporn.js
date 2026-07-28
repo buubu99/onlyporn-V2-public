@@ -1,10 +1,16 @@
 const { load } = require('cheerio');
 const logger = require('../logger');
+const BoundedTtlCache = require('./cache');
 const mediaRelay = require('../media-relay');
 const { meta } = require('../model');
 const Provider = require('./provider');
 const safariImpersonation = require('./safari-impersonation');
 const { dex } = require('./javhdporn-player');
+const {
+  captureJwPlayerSources,
+  getPlayerConfigMetadata,
+  isJavPlayerHost,
+} = require('./javhdporn-jw-config');
 const {
   cleanMediaUrl,
   extractResolution,
@@ -25,6 +31,7 @@ const PLAYBACK_USER_AGENT =
 const DEFAULT_POSTER = 'https://pics.pornfhd.com/404.jpeg';
 const MAX_PLAYER_PAGES = 12;
 const MAX_PLAYER_DEPTH = 3;
+const PLAYER_SCRIPT_MAX_BYTES = 1024 * 1024;
 
 const GENRE_ROUTES = new Map([
   ['Latest', '/v3/category/censored/'],
@@ -193,6 +200,20 @@ class JavHdPornProvider extends Provider {
     super('https://www.javhdporn.net', 'javhdporn', 24, {
       allowedPageHosts: ['javhdporn.net', 'video.javhdporn.net'],
     });
+    this.playerScriptCache = new BoundedTtlCache({
+      maxEntries: 12,
+      ttlMs: 15 * 60 * 1000,
+    });
+  }
+
+  approveDynamicPlayerHost(url) {
+    try {
+      const hostname = new URL(url).hostname.toLowerCase();
+      if (isJavPlayerHost(hostname)) this.allowedPageHosts.add(hostname);
+      return hostname;
+    } catch {
+      return '';
+    }
   }
 
   static create() {
@@ -204,6 +225,7 @@ class JavHdPornProvider extends Provider {
   }
 
   async fetchSafariResponse(url, options = {}) {
+    this.approveDynamicPlayerHost(url);
     const safeUrl = await assertSafeHttpsUrl(url, {
       allowedHosts: this.allowedPageHosts,
     });
@@ -264,6 +286,7 @@ class JavHdPornProvider extends Provider {
   }
 
   async fetchSafariJson(url, options = {}) {
+    this.approveDynamicPlayerHost(url);
     const safeUrl = await assertSafeHttpsUrl(url, {
       allowedHosts: this.allowedPageHosts,
     });
@@ -499,6 +522,44 @@ class JavHdPornProvider extends Provider {
     return decoded;
   }
 
+  async encryptedJwPlayerCandidates(html, playerUrl) {
+    const metadata = getPlayerConfigMetadata(html, playerUrl);
+    if (!metadata.encryptedConfig || !metadata.mainScriptUrl) return [];
+
+    this.approveDynamicPlayerHost(metadata.mainScriptUrl);
+    let mainScript = this.playerScriptCache.get(metadata.mainScriptUrl);
+    if (mainScript === undefined) {
+      const headers = await this.playbackHeaders(playerUrl, metadata.mainScriptUrl);
+      const response = await this.fetchSafariResponse(metadata.mainScriptUrl, {
+        headers,
+        maxBytes: PLAYER_SCRIPT_MAX_BYTES,
+      });
+      mainScript = String(response.data || '');
+      this.playerScriptCache.set(metadata.mainScriptUrl, mainScript);
+    }
+
+    const captured = await captureJwPlayerSources({
+      html,
+      script: mainScript,
+      playerUrl,
+    });
+    if (captured.executionWarning) {
+      logger.debug(
+        { provider: this.name, warning: captured.executionWarning },
+        'JAVHDPorn JWPlayer decoder completed with a non-fatal warning'
+      );
+    }
+    logger.debug(
+      { provider: this.name, jwSources: captured.sources.length },
+      'JAVHDPorn encrypted JWPlayer configuration decoded'
+    );
+
+    return captured.sources.map(source => ({
+      url: source.url,
+      context: source.label || source.type || 'JWPlayer source',
+    }));
+  }
+
   async playbackHeaders(referer, mediaUrl = referer) {
     const headers = {
       Referer: referer || `${this.baseUrl}/`,
@@ -548,6 +609,7 @@ class JavHdPornProvider extends Provider {
       if (item.depth >= MAX_PLAYER_DEPTH) continue;
 
       try {
+        this.approveDynamicPlayerHost(item.url);
         const safeUrl = await assertSafeHttpsUrl(item.url);
         const headers = await this.playbackHeaders(item.referer, safeUrl);
 
@@ -597,7 +659,22 @@ class JavHdPornProvider extends Provider {
           continue;
         }
 
-        for (const candidate of extractPlayerCandidates(html, safeUrl)) {
+        let encryptedCandidates = [];
+        if (useSafari && isJavPlayerHost(candidateHost)) {
+          try {
+            encryptedCandidates = await this.encryptedJwPlayerCandidates(html, safeUrl);
+          } catch (error) {
+            logger.debug(
+              { provider: this.name, url: sanitizeUrlForLogs(safeUrl), error: error.message },
+              'JAVHDPorn encrypted player configuration was not decoded'
+            );
+          }
+        }
+
+        for (const candidate of [
+          ...encryptedCandidates,
+          ...extractPlayerCandidates(html, safeUrl),
+        ]) {
           if (!visited.has(candidate.url)) {
             queue.push({
               url: candidate.url,
@@ -684,5 +761,6 @@ create._test = {
   isoDurationToRuntime,
   normalizePoster,
   normalizeSourceValue,
+  isJavPlayerHost,
 };
 module.exports = create;

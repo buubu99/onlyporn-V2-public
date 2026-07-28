@@ -169,3 +169,6 @@ The HAR used during development is intentionally excluded from the package. The 
 Production diagnosis on the Singapore Render instance established the transport mismatch: Node/Axios returned HTTP 403 for `https://www.javhdporn.net/v3/category/censored/`, while `curl_cffi==0.15.0` with Safari impersonation returned HTTP 200, 76,683 response bytes, 44 `/video/` occurrences, and 22 parsed catalog entries. The hotfix adds an isolated persistent JAV HD Porn Safari session and uses it for page GETs, player-page HEAD/GET requests on approved JAV hosts, and the form-encoded `/api/play/` POST.
 
 Run `npm run test:hotfix251`, then `EXPECTED_VERSION=2.5.1 npm run validate:release`. After Render becomes live, request `/catalog/movie/javhdporn.json`; it must return a non-empty `metas` array and logs must show `JAVHDPorn Safari request succeeded`.
+## Hotfix 2.5.2 validation
+
+Run `npm run test:hotfix252`, `npm run test:phase5`, then `EXPECTED_VERSION=2.5.2 npm run validate:release`. Live validation must show a non-empty SpankBang catalog without a bootstrap 403, a non-empty JAV HD Porn catalog, at least one decoded JWPlayer HLS source, relayed HLS playlists, and wrapped TikTok CDN segments returned as `video/mp2t`.

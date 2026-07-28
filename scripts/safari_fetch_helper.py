@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import json
 import os
+import re
 import sys
 from typing import Any
 from urllib.parse import urlparse
@@ -22,7 +23,7 @@ PROFILES = {
         "allowed_hosts": {"spankbang.com", "www.spankbang.com"},
         "home_url": "https://spankbang.com/",
         "impersonate": os.getenv("SPANKBANG_IMPERSONATE", "safari"),
-        "bootstrap": True,
+        "bootstrap": False,
     },
     "javhdporn": {
         "allowed_hosts": {
@@ -33,6 +34,7 @@ PROFILES = {
         "home_url": "https://www.javhdporn.net/",
         "impersonate": os.getenv("JAVHDPORN_IMPERSONATE", "safari"),
         "bootstrap": False,
+        "allowed_host_patterns": [re.compile(r"^video\d*\.javhdporn\.net$")],
     },
 }
 MAX_BYTES_HARD_LIMIT = 8 * 1024 * 1024
@@ -77,7 +79,10 @@ def validate_url(value: Any, config: dict[str, Any]) -> str:
         raise ValueError("URL must be a string")
     parsed = urlparse(value)
     host = (parsed.hostname or "").lower().rstrip(".")
-    if parsed.scheme != "https" or host not in config["allowed_hosts"]:
+    allowed = host in config["allowed_hosts"] or any(
+        pattern.fullmatch(host) for pattern in config.get("allowed_host_patterns", [])
+    )
+    if parsed.scheme != "https" or not allowed:
         raise ValueError("URL host is not approved for Safari transport")
     if parsed.username or parsed.password or parsed.port not in (None, 443):
         raise ValueError("URL contains disallowed credentials or port")

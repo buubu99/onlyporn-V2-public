@@ -138,3 +138,10 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Keeps separate SpankBang and JAV HD Porn Safari sessions so cookies and anti-bot state cannot cross providers.
 - Forwards the JAV HD Porn Safari-session cookies to protected media relay requests when available.
 - Preserves the working live catalog parser, which returned 22 metadata entries from the successful Safari response.
+## Hotfix 2.5.2
+
+- Removed the SpankBang homepage bootstrap that returned HTTP 403.
+- Added dynamic numbered JAV HD Porn player-host support.
+- Added isolated JWPlayer configuration capture for encrypted `data-config` pages.
+- Added `streamhls.click` playlist relay and strict TikTok CDN segment relay.
+- Added PNG-container removal and MPEG-TS validation for JAV HD Porn HLS segments.

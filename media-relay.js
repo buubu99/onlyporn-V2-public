@@ -4,16 +4,23 @@ const BoundedTtlCache = require('./provider/cache');
 const logger = require('./logger');
 
 const ENTRY_TTL_MS = 45 * 60 * 1000;
-const MAX_ENTRIES = 4000;
+const MAX_ENTRIES = 8000;
 const MAX_REDIRECTS = 5;
 const PLAYLIST_MAX_BYTES = 4 * 1024 * 1024;
+const JAV_SEGMENT_MAX_BYTES = 32 * 1024 * 1024;
 const entries = new BoundedTtlCache({ maxEntries: MAX_ENTRIES, ttlMs: ENTRY_TTL_MS });
 
 const PROVIDER_SUFFIXES = {
   eporner: ['eporner.com'],
   xvideos: ['xvideos.com', 'xvideos-cdn.com'],
   xnxx: ['xnxx.com', 'xnxx-cdn.com'],
-  javhdporn: ['javhdporn.net', 'pornfhd.com', 'storagexhd.com'],
+  javhdporn: [
+    'javhdporn.net',
+    'pornfhd.com',
+    'storagexhd.com',
+    'streamhls.click',
+    'tiktokcdn.com',
+  ],
 };
 
 const SAFE_REQUEST_HEADERS = new Set([
@@ -146,7 +153,7 @@ function resolveChildUrl(parentUrl, value) {
   }
 }
 
-function relayChild(entry, parentUrl, value) {
+function relayChild(entry, parentUrl, value, kind) {
   const resolved = resolveChildUrl(parentUrl, value);
   if (!resolved) return value;
   try {
@@ -154,14 +161,26 @@ function relayChild(entry, parentUrl, value) {
       url: resolved,
       headers: entry.headers,
       provider: entry.provider,
-      kind: kindFromUrl(resolved),
+      kind: kind || kindFromUrl(resolved),
     });
   } catch {
     return resolved;
   }
 }
 
+function kindFromPlaylistTag(line, fallbackUrl = '') {
+  const normalized = String(line || '').toUpperCase();
+  if (normalized.startsWith('#EXT-X-STREAM-INF')) return 'hls';
+  if (normalized.startsWith('#EXT-X-I-FRAME-STREAM-INF')) return 'hls';
+  if (normalized.startsWith('#EXT-X-MEDIA')) return 'hls';
+  if (normalized.startsWith('#EXT-X-KEY')) return 'key';
+  if (normalized.startsWith('#EXT-X-MAP')) return 'segment';
+  if (normalized.startsWith('#EXTINF')) return 'segment';
+  return kindFromUrl(fallbackUrl);
+}
+
 function rewritePlaylist(content, finalUrl, entry) {
+  let pendingKind = '';
   return String(content)
     .split(/\r?\n/)
     .map(line => {
@@ -169,18 +188,70 @@ function rewritePlaylist(content, finalUrl, entry) {
       if (!trimmed) return line;
 
       if (!trimmed.startsWith('#')) {
-        return relayChild(entry, finalUrl, trimmed);
+        const rewritten = relayChild(entry, finalUrl, trimmed, pendingKind);
+        pendingKind = '';
+        return rewritten;
       }
 
+      if (trimmed.startsWith('#EXT-X-STREAM-INF')) pendingKind = 'hls';
+      else if (trimmed.startsWith('#EXTINF')) pendingKind = 'segment';
+
       if (!/URI="[^"]+"/.test(line)) return line;
+      const uriKind = kindFromPlaylistTag(trimmed);
       return line.replace(/URI="([^"]+)"/g, (_, uri) => {
-        return `URI="${relayChild(entry, finalUrl, uri)}"`;
+        return `URI="${relayChild(entry, finalUrl, uri, uriKind)}"`;
       });
     })
     .join('\n');
 }
 
-async function upstreamRequest(entry, { method = 'GET', range, text = false } = {}) {
+function pngPayloadOffset(buffer) {
+  const input = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || '');
+  const signature = Buffer.from('89504e470d0a1a0a', 'hex');
+  if (input.length < signature.length || !input.subarray(0, 8).equals(signature)) return -1;
+
+  let offset = 8;
+  while (offset + 12 <= input.length) {
+    const length = input.readUInt32BE(offset);
+    const typeStart = offset + 4;
+    const dataEnd = typeStart + 4 + length;
+    const chunkEnd = dataEnd + 4;
+    if (chunkEnd > input.length) return -1;
+    const type = input.subarray(typeStart, typeStart + 4).toString('ascii');
+    if (type === 'IEND') return chunkEnd;
+    offset = chunkEnd;
+  }
+  return -1;
+}
+
+function looksLikeTransportStream(buffer) {
+  if (!Buffer.isBuffer(buffer) || buffer.length < 188 || buffer[0] !== 0x47) return false;
+  const checks = Math.min(4, Math.floor(buffer.length / 188));
+  for (let index = 1; index < checks; index += 1) {
+    if (buffer[index * 188] !== 0x47) return false;
+  }
+  return true;
+}
+
+function stripPngWrappedTsBuffer(buffer) {
+  const input = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || '');
+  const payloadOffset = pngPayloadOffset(input);
+  if (payloadOffset < 0) return null;
+  const payload = input.subarray(payloadOffset);
+  return looksLikeTransportStream(payload) ? payload : null;
+}
+
+function isJavWrappedSegment(entry) {
+  if (entry?.provider !== 'javhdporn' || entry?.kind !== 'segment') return false;
+  try {
+    const hostname = new URL(entry.url).hostname.toLowerCase();
+    return hostname === 'tiktokcdn.com' || hostname.endsWith('.tiktokcdn.com');
+  } catch {
+    return false;
+  }
+}
+
+async function upstreamRequest(entry, { method = 'GET', range, text = false, buffer = false } = {}) {
   let currentUrl = entry.url;
 
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
@@ -198,12 +269,14 @@ async function upstreamRequest(entry, { method = 'GET', range, text = false } = 
       method,
       headers,
       maxRedirects: 0,
-      responseType: text ? 'text' : 'stream',
+      responseType: text ? 'text' : (buffer ? 'arraybuffer' : 'stream'),
       timeout: 30_000,
       validateStatus: () => true,
       decompress: true,
-      maxContentLength: text ? PLAYLIST_MAX_BYTES : Infinity,
-      maxBodyLength: Infinity,
+      maxContentLength: text
+        ? PLAYLIST_MAX_BYTES
+        : (buffer ? JAV_SEGMENT_MAX_BYTES : Infinity),
+      maxBodyLength: buffer ? JAV_SEGMENT_MAX_BYTES : Infinity,
     });
 
     if ([301, 302, 303, 307, 308].includes(response.status)) {
@@ -270,6 +343,44 @@ async function handleRequest(req, res) {
       return;
     }
 
+    if (isJavWrappedSegment(entry)) {
+      const { response } = await upstreamRequest(entry, {
+        method: 'GET',
+        text: false,
+        buffer: true,
+      });
+
+      if (response.status < 200 || response.status >= 300) {
+        res.status(response.status).type('text/plain').send('Upstream segment request failed');
+        return;
+      }
+
+      const wrapped = Buffer.from(response.data || '');
+      const payload = stripPngWrappedTsBuffer(wrapped);
+      if (!payload) {
+        res.status(502).type('text/plain').send('JAVHDPorn segment wrapper was not recognized');
+        return;
+      }
+
+      logger.debug(
+        {
+          provider: entry.provider,
+          wrapperBytes: wrapped.length - payload.length,
+          payloadBytes: payload.length,
+        },
+        'JAVHDPorn PNG-wrapped MPEG-TS segment decoded'
+      );
+
+      res.status(200);
+      res.setHeader('Content-Type', 'video/mp2t');
+      res.setHeader('Content-Length', payload.length);
+      res.setHeader('Accept-Ranges', 'none');
+      res.setHeader('Cache-Control', 'no-store, max-age=0');
+      if (req.method === 'HEAD') res.end();
+      else res.end(payload);
+      return;
+    }
+
     const { response, finalUrl } = await upstreamRequest(entry, {
       method: req.method === 'HEAD' ? 'HEAD' : 'GET',
       range: req.headers.range,
@@ -327,9 +438,13 @@ module.exports = {
   _test: {
     entries,
     hostnameAllowed,
+    isJavWrappedSegment,
+    kindFromPlaylistTag,
     kindFromUrl,
     normalizePublicBase,
+    pngPayloadOffset,
     rewritePlaylist,
+    stripPngWrappedTsBuffer,
     validateTargetUrl,
   },
 };
