@@ -14,6 +14,7 @@ const {
   normalizePerformers,
   normalizeScene,
   normalizeStudioName,
+  sceneImages,
 } = require('./tpb4k/metadata-normalize');
 const {
   createMetadataAdapters,
@@ -24,7 +25,8 @@ const { readTpb4kConfig } = require('./tpb4k/config');
 const { clearAdapters, listAdapters } = require('./tpb4k/index');
 const { decodeTpb4kId } = require('./tpb4k/id-codec');
 const { buildSceneIdentity } = require('./tpb4k/identity');
-const { sceneInput } = require('./tpb4k/stashbox-client');
+const { QUERY_SCENES, SCENE_FIELDS, sceneInput } = require('./tpb4k/stashbox-client');
+const { TpdbRestClient } = require('./tpb4k/tpdb-rest-client');
 const { Tpb4kProvider } = require('./tpb4k');
 
 function jsonResponse(payload, status = 200) {
@@ -67,19 +69,40 @@ function fixtureScene(id, overrides = {}) {
   };
 }
 
-function createGraphqlFetch(options = {}) {
+function createMetadataFetch(options = {}) {
   const calls = [];
-  const fetchImpl = async (url, request) => {
+  const fetchImpl = async (url, request = {}) => {
+    const method = String(request.method || 'GET').toUpperCase();
+    calls.push({ url, request, method });
+
+    if (method === 'GET') {
+      const parsed = new URL(url);
+      const sceneMatch = parsed.pathname.match(/\/scenes\/([^/]+)$/);
+      if (sceneMatch) {
+        return jsonResponse({ data: fixtureScene(decodeURIComponent(sceneMatch[1])) });
+      }
+      const page = Number.parseInt(parsed.searchParams.get('page') || '1', 10);
+      const perPage = Number.parseInt(parsed.searchParams.get('per_page') || '1', 10);
+      const scenes = Array.from({ length: perPage }, (_, index) =>
+        fixtureScene(`tpdb-recent-${page}-${index}`, {
+          studio: { id: 'tpdb-studio', name: 'ThePornDB Recent', parent: null },
+          poster: `https://images.example/tpdb-${page}-${index}-poster.jpg`,
+          background: { large: `https://images.example/tpdb-${page}-${index}-bg.jpg` },
+        })
+      );
+      return jsonResponse({ data: scenes, meta: { current_page: page } });
+    }
+
     const body = JSON.parse(request.body);
-    calls.push({ url, request, body });
+    calls[calls.length - 1].body = body;
     if (body.query.includes('OnlyPornFindScene')) {
       return jsonResponse({ data: { findScene: fixtureScene(body.variables.id) } });
     }
+
     const input = body.variables.input;
-    const provider = String(url).includes('stashdb') ? 'stashdb' : 'tpdb';
     const id = options.sameIdentity
-      ? `${provider}-${input.page}`
-      : `${provider}-${input.parentStudio || 'recent'}-${input.page}`;
+      ? `stashdb-${input.page}`
+      : `stashdb-${input.parentStudio || 'recent'}-${input.page}`;
     const overrides = options.sameIdentity
       ? {
           title: 'Shared Metadata Scene',
@@ -88,8 +111,8 @@ function createGraphqlFetch(options = {}) {
         }
       : {
           studio: {
-            id: `studio-${provider}`,
-            name: input.parentStudio || 'ThePornDB',
+            id: 'studio-stashdb',
+            name: input.parentStudio || 'StashDB',
             parent: null,
           },
         };
@@ -142,14 +165,54 @@ test('GraphQL metadata client keeps API keys in the ApiKey header only and cache
   assert.doesNotMatch(calls[0].request.body, new RegExp(secret));
 });
 
+
+test('TPDB REST client uses Bearer auth only and caches scene pages', async () => {
+  const secret = 'tpdb-rest-secret';
+  const calls = [];
+  const client = new TpdbRestClient({
+    endpoint: 'https://api.theporndb.example',
+    apiKey: secret,
+    fetchImpl: async (url, request) => {
+      calls.push({ url, request });
+      return jsonResponse({ data: [fixtureScene('rest-1')] });
+    },
+  });
+  assert.equal((await client.queryScenes({ page: 1, perPage: 5 })).length, 1);
+  assert.equal((await client.queryScenes({ page: 1, perPage: 5 })).length, 1);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].request.headers.Authorization, `Bearer ${secret}`);
+  assert.equal(Object.hasOwn(calls[0].request.headers, 'ApiKey'), false);
+  assert.doesNotMatch(calls[0].url, new RegExp(secret));
+});
+
+
+test('live stash-box scene query selects URL object values and surfaces GraphQL errors', async () => {
+  assert.match(SCENE_FIELDS, /urls\s*\{\s*url\s*\}/);
+
+  const client = new StashBoxGraphqlClient({
+    name: 'stashdb',
+    endpoint: 'https://stashdb.example/graphql',
+    apiKey: 'fixture-key',
+    fetchImpl: async () => jsonResponse({
+      errors: [{ message: 'Field urls requires a selection of subfields' }],
+    }),
+  });
+
+  await assert.rejects(
+    () => client.request(QUERY_SCENES, { input: sceneInput() }),
+    /Field urls requires a selection/
+  );
+});
+
 test('scene query pagination and studio filters never add a resolution constraint', () => {
-  const input = sceneInput({ page: 3, perPage: 40, studio: 'SexArt', sort: 'POPULARITY' });
+  const studioId = '11111111-2222-3333-4444-555555555555';
+  const input = sceneInput({ page: 3, perPage: 40, studio: studioId, sort: 'POPULARITY' });
   assert.deepEqual(input, {
     page: 3,
     per_page: 40,
     direction: 'DESC',
     sort: 'POPULARITY',
-    parentStudio: 'SexArt',
+    parentStudio: studioId,
   });
   assert.doesNotMatch(JSON.stringify(input), /2160|1080|resolution|4k/i);
 });
@@ -159,6 +222,8 @@ test('metadata normalization selects portrait and landscape art and canonicalize
   assert.equal(item.sourceId, 'tpdb:42');
   assert.equal(item.poster, 'https://images.example/42-poster.jpg');
   assert.equal(item.background, 'https://images.example/42-bg.jpg');
+  assert.equal(item.detailUrl, 'https://metadata.example/scenes/42');
+  assert.equal(sceneImages({ poster: 'https://images.example/poster.jpg' }).length, 1);
   assert.equal(item.studio, 'DigitalPlayground');
   assert.deepEqual(item.performers, ['Performer One']);
   assert.equal(normalizeStudioName('X Videos RED'), 'XVideosRED');
@@ -213,24 +278,21 @@ test('window pagination advances pages and never repeats an earlier page', async
 test('missing metadata keys degrade to empty catalogs and never create fake streams', async () => {
   const config = readTpb4kConfig({ TPB4K_ENABLED: 'true' });
   const bundle = createMetadataAdapters({ config, fetchImpl: async () => assert.fail('fetch called') });
+  assert.equal(bundle.adapters.length, 1);
+  assert.equal(bundle.adapters[0].id, 'tpdb');
   assert.deepEqual(await bundle.adapters[0].catalog({ skip: 0, limit: 40 }), []);
-  assert.deepEqual(
-    await bundle.adapters[1].catalog({ catalog: { studio: 'Vixen' }, skip: 0, limit: 40 }),
-    []
-  );
   assert.deepEqual(await bundle.adapters[0].resolve({}), []);
-  assert.deepEqual(await bundle.adapters[1].resolve({}), []);
 });
 
 test('TPDB recent catalog and meta handlers return stable metadata while stream resolution remains empty', async () => {
-  const { calls, fetchImpl } = createGraphqlFetch();
+  const { calls, fetchImpl } = createMetadataFetch();
   const provider = new Tpb4kProvider({
     fetchImpl,
     env: {
       TPB4K_ENABLED: 'true',
       TPB4K_CATALOG_LIMIT: '1',
       TPDB_API_KEY: 'tpdb-fixture',
-      TPDB_API_URL: 'https://theporndb.example/graphql',
+      TPDB_REST_API_URL: 'https://api.theporndb.example',
     },
   });
   assert.deepEqual(listAdapters(), ['hentai', 'pornrips', 'stripchat', 'sukebei', 'torrent-index', 'tpdb', 'yesporn']);
@@ -251,44 +313,43 @@ test('TPDB recent catalog and meta handlers return stable metadata while stream 
 
   const streams = await provider.handleStream({ type: 'movie', id: catalog.metas[0].id });
   assert.deepEqual(streams, { streams: [] });
-  assert.equal(calls.every(call => call.request.headers.ApiKey === 'tpdb-fixture'), true);
+  const restCalls = calls.filter(call => call.method === 'GET');
+  assert.equal(restCalls.length, 2);
+  assert.equal(
+    restCalls.every(call => call.request.headers.Authorization === 'Bearer tpdb-fixture'),
+    true
+  );
+  assert.equal(
+    restCalls.every(call => !Object.hasOwn(call.request.headers, 'ApiKey')),
+    true
+  );
+  assert.equal(calls.some(call => call.method === 'POST'), false);
   assert.equal(calls.every(call => !call.url.includes('tpdb-fixture')), true);
 });
 
-test('nineteen studio definitions use both configured metadata providers and dedupe scene identity', async () => {
-  const { calls, fetchImpl } = createGraphqlFetch({ sameIdentity: true });
-  const provider = new Tpb4kProvider({
-    fetchImpl,
-    env: {
+test('nineteen studio definitions are independent torrent-index catalogs, not metadata-provider queries', async () => {
+  const { calls, fetchImpl } = createMetadataFetch({ sameIdentity: true });
+  const bundle = createMetadataAdapters({
+    config: readTpb4kConfig({
       TPB4K_ENABLED: 'true',
-      TPB4K_CATALOG_LIMIT: '10',
       TPDB_API_KEY: 'tpdb-fixture',
       STASHDB_API_KEY: 'stash-fixture',
-      TPDB_API_URL: 'https://theporndb.example/graphql',
+      TPDB_REST_API_URL: 'https://api.theporndb.example',
       STASHDB_API_URL: 'https://stashdb.example/graphql',
-    },
+    }),
+    fetchImpl,
   });
   const studioDefinitions = catalogDefinitions.filter(item => item.mode === 'studio-top');
   assert.equal(studioDefinitions.length, 19);
-  assert.equal(studioDefinitions.some(item => Object.hasOwn(item, 'targetResolution')), false);
-
-  const catalog = await provider.handleCatalog({
-    type: 'movie',
-    id: 'tpb4k.studio.vixen.top',
-    extra: { skip: 0 },
-  });
-  assert.equal(catalog.metas.length, 1);
-  const queryCalls = calls.filter(call => call.body.query.includes('OnlyPornQueryScenes'));
-  assert.equal(queryCalls.length, 2);
-  assert.equal(queryCalls.every(call => call.body.variables.input.parentStudio === 'Vixen'), true);
-  assert.equal(queryCalls.every(call => call.body.variables.input.sort === 'POPULARITY'), true);
-  assert.equal(queryCalls.every(call => !/2160|1080|resolution/i.test(JSON.stringify(call.body))), true);
+  assert.equal(studioDefinitions.every(item => item.source === 'torrent-index'), true);
+  assert.deepEqual(bundle.adapters.map(item => item.id), ['tpdb']);
+  assert.equal(calls.length, 0);
 });
 
 test('Phase 2A release wiring preserves 28 catalogs, 37 feature catalogs, and prior hardening', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const relay = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
-  assert.equal(pkg.version, '2.7.0-alpha.7');
+  assert.equal(pkg.version, '2.7.0-alpha.10');
   assert.equal(catalogDefinitions.length, 28);
   assert.match(pkg.scripts['test:release'], /tpb4k-phase2a\.test\.js/);
   assert.match(relay, /const SESSION_TTL_MS = 8 \* 60 \* 60 \* 1000/);

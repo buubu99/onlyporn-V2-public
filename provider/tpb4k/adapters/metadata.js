@@ -3,6 +3,7 @@
 const { buildSceneIdentity } = require('../identity');
 const { normalizeScene } = require('../metadata-normalize');
 const { StashBoxMetadataClient } = require('../stashbox-client');
+const { TpdbMetadataClient } = require('../tpdb-client');
 
 function parseSourceId(value) {
   const text = String(value || '').trim();
@@ -23,10 +24,9 @@ function createClients(config, fetchImpl) {
     fetchImpl,
   };
   return Object.freeze({
-    tpdb: new StashBoxMetadataClient({
+    tpdb: new TpdbMetadataClient({
       ...common,
-      id: 'tpdb',
-      endpoint: config.tpdb.endpoint,
+      restEndpoint: config.tpdb.restEndpoint,
       apiKey: config.tpdb.apiKey,
     }),
     stashdb: new StashBoxMetadataClient({
@@ -100,16 +100,12 @@ function createMetadataAdapters(options = {}) {
     id: 'tpdb',
     async catalog({ skip, limit }) {
       if (!clients.tpdb.configured) return [];
-      try {
-        const scenes = await fetchWindow(clients.tpdb, {
-          skip,
-          limit,
-          sort: 'DATE',
-        });
-        return scenes.map(scene => normalizeScene('tpdb', scene)).filter(Boolean);
-      } catch {
-        return [];
-      }
+      const scenes = await fetchWindow(clients.tpdb, {
+        skip,
+        limit,
+        sort: 'DATE',
+      });
+      return scenes.map(scene => normalizeScene('tpdb', scene)).filter(Boolean);
     },
     async meta({ sourceId }) {
       return findBySourceId(sourceId);
@@ -119,38 +115,11 @@ function createMetadataAdapters(options = {}) {
     },
   };
 
-  const torrentIndex = {
-    id: 'torrent-index',
-    async catalog({ catalog, skip, limit }) {
-      const studio = String(catalog?.studio || '').trim();
-      if (!studio) return [];
-      const available = Object.values(clients).filter(client => client.configured);
-      const settled = await Promise.allSettled(
-        available.map(async client => {
-          const scenes = await fetchWindow(client, {
-            skip,
-            limit,
-            studio,
-            sort: 'POPULARITY',
-          });
-          return scenes.map(scene => normalizeScene(client.id, scene)).filter(Boolean);
-        })
-      );
-      return dedupeMetadata(
-        settled.flatMap(result => (result.status === 'fulfilled' ? result.value : []))
-      ).slice(0, limit);
-    },
-    async meta({ sourceId }) {
-      return findBySourceId(sourceId);
-    },
-    async resolve() {
-      return [];
-    },
-  };
+
 
   return Object.freeze({
     clients,
-    adapters: Object.freeze([tpdb, torrentIndex]),
+    adapters: Object.freeze([tpdb]),
   });
 }
 

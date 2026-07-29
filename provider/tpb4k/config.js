@@ -2,6 +2,32 @@
 
 const { validateConfiguredEndpoint } = require('./source-http');
 
+
+const DEFAULT_TPB_MIRRORS = Object.freeze([
+  'https://thehiddenbay.com',
+  'https://thepiratebay0.org',
+  'https://piratebay.live',
+]);
+
+function endpointOrigins(value, fallback = DEFAULT_TPB_MIRRORS) {
+  const raw = String(value || '').trim();
+  const values = raw ? raw.split(',') : fallback;
+  const output = [];
+  const seen = new Set();
+  for (const item of values) {
+    const url = new URL(String(item || '').trim());
+    if (url.protocol !== 'https:' || url.username || url.password ||
+        url.pathname !== '/' || url.search || url.hash) {
+      throw new Error('TPB4K torrent mirrors must be bare credential-free HTTPS origins');
+    }
+    if (seen.has(url.origin)) continue;
+    seen.add(url.origin);
+    output.push(url.origin);
+  }
+  if (!output.length) throw new Error('TPB4K requires at least one torrent mirror');
+  return Object.freeze(output);
+}
+
 const SECRET_NAMES = Object.freeze([
   'TPDB_API_KEY',
   'STASHDB_API_KEY',
@@ -79,10 +105,16 @@ function readTpb4kConfig(env = process.env) {
         'Sukebei RSS endpoint'
       ),
     }),
+    torrentIndex: Object.freeze({
+      mirrors: endpointOrigins(env.TPB4K_TPB_MIRRORS),
+      category: '507',
+      sort: '7',
+      pageSize: 30,
+    }),
     tpdb: Object.freeze({
       configured: Boolean(tpdbApiKey),
       apiKey: tpdbApiKey,
-      endpoint: endpoint(env.TPDB_API_URL, 'https://theporndb.net/graphql'),
+      restEndpoint: endpoint(env.TPDB_REST_API_URL, 'https://api.theporndb.net'),
     }),
     stashdb: Object.freeze({
       configured: Boolean(stashdbApiKey),
@@ -100,10 +132,12 @@ function publicConfigStatus(config = readTpb4kConfig()) {
     requestTimeoutMs: config.requestTimeoutMs,
     tpdbConfigured: config.tpdb.configured,
     stashdbConfigured: config.stashdb.configured,
-    configuredDiscoverySources: Object.entries(config.discovery)
-      .filter(([, value]) => Boolean(value))
-      .map(([name]) => name)
-      .sort(),
+    configuredDiscoverySources: [
+      ...Object.entries(config.discovery)
+        .filter(([, value]) => Boolean(value))
+        .map(([name]) => name),
+      ...(config.torrentIndex?.mirrors?.length ? ['torrent-index'] : []),
+    ].sort(),
     stripchatPhaseRequired: 7,
     renderPreview: config.renderPreview,
   });
@@ -119,7 +153,9 @@ function redactSecrets(value, env = process.env) {
 }
 
 module.exports = {
+  DEFAULT_TPB_MIRRORS,
   SECRET_NAMES,
+  endpointOrigins,
   publicConfigStatus,
   readTpb4kConfig,
   redactSecrets,

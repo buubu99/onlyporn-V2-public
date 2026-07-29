@@ -1,22 +1,21 @@
 # TPB4K Phase 2A — Metadata Core
 
-Version: `2.7.0-alpha.7`
+Version: `2.7.0-alpha.10`
 
 Phase 2A is an isolated metadata release on `feature/tpb4k-v2.7.0`. It must not be merged into production `main`.
 
 ## Implemented
 
-- Environment-only ThePornDB and StashDB GraphQL clients.
-- `ApiKey` authentication kept in request headers only.
+- Environment-only ThePornDB REST and StashDB GraphQL clients.
+- ThePornDB uses `Authorization: Bearer`; StashDB uses `ApiKey`.
 - HTTPS-only metadata endpoints with redirects disabled.
 - Bounded positive cache and short negative cache.
 - Response content-type and size validation.
 - ThePornDB recent metadata catalog.
-- All 19 studio metadata catalog definitions queried without resolution filters.
+- All 19 studio metadata catalogs query StashDB without resolution filters.
 - Deterministic skip/page windows.
 - Poster/background selection by image dimensions.
 - Studio and performer normalization.
-- Cross-provider metadata deduplication by scene identity.
 - Source IDs and playback identity remain stable when artwork is enriched.
 - Metadata adapter failures degrade to empty results.
 - Phase 2A adapters intentionally return no streams.
@@ -30,7 +29,7 @@ Torrent resolution, Real-Debrid, direct VOD playback, and live HLS remain later 
 ## Environment variables
 
 - `TPDB_API_KEY`
-- `TPDB_API_URL` (default `https://theporndb.net/graphql`)
+- `TPDB_REST_API_URL` (default `https://api.theporndb.net`)
 - `STASHDB_API_KEY`
 - `STASHDB_API_URL` (default `https://stashdb.org/graphql`)
 - `TPB4K_METADATA_CACHE_TTL_MS`

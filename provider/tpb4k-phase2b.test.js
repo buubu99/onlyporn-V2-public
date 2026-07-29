@@ -26,7 +26,7 @@ test('configured optional endpoints require credential-free HTTPS and reject sec
 test('Phase 2B status exposes source names but never endpoint URLs or API credentials', () => {
   const config = readTpb4kConfig({ TPB4K_ENABLED: 'true', TPDB_API_KEY: 'tpdb-secret', STASHDB_API_KEY: 'stash-secret' });
   const status = publicConfigStatus(config);
-  assert.deepEqual(status.configuredDiscoverySources, ['hentai', 'pornrips', 'sukebei', 'yesporn']);
+  assert.deepEqual(status.configuredDiscoverySources, ['hentai', 'pornrips', 'sukebei', 'torrent-index', 'yesporn']);
   assert.equal(JSON.stringify(status).includes('secret'), false);
   assert.equal(JSON.stringify(status).includes('pornrips.to'), false);
   assert.equal(status.stripchatPhaseRequired, 7);
@@ -63,7 +63,7 @@ test('built-in adapter registry covers every Phase 2 source while preserving the
   const installed = installBuiltInAdapters({ env: { TPB4K_ENABLED: 'true' }, fetchImpl: async url => String(url).includes('sukebei') ? response(rssBody, 'application/rss+xml') : response('<html></html>', 'text/html'), checkDns: false });
   assert.deepEqual(listAdapters(), ['hentai', 'pornrips', 'stripchat', 'sukebei', 'torrent-index', 'tpdb', 'yesporn']);
   assert.equal(installed.phaseGates.stripchat, 7);
-  assert.deepEqual(installed.configuredDiscoverySources, ['hentai', 'pornrips', 'sukebei', 'yesporn']);
+  assert.deepEqual(installed.configuredDiscoverySources, ['hentai', 'pornrips', 'sukebei', 'torrent-index', 'yesporn']);
 });
 
 test('discovery and native smoke scripts are present and do not contain configured secrets', () => {
@@ -80,7 +80,7 @@ test('all 28 TPB4K catalog IDs remain unique and unified-resolution', () => {
   assert.equal(tpb4kCatalogs.some(item => /\.(?:2160p|1080p|4k)\./i.test(item.id.replace(/^tpb4k\./, ''))), false);
 });
 
-test('Phase 2B release wiring remains included under alpha.5', () => {
-  assert.equal(require('../package.json').version, '2.7.0-alpha.7');
+test('Phase 2B release wiring retains the TPB torrent-index adapter', () => {
+  assert.equal(require('../package.json').version, '2.7.0-alpha.10');
   assert.match(require('../package.json').scripts['test:release'], /tpb4k-phase2b\.test\.js/);
 });

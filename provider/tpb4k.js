@@ -7,7 +7,7 @@ const {
   sortCandidates,
   toStremioStream,
 } = require('./tpb4k/candidate');
-const { readTpb4kConfig, publicConfigStatus } = require('./tpb4k/config');
+const { readTpb4kConfig, publicConfigStatus, redactSecrets } = require('./tpb4k/config');
 const { decodeTpb4kId, encodeTpb4kId } = require('./tpb4k/id-codec');
 const { buildSceneIdentity } = require('./tpb4k/identity');
 const { getAdapter, installBuiltInAdapters } = require('./tpb4k/index');
@@ -61,7 +61,7 @@ function toMetaPreview(item, catalogId) {
     type: TYPE,
     name: item.title,
     poster,
-    posterShape: 'poster',
+    posterShape: item.source === 'torrent-index' ? 'landscape' : 'poster',
     genres: [item.studio, item.resolution, item.quality].filter(Boolean),
     description: item.description,
     links: toLinks(identity),
@@ -77,7 +77,7 @@ function toMetaResponse(item, id) {
     name: item.title,
     poster,
     background: safePoster(item.background) || poster,
-    posterShape: 'poster',
+    posterShape: item.source === 'torrent-index' ? 'landscape' : 'poster',
     genres: [item.studio, item.resolution, item.quality].filter(Boolean),
     description: item.description,
     links: toLinks(identity),
@@ -149,9 +149,14 @@ class Tpb4kProvider {
         limit: config.catalogLimit,
         config,
       });
-    } catch {
+    } catch (error) {
       logger().warn(
-        { provider: this.name, catalogId: definition.id, source: definition.source },
+        {
+          provider: this.name,
+          catalogId: definition.id,
+          source: definition.source,
+          error: redactSecrets(error?.message || error, this.env),
+        },
         'TPB4K catalog adapter failed safely'
       );
     }

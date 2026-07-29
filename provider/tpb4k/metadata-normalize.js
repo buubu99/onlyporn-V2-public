@@ -71,11 +71,47 @@ function safeHttpsUrl(value) {
 function normalizedImages(images) {
   return (Array.isArray(images) ? images : [])
     .map(image => ({
-      url: safeHttpsUrl(image?.url || image),
+      url: safeHttpsUrl(
+        image?.url ||
+          image?.large ||
+          image?.medium ||
+          image?.small ||
+          image
+      ),
       width: Number.parseInt(String(image?.width || 0), 10) || 0,
       height: Number.parseInt(String(image?.height || 0), 10) || 0,
     }))
     .filter(image => image.url);
+}
+
+function sceneImages(scene = {}) {
+  const values = [];
+  for (const collection of [
+    scene.images,
+    scene.posters,
+    scene.backgrounds,
+    scene.media,
+  ]) {
+    if (Array.isArray(collection)) values.push(...collection);
+  }
+  for (const image of [
+    scene.poster,
+    scene.poster_image,
+    scene.background,
+    scene.back_image,
+    scene.image,
+    scene.thumbnail,
+  ]) {
+    if (!image) continue;
+    if (typeof image === 'object' && !Array.isArray(image)) {
+      for (const candidate of [image.large, image.medium, image.small, image.url]) {
+        if (candidate) values.push({ url: candidate });
+      }
+    } else {
+      values.push(image);
+    }
+  }
+  return values;
 }
 
 function choosePoster(images) {
@@ -103,10 +139,10 @@ function normalizeScene(provider, scene = {}) {
   const studio = normalizeStudioName(scene.studio?.name || scene.site?.name || scene.studio || '');
   const performers = normalizePerformers(scene.performers || scene.performer || []);
   const releaseDate = String(scene.release_date || scene.date || scene.releaseDate || '').trim();
-  const sceneCode = String(scene.code || scene.sceneCode || '').trim();
-  const images = scene.images || [scene.poster, scene.background?.large, scene.background].filter(Boolean);
+  const sceneCode = String(scene.code || scene.sku || scene.sceneCode || '').trim();
+  const images = sceneImages(scene);
   const detailUrl = (Array.isArray(scene.urls) ? scene.urls : [scene.url])
-    .map(safeHttpsUrl)
+    .map(value => safeHttpsUrl(value?.url || value))
     .find(Boolean) || '';
 
   const item = {
@@ -162,4 +198,5 @@ module.exports = {
   normalizeScene,
   normalizeStudioName,
   safeHttpsUrl,
+  sceneImages,
 };

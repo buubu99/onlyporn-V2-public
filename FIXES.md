@@ -1,3 +1,19 @@
+## 2.7.0-alpha.10 — TPDB REST / StashDB GraphQL metadata split
+
+- Uses `https://api.theporndb.net/scenes` with `Authorization: Bearer` for TPDB Recent.
+- Uses StashDB GraphQL with `urls { url }` for all 19 studio catalogs.
+- Removes TPDB GraphQL scene-list acquisition after live proof returned `scenes: null`.
+- Normalizes TPDB REST poster, background, media, site, performer, date, and URL fields.
+- Keeps scene-detail and stream calls out of the mandatory 20-catalog gate.
+
+
+## 2.7.0-alpha.10 — Stash-box metadata query repair
+
+- Corrects the Scene `urls` GraphQL selection from the obsolete object form to the current scalar-list form.
+- Surfaces sanitized GraphQL and adapter errors instead of silently converting every provider failure into an empty catalog.
+- Makes the TPDB Recent plus all 19 studio catalog-only live smoke mandatory before commit or push.
+- Keeps all TPB4K streams intentionally empty.
+
 # OnlyPorn V2 playback fixes
 
 This fork contains targeted playback and compatibility fixes:
@@ -244,7 +260,7 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Updated the native smoke to allow small live-feed overlap while rejecting complete pagination repeats and identical Hentai modes.
 - TPB4K stream resolution remains intentionally empty.
 
-## 2.7.0-alpha.7 — Hentai live-page acceptance hardening
+## 2.7.0-alpha.10 — Hentai live-page acceptance hardening
 
 - Accepts a HentaiMama page containing incidental Cloudflare script markers only when genuine article and `/tvshows/` catalog evidence is also present.
 - Groups all duplicate `/tvshows/<slug>/` anchors by path and extracts the enclosing article, so the empty poster anchor cannot hide the later title anchor.

@@ -58,7 +58,7 @@ test('native source origins are built into code and obsolete feed variables are 
   assert.equal(config.discovery.pornrips, 'https://pornrips.to/');
   assert.equal(config.discovery.yesporn, 'https://yesporn.vip/');
   assert.equal(config.discovery.hentai, 'https://hentaimama.io/');
-  assert.deepEqual(publicConfigStatus(config).configuredDiscoverySources, ['hentai', 'pornrips', 'sukebei', 'yesporn']);
+  assert.deepEqual(publicConfigStatus(config).configuredDiscoverySources, ['hentai', 'pornrips', 'sukebei', 'torrent-index', 'yesporn']);
 });
 
 test('PornRips native parser returns opaque metadata records and no playable fields', () => {
@@ -108,7 +108,7 @@ test('detail parser enriches an opaque source path without changing source ident
 
 test('native adapters are always configured, fetch exact origins, paginate, and resolve no streams', async () => {
   const bundle = createDiscoveryAdapters({ config: readTpb4kConfig(env()), fetchImpl: nativeFetch, checkDns: false, minRequestIntervalMs: 0 });
-  assert.deepEqual(bundle.configuredSources, ['hentai', 'pornrips', 'sukebei', 'yesporn']);
+  assert.deepEqual(bundle.configuredSources, ['hentai', 'pornrips', 'sukebei', 'torrent-index', 'yesporn']);
   for (const [id, catalog] of [
     ['pornrips', { id: 'tpb4k.pornrips.recent', mode: 'recent' }],
     ['yesporn', { id: 'tpb4k.yesporn.recent', mode: 'recent' }],
@@ -188,10 +188,10 @@ test('challenge HTML and lookalike links fail closed instead of becoming catalog
   assert.equal(parsePornripsCatalog(lookalike).length, 0);
 });
 
-test('alpha.7 release wiring keeps native live smoke and hardens Hentai acceptance', () => {
+test('alpha.10 release wiring keeps native live smoke, TPDB REST, and adds the original TPB studio catalog transport', () => {
   const root = path.join(__dirname, '..');
   const pkg = require('../package.json');
-  assert.equal(pkg.version, '2.7.0-alpha.7');
+  assert.equal(pkg.version, '2.7.0-alpha.10');
   assert.match(pkg.scripts['test:release'], /tpb4k-phase2c\.test\.js/);
   assert.equal(pkg.scripts['smoke:tpb4k-native'], 'node scripts/tpb4k-native-smoke.js');
   assert.equal(pkg.scripts['smoke:tpb4k-hentai'], 'node scripts/tpb4k-hentai-live-smoke.js');

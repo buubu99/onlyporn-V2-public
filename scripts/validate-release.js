@@ -128,6 +128,8 @@ const requiredFiles = [
   'provider/tpb4k/source-contract.js',
   'provider/tpb4k/cache.js',
   'provider/tpb4k/graphql-client.js',
+  'provider/tpb4k/tpdb-rest-client.js',
+  'provider/tpb4k/tpdb-client.js',
   'provider/tpb4k/metadata-normalize.js',
   'provider/tpb4k/stashbox-client.js',
   'provider/tpb4k/adapters/metadata.js',

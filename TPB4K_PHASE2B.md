@@ -1,6 +1,6 @@
 # TPB4K Phase 2B — discovery records and Render preview readiness
 
-Version: 2.7.0-alpha.7
+Version: 2.7.0-alpha.10
 
 Phase 2B adds metadata-only discovery adapters for PornRips, YesPorn, Hentai, and Sukebei. Each adapter is optional, bounded, HTTPS-only, rejects HTML placeholders, produces stable metadata identities, and deliberately returns no streams.
 

@@ -1,6 +1,6 @@
 # TPB4K Phase 2C — Native catalog acquisition
 
-Version: 2.7.0-alpha.7
+Version: 2.7.0-alpha.10
 
 This release replaces the temporary external-feed placeholders with clean-room native metadata acquisition:
 

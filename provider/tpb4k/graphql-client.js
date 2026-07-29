@@ -68,18 +68,8 @@ class StashBoxGraphqlClient {
       clearTimeout(timer);
     }
 
-    if (!response || !response.ok) {
-      const status = Number(response?.status || 0);
-      if (status === 404) this.cache.setNegative(key, this.negativeTtlMs);
-      throw new Error(`${this.name} metadata request failed with HTTP ${status || 'unknown'}`);
-    }
-
-    const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
-    if (!contentType.includes('application/json')) {
-      throw new Error(`${this.name} metadata endpoint returned a non-JSON response`);
-    }
-
-    const declaredLength = Number.parseInt(String(response.headers?.get?.('content-length') || '0'), 10) || 0;
+    const contentType = String(response?.headers?.get?.('content-type') || '').toLowerCase();
+    const declaredLength = Number.parseInt(String(response?.headers?.get?.('content-length') || '0'), 10) || 0;
     if (declaredLength > MAX_RESPONSE_BYTES) {
       throw new Error(`${this.name} metadata response exceeded the size limit`);
     }
@@ -89,14 +79,40 @@ class StashBoxGraphqlClient {
       throw new Error(`${this.name} metadata response exceeded the size limit`);
     }
 
-    let payload;
-    try {
-      payload = JSON.parse(text);
-    } catch {
-      throw new Error(`${this.name} metadata endpoint returned malformed JSON`);
+    let payload = null;
+    if (text) {
+      try {
+        payload = JSON.parse(text);
+      } catch {
+        throw new Error(`${this.name} metadata endpoint returned malformed JSON`);
+      }
     }
-    if (Array.isArray(payload.errors) && payload.errors.length) {
-      throw new Error(`${this.name} metadata GraphQL query failed`);
+
+    const graphErrors = Array.isArray(payload?.errors) ? payload.errors : [];
+    const graphDetail = graphErrors
+      .map(error => String(error?.message || '').replace(/\s+/g, ' ').trim())
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(' | ');
+
+    if (!response || !response.ok) {
+      const status = Number(response?.status || 0);
+      if (status === 404) this.cache.setNegative(key, this.negativeTtlMs);
+      throw new Error(
+        `${this.name} metadata request failed with HTTP ${status || 'unknown'}${
+          graphDetail ? `: ${graphDetail}` : ''
+        }`
+      );
+    }
+
+    if (!contentType.includes('application/json')) {
+      throw new Error(`${this.name} metadata endpoint returned a non-JSON response`);
+    }
+
+    if (graphErrors.length) {
+      throw new Error(
+        `${this.name} metadata GraphQL query failed${graphDetail ? `: ${graphDetail}` : ''}`
+      );
     }
 
     const data = payload && typeof payload.data === 'object' ? payload.data : null;

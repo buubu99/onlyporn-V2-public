@@ -254,7 +254,7 @@ The focused suite verifies the 28-catalog registry, feature flag, magnet/hash no
 
 ```bash
 npm run test:tpb4k-phase2a
-EXPECTED_VERSION=2.7.0-alpha.7 npm run validate:release
+EXPECTED_VERSION=2.7.0-alpha.10 npm run validate:release
 npm run smoke:jav262
 ```
 
@@ -270,3 +270,13 @@ Phase 2A acceptance requires deterministic pagination, header-only metadata auth
 ## TPB4K Phase 2C
 
 Run `npm run test:tpb4k-phase2c` for offline parser/security coverage and `npm run smoke:tpb4k-native` for mandatory live non-empty catalog proof. All stream responses remain empty in this phase.
+
+## TPDB + StashDB catalog-only production gate
+
+With `TPDB_API_KEY` and `STASHDB_API_KEY` exported locally:
+
+```bash
+TPB4K_ENABLED=true npm run smoke:tpb4k-metadata
+```
+
+This must return non-empty listings for ThePornDB Recent and all 19 studio catalogs. It calls no metadata-detail or stream handlers.

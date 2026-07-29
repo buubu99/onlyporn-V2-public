@@ -250,7 +250,7 @@ test('TPDB and StashDB keys are environment-only and public status never returns
     requestTimeoutMs: 15000,
     tpdbConfigured: true,
     stashdbConfigured: true,
-    configuredDiscoverySources: ['hentai', 'pornrips', 'sukebei', 'yesporn'],
+    configuredDiscoverySources: ['hentai', 'pornrips', 'sukebei', 'torrent-index', 'yesporn'],
     stripchatPhaseRequired: 7,
     renderPreview: false,
   });
@@ -295,7 +295,7 @@ test('release wiring preserves v2.6.4 hardening and keeps TPB4K off production b
   const relay = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
   const catalogIndex = fs.readFileSync(path.join(ROOT, 'catalog/index.js'), 'utf8');
 
-  assert.equal(pkg.version, '2.7.0-alpha.7');
+  assert.equal(pkg.version, '2.7.0-alpha.10');
   assert.equal(pkg.scripts['test:tpb4k-phase1'], 'node --test provider/tpb4k-phase1.test.js');
   assert.match(pkg.scripts['test:release'], /tpb4k-phase1\.test\.js/);
   assert.match(relay, /const SESSION_TTL_MS = 8 \* 60 \* 60 \* 1000/);

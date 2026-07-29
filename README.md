@@ -45,7 +45,7 @@ The feature is disabled by default with `TPB4K_ENABLED=false`. No live TPB4K sou
 
 ## TPB4K Phase 2A
 
-Version `2.7.0-alpha.7` retains the Phase 2A metadata core for ThePornDB and StashDB and adds corrected native Phase 2C catalog acquisition for PornRips, YesPorn, and HentaiMama. API keys remain environment-only, source requests are cached and serialized conservatively, and TPB4K streams remain intentionally empty.
+Version `2.7.0-alpha.10` uses the live-proven ThePornDB REST API with Bearer authentication for TPDB Recent and restores the original TPB4K studio architecture: each of the 19 selected studio catalogs searches TPB-compatible mirrors in UHD category 507, sorted by seeders with order code 7. The fixed mirror chain is TheHiddenBay, ThePirateBay0, and PirateBay Live. Catalog output exposes titles, studio labels, size, quality, seeders, and opaque IDs while magnets and info hashes stay private. PornRips, YesPorn, and HentaiMama native acquisition remains intact, and TPB4K stream resolution remains intentionally empty until the next phase.
 
 ## TPB4K Phase 2B
 
@@ -54,3 +54,7 @@ Alpha.4 adds optional metadata-only discovery feeds for PornRips, YesPorn, Henta
 ### TPB4K native metadata acquisition
 
 PornRips, YesPorn, and HentaiMama catalog metadata is acquired directly from fixed audited HTTPS origins. No external JSON feed URLs are required. Playback resolution begins in later TPB4K phases.
+
+### TPB studio catalog transport
+
+The 19 `tpb4k.studio.*.top` catalogs do not come from StashDB. They use TPB-style HTML search paths `/search/{studio}/{page}/7/507`. `TPB4K_TPB_MIRRORS` may override the comma-separated mirror order for operations, but only bare credential-free HTTPS origins are accepted.
