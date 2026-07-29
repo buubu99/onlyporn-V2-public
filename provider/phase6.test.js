@@ -20,7 +20,7 @@ mediaRelay.setPublicBase('https://onlyporn.example');
 
 function relayEntryFromUrl(relayUrl) {
   const token = new URL(relayUrl).pathname.split('/')[2];
-  return mediaRelay._test.resolveRelayEntry(token);
+  return mediaRelay._test.entries.get(token);
 }
 
 test('Pornhub catalog parser keeps same-origin viewkeys, posters, and titles', () => {
@@ -185,6 +185,6 @@ test('Pornhub routes, manifest wiring, and release version are deterministic', (
   assert.equal(loadProvider('pornhub').getName(), 'pornhub');
 
   const pkg = require('../package.json');
-  assert.match(pkg.version, /^2\.(?:[7-9]|\d{2,})\.\d+$|^2\.6\.[0-9]*[1-9]\d*$/);
+  assert.equal(pkg.version, '2.6.0');
   assert.match(pkg.scripts['test:release'], /phase6\.test\.js/);
 });

@@ -194,7 +194,7 @@ test('JAVHDPorn HLS rewrite marks image-named EXTINF objects as media segments',
     entry
   );
   const relayUrl = rewritten.split('\n').at(-1);
-  const stored = mediaRelay._test.resolveRelayEntry(tokenFromRelayUrl(relayUrl));
+  const stored = mediaRelay._test.entries.get(tokenFromRelayUrl(relayUrl));
   assert.equal(stored.provider, 'javhdporn');
   assert.equal(stored.kind, 'segment');
   assert.match(stored.url, /tiktokcdn\.com/);
