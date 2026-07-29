@@ -116,13 +116,14 @@ test('vdcdn master rewriting preserves custom token lines and relays image-named
   assert.match(rewritten, /#EXT-X-TOKEN=fixture-token-must-remain/);
   const relayUrl = rewritten.split('\n').find(line => line.startsWith('https://onlyporn.example/media/'));
   assert.ok(relayUrl);
-  const stored = mediaRelay._test.entries.get(tokenFromRelayUrl(relayUrl));
+  const stored = mediaRelay._test.resolveRelayEntry(tokenFromRelayUrl(relayUrl));
   assert.equal(stored.provider, 'javhdporn');
   assert.equal(stored.kind, 'segment');
   assert.equal(stored.url, 'https://akamai-cache-p01.vdcdn.xyz/hls4/a/b/360p/seg0.webp');
   assert.equal(stored.headers.Cookie, 'fixture=1');
   assert.equal(stored.headers.Origin, 'https://video.javhdporn.net');
   assert.match(stored.headers.Referer, /video\.javhdporn\.net\/p\/fixture/);
+  assert.equal(mediaRelay._test.entries.size, 1, 'segment child token must reuse one session');
 });
 
 test('raw MPEG-TS disguised as image/webp remains byte-identical', () => {
@@ -224,10 +225,11 @@ test('TikTok PNG-wrapped segment behavior remains intact', async () => {
 test('OnlyPorn 2.6.2 wires the isolated vdcdn hotfix into release validation', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const relay = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
-  assert.equal(pkg.version, '2.6.2');
+  assert.equal(pkg.version, '2.6.3');
   assert.match(pkg.scripts['test:hotfix262'], /hotfix-2\.6\.2\.test\.js/);
   assert.match(pkg.scripts['test:release'], /hotfix-2\.6\.2\.test\.js/);
   assert.match(relay, /'vdcdn\.xyz'/);
   assert.match(relay, /JAVHDPorn image-labelled MPEG-TS segment normalized/);
-  assert.equal(relay.includes('const ENTRY_TTL_MS = 45 * 60 * 1000;'), true);
+  assert.equal(relay.includes('const SESSION_TTL_MS = 8 * 60 * 60 * 1000;'), true);
+  assert.match(pkg.scripts['test:release'], /phase0-hardening\.test\.js/);
 });

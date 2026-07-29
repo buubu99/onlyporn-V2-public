@@ -184,3 +184,12 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Retained existing PNG-wrapped MPEG-TS removal, including the production-observed 70-byte wrapper path.
 - Added focused offline regression coverage and a live two-title smoke command.
 - Deliberately did not restore Hardening Phase 0; relay tokens remain on the stable v2.6.0 45-minute model until Phase 0 is reintroduced separately.
+
+## Hardening Phase 0 restoration — 2.6.3
+
+- Restored the eight-hour media-relay session lifetime on top of the verified v2.6.2 JAVHDPorn hotfix.
+- Replaced one-cache-entry-per-HLS-child behavior with authenticated stateless child tokens tied to the original playback session.
+- Nested playlists, keys, maps, and segments reuse the same provider headers and session.
+- Preserved `vdcdn.xyz` approval, custom `#EXT-X-TOKEN` lines, raw `.webp` MPEG-TS normalization, and PNG-wrapper removal.
+- Preserved the three-layer JAVHDPorn decoding pipeline and 30-second AIOStreams timeout.
+- Render restarts still invalidate process-local sessions; restart-safe relay state remains a later hardening phase.

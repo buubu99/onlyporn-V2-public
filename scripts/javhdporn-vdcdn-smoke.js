@@ -105,6 +105,7 @@ async function main() {
     await inspectTitle(provider, title);
   }
   console.log('JAVHDPorn vdcdn live smoke passed for 2 titles.');
+  process.exit(0);
 }
 
 main().catch(error => {

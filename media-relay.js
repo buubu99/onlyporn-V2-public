@@ -3,12 +3,15 @@ const axios = require('axios');
 const BoundedTtlCache = require('./provider/cache');
 const logger = require('./logger');
 
-const ENTRY_TTL_MS = 45 * 60 * 1000;
-const MAX_ENTRIES = 8000;
+const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
+const MAX_SESSIONS = 8000;
+const CHILD_TOKEN_VERSION = 'c1';
+const CHILD_TOKEN_SIGNATURE_BYTES = 18;
+const CHILD_TOKEN_SECRET = crypto.randomBytes(32);
 const MAX_REDIRECTS = 5;
 const PLAYLIST_MAX_BYTES = 4 * 1024 * 1024;
 const JAV_SEGMENT_MAX_BYTES = 32 * 1024 * 1024;
-const entries = new BoundedTtlCache({ maxEntries: MAX_ENTRIES, ttlMs: ENTRY_TTL_MS });
+const entries = new BoundedTtlCache({ maxEntries: MAX_SESSIONS, ttlMs: SESSION_TTL_MS });
 
 const PROVIDER_SUFFIXES = {
   eporner: ['eporner.com'],
@@ -125,26 +128,127 @@ function filenameFor(kind) {
   return 'segment.bin';
 }
 
-function register({ url, headers = {}, provider, kind, ttlMs = ENTRY_TTL_MS }) {
-  const publicBase = getPublicBase();
-  if (!publicBase) throw new Error('Media relay public base URL is not initialized');
+const KIND_TO_CODE = Object.freeze({
+  hls: 'h',
+  mp4: 'm',
+  segment: 's',
+  key: 'k',
+  binary: 'b',
+});
 
+const CODE_TO_KIND = Object.freeze(
+  Object.fromEntries(Object.entries(KIND_TO_CODE).map(([kind, code]) => [code, kind]))
+);
+
+function signChildToken(unsignedToken) {
+  return crypto
+    .createHmac('sha256', CHILD_TOKEN_SECRET)
+    .update(unsignedToken)
+    .digest()
+    .subarray(0, CHILD_TOKEN_SIGNATURE_BYTES)
+    .toString('base64url');
+}
+
+function signaturesEqual(left, right) {
+  try {
+    const a = Buffer.from(String(left), 'base64url');
+    const b = Buffer.from(String(right), 'base64url');
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+function createSessionEntry({ url, headers = {}, provider, kind, ttlMs = SESSION_TTL_MS }) {
   const safeUrl = validateTargetUrl(url, provider);
   const resolvedKind = kind || kindFromUrl(safeUrl);
   const token = crypto.randomBytes(24).toString('base64url');
-  entries.set(
-    token,
-    {
-      url: safeUrl,
-      headers: sanitizeHeaders(headers),
-      provider,
-      kind: resolvedKind,
-    },
-    ttlMs
-  );
+  const entry = {
+    url: safeUrl,
+    headers: sanitizeHeaders(headers),
+    provider,
+    kind: resolvedKind,
+    sessionToken: token,
+  };
 
-  logger.debug({ provider, kind: resolvedKind }, 'Media relay token registered');
-  return `${publicBase}/media/${token}/${filenameFor(resolvedKind)}`;
+  entries.set(token, entry, ttlMs);
+  logger.debug({ provider, kind: resolvedKind }, 'Media relay session registered');
+  return entry;
+}
+
+function register({ url, headers = {}, provider, kind, ttlMs = SESSION_TTL_MS }) {
+  const publicBase = getPublicBase();
+  if (!publicBase) throw new Error('Media relay public base URL is not initialized');
+
+  const entry = createSessionEntry({ url, headers, provider, kind, ttlMs });
+  return `${publicBase}/media/${entry.sessionToken}/${filenameFor(entry.kind)}`;
+}
+
+function ensureSessionEntry(entry, parentUrl) {
+  if (entry?.sessionToken) {
+    const stored = entries.get(entry.sessionToken);
+    if (stored) return stored;
+  }
+
+  if (!entry?.provider) throw new Error('Media relay provider is missing');
+  return createSessionEntry({
+    url: entry.url || parentUrl,
+    headers: entry.headers,
+    provider: entry.provider,
+    kind: entry.kind || 'hls',
+  });
+}
+
+function createChildToken(sessionEntry, url, kind) {
+  const safeUrl = validateTargetUrl(url, sessionEntry.provider);
+  const resolvedKind = kind || kindFromUrl(safeUrl);
+  const kindCode = KIND_TO_CODE[resolvedKind] || KIND_TO_CODE.binary;
+  const encodedUrl = Buffer.from(safeUrl, 'utf8').toString('base64url');
+  const unsignedToken = [
+    CHILD_TOKEN_VERSION,
+    sessionEntry.sessionToken,
+    kindCode,
+    encodedUrl,
+  ].join('.');
+  return `${unsignedToken}.${signChildToken(unsignedToken)}`;
+}
+
+function resolveChildToken(token) {
+  if (typeof token !== 'string' || token.length > 16_384) return undefined;
+  const parts = token.split('.');
+  if (parts.length !== 5 || parts[0] !== CHILD_TOKEN_VERSION) return undefined;
+
+  const [version, sessionToken, kindCode, encodedUrl, signature] = parts;
+  const kind = CODE_TO_KIND[kindCode];
+  if (!kind || !sessionToken || !encodedUrl || !signature) return undefined;
+
+  const unsignedToken = [version, sessionToken, kindCode, encodedUrl].join('.');
+  if (!signaturesEqual(signature, signChildToken(unsignedToken))) return undefined;
+
+  const sessionEntry = entries.get(sessionToken);
+  if (!sessionEntry) return undefined;
+
+  let decodedUrl;
+  try {
+    decodedUrl = Buffer.from(encodedUrl, 'base64url').toString('utf8');
+  } catch {
+    return undefined;
+  }
+
+  try {
+    return {
+      ...sessionEntry,
+      url: validateTargetUrl(decodedUrl, sessionEntry.provider),
+      kind,
+      sessionToken,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function resolveRelayEntry(token) {
+  return entries.get(token) || resolveChildToken(token);
 }
 
 function resolveChildUrl(parentUrl, value) {
@@ -159,12 +263,12 @@ function relayChild(entry, parentUrl, value, kind) {
   const resolved = resolveChildUrl(parentUrl, value);
   if (!resolved) return value;
   try {
-    return register({
-      url: resolved,
-      headers: entry.headers,
-      provider: entry.provider,
-      kind: kind || kindFromUrl(resolved),
-    });
+    const publicBase = getPublicBase();
+    if (!publicBase) throw new Error('Media relay public base URL is not initialized');
+    const sessionEntry = ensureSessionEntry(entry, parentUrl);
+    const resolvedKind = kind || kindFromUrl(resolved);
+    const token = createChildToken(sessionEntry, resolved, resolvedKind);
+    return `${publicBase}/media/${token}/${filenameFor(resolvedKind)}`;
   } catch {
     return resolved;
   }
@@ -182,6 +286,7 @@ function kindFromPlaylistTag(line, fallbackUrl = '') {
 }
 
 function rewritePlaylist(content, finalUrl, entry) {
+  const sessionEntry = ensureSessionEntry(entry, finalUrl);
   let pendingKind = '';
   return String(content)
     .split(/\r?\n/)
@@ -190,7 +295,7 @@ function rewritePlaylist(content, finalUrl, entry) {
       if (!trimmed) return line;
 
       if (!trimmed.startsWith('#')) {
-        const rewritten = relayChild(entry, finalUrl, trimmed, pendingKind);
+        const rewritten = relayChild(sessionEntry, finalUrl, trimmed, pendingKind);
         pendingKind = '';
         return rewritten;
       }
@@ -201,7 +306,7 @@ function rewritePlaylist(content, finalUrl, entry) {
       if (!/URI="[^"]+"/.test(line)) return line;
       const uriKind = kindFromPlaylistTag(trimmed);
       return line.replace(/URI="([^"]+)"/g, (_, uri) => {
-        return `URI="${relayChild(entry, finalUrl, uri, uriKind)}"`;
+        return `URI="${relayChild(sessionEntry, finalUrl, uri, uriKind)}"`;
       });
     })
     .join('\n');
@@ -325,7 +430,7 @@ async function handleRequest(req, res) {
     return;
   }
 
-  const entry = entries.get(req.params.token);
+  const entry = resolveRelayEntry(req.params.token);
   if (!entry) {
     res.status(410).type('text/plain').send('Media relay link expired');
     return;
@@ -457,6 +562,9 @@ module.exports = {
   setPublicBase,
   _test: {
     entries,
+    MAX_SESSIONS,
+    SESSION_TTL_MS,
+    createChildToken,
     hostnameAllowed,
     isJavTransportSegment,
     normalizeJavTransportSegment,
@@ -464,6 +572,7 @@ module.exports = {
     kindFromUrl,
     normalizePublicBase,
     pngPayloadOffset,
+    resolveRelayEntry,
     rewritePlaylist,
     stripPngWrappedTsBuffer,
     validateTargetUrl,

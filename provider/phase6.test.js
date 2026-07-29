@@ -30,7 +30,7 @@ mediaRelay.setPublicBase('https://onlyporn.example');
 
 function relayEntryFromUrl(relayUrl) {
   const token = new URL(relayUrl).pathname.split('/')[2];
-  return mediaRelay._test.entries.get(token);
+  return mediaRelay._test.resolveRelayEntry(token);
 }
 
 test('Pornhub catalog parser keeps same-origin viewkeys, posters, and titles', () => {
