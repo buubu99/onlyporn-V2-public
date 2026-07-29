@@ -212,7 +212,7 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Added environment-only TPDB/StashDB configuration and secret-redacted status reporting.
 - Kept the feature disabled by default while source adapters are developed and validated.
 
-## 2.7.0-alpha.4 — TPB4K Phase 2A metadata core
+## 2.7.0-alpha.3 — TPB4K Phase 2A metadata core
 
 - Added environment-only Stash-box GraphQL clients for ThePornDB and StashDB.
 - Added bounded positive and negative metadata caching.
@@ -221,10 +221,31 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Activated ThePornDB recent and 19 studio metadata adapters behind `TPB4K_ENABLED`.
 - Kept all Phase 2A stream resolution empty by design.
 
-## 2.7.0-alpha.4
+## 2.7.0-alpha.4 — TPB4K Phase 2B discovery scaffolding
 
 - Added bounded HTTPS-only metadata discovery feeds for the remaining Phase 2 sources.
 - Rejected HTML placeholders and secret-bearing endpoint query parameters.
 - Added deterministic pagination and in-memory metadata lookup.
 - Kept all Phase 2 stream resolution empty and Stripchat gated to Phase 7.
 - Added Render preview smoke validation for all 28 TPB4K catalog routes.
+
+## TPB4K Phase 2C — alpha.5
+
+- Removed the three nonfunctional external catalog-feed placeholders.
+- Added native PornRips, YesPorn, and HentaiMama catalog/detail acquisition.
+- Added exact-origin HTML safety boundaries and opaque path IDs.
+- Added mandatory live native catalog smoke testing before feature-branch push.
+
+## 2.7.0-alpha.6 — TPB4K Phase 2C live parser correction
+
+- Replaced fragile YesPorn and HentaiMama anchor-only parsing with exact-path, card-level extraction.
+- Added HentaiMama article-level title/poster/rating/year extraction.
+- Added one-request-per-source scheduling, 350 ms spacing, in-flight deduplication, bounded caching, and one retry only for network/5xx failures.
+- Updated the native smoke to allow small live-feed overlap while rejecting complete pagination repeats and identical Hentai modes.
+- TPB4K stream resolution remains intentionally empty.
+
+## 2.7.0-alpha.7 — Hentai live-page acceptance hardening
+
+- Accepts a HentaiMama page containing incidental Cloudflare script markers only when genuine article and `/tvshows/` catalog evidence is also present.
+- Groups all duplicate `/tvshows/<slug>/` anchors by path and extracts the enclosing article, so the empty poster anchor cannot hide the later title anchor.
+- Preserves exact-origin checks, request spacing, caching, pagination checks, and intentionally empty stream output.

@@ -1,3 +1,4 @@
+
 'use strict';
 
 const { BoundedTtlCache } = require('./cache');
@@ -30,7 +31,20 @@ class SourceHttpClient {
     this.cacheTtlMs = Math.max(Number(options.cacheTtlMs || 5 * 60 * 1000), 1_000);
     this.negativeTtlMs = Math.max(Number(options.negativeTtlMs || 60 * 1000), 1_000);
     this.fetchImpl = options.fetchImpl || globalThis.fetch;
+    this.allowHtml = options.allowHtml === true;
+    this.accept = String(options.accept || 'application/json, application/rss+xml, application/xml, text/xml;q=0.9');
+    this.userAgent = String(options.userAgent || 'OnlyPorn-TPB4K/2.7');
     this.checkDns = options.checkDns !== false;
+    this.minRequestIntervalMs = Math.max(Number(options.minRequestIntervalMs ?? 0), 0);
+    this.maxRetries = Math.min(Math.max(Number(options.maxRetries ?? 0), 0), 2);
+    this.retryBaseDelayMs = Math.max(Number(options.retryBaseDelayMs ?? 500), 10);
+    this.now = typeof options.now === 'function' ? options.now : Date.now;
+    this.sleep = typeof options.sleep === 'function'
+      ? options.sleep
+      : milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds));
+    this.inflight = new Map();
+    this.requestQueue = Promise.resolve();
+    this.nextRequestAt = 0;
     this.cache = options.cache || new BoundedTtlCache({
       maxEntries: Math.max(Number(options.cacheMaxEntries || 250), 1),
     });
@@ -61,34 +75,64 @@ class SourceHttpClient {
     return url.toString();
   }
 
-  async fetchText(url, options = {}) {
-    if (!this.configured) return '';
-    const safeUrl = await assertSafeHttpsUrl(url, {
-      allowedHosts: this.allowedHosts,
-      checkDns: this.checkDns,
-    });
-    if (new URL(safeUrl).origin !== this.origin) throw new Error('TPB4K source origin changed unexpectedly');
+  async schedule(task) {
+    const previous = this.requestQueue;
+    let release;
+    this.requestQueue = new Promise(resolve => { release = resolve; });
+    await previous;
+    try {
+      const delay = Math.max(this.nextRequestAt - this.now(), 0);
+      if (delay > 0) await this.sleep(delay);
+      return await task();
+    } finally {
+      this.nextRequestAt = this.now() + this.minRequestIntervalMs;
+      release();
+    }
+  }
 
-    const key = String(options.cacheKey || safeUrl);
-    const cached = this.cache.getEntry(key);
-    if (cached) return cached.negative ? '' : cached.value;
-
+  async requestOnce(safeUrl) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     try {
-      const response = await this.fetchImpl(safeUrl, {
+      return await this.fetchImpl(safeUrl, {
         method: 'GET',
         redirect: 'manual',
         signal: controller.signal,
         headers: {
-          Accept: 'application/json, application/rss+xml, application/xml, text/xml;q=0.9',
-          'User-Agent': 'OnlyPorn-TPB4K/2.7',
+          Accept: this.accept,
+          'Accept-Language': 'en-US,en;q=0.8',
+          'User-Agent': this.userAgent,
         },
       });
-      if (!response || response.status < 200 || response.status >= 300) {
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async fetchWithRetry(safeUrl, key) {
+    for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
+      let response;
+      try {
+        response = await this.requestOnce(safeUrl);
+      } catch (error) {
+        if (attempt < this.maxRetries) {
+          await this.sleep(this.retryBaseDelayMs * (2 ** attempt));
+          continue;
+        }
+        this.cache.setNegative(key, this.negativeTtlMs);
+        throw error;
+      }
+
+      const status = Number(response?.status || 0);
+      if (status >= 500 && status <= 599 && attempt < this.maxRetries) {
+        await this.sleep(this.retryBaseDelayMs * (2 ** attempt));
+        continue;
+      }
+      if (!response || status < 200 || status >= 300) {
         this.cache.setNegative(key, this.negativeTtlMs);
         return '';
       }
+
       const contentLength = Number.parseInt(String(response.headers?.get?.('content-length') || 0), 10) || 0;
       if (contentLength > this.maxResponseBytes) {
         throw new Error('TPB4K source response exceeded the configured byte limit');
@@ -102,15 +146,39 @@ class SourceHttpClient {
       if (Buffer.byteLength(text, 'utf8') > this.maxResponseBytes) {
         throw new Error('TPB4K source response exceeded the configured byte limit');
       }
-      if (/^\s*<!doctype\s+html|^\s*<html\b/i.test(text)) {
+      if (!this.allowHtml && /^(?:\s*<!doctype\s+html|\s*<html\b)/i.test(text)) {
+        this.cache.setNegative(key, this.negativeTtlMs);
+        return '';
+      }
+      if (!text) {
         this.cache.setNegative(key, this.negativeTtlMs);
         return '';
       }
       this.cache.set(key, text, this.cacheTtlMs);
       return text;
-    } finally {
-      clearTimeout(timer);
     }
+    return '';
+  }
+
+  async fetchText(url, options = {}) {
+    if (!this.configured) return '';
+    const safeUrl = await assertSafeHttpsUrl(url, {
+      allowedHosts: this.allowedHosts,
+      checkDns: this.checkDns,
+    });
+    if (new URL(safeUrl).origin !== this.origin) throw new Error('TPB4K source origin changed unexpectedly');
+
+    const key = String(options.cacheKey || safeUrl);
+    const cached = this.cache.getEntry(key);
+    if (cached) return cached.negative ? '' : cached.value;
+
+    const active = this.inflight.get(key);
+    if (active) return active;
+
+    const request = this.schedule(() => this.fetchWithRetry(safeUrl, key))
+      .finally(() => this.inflight.delete(key));
+    this.inflight.set(key, request);
+    return request;
   }
 }
 

@@ -26,6 +26,11 @@ function installBuiltInAdapters(options = {}) {
     config,
     fetchImpl: options.fetchImpl,
     checkDns: options.checkDns,
+    minRequestIntervalMs: options.minRequestIntervalMs,
+    maxRetries: options.maxRetries,
+    retryBaseDelayMs: options.retryBaseDelayMs,
+    now: options.now,
+    sleep: options.sleep,
   });
   for (const adapter of [...metadata.adapters, ...discovery.adapters]) registerAdapterIfAbsent(adapter);
   return Object.freeze({

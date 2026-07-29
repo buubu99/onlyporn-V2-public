@@ -254,7 +254,7 @@ The focused suite verifies the 28-catalog registry, feature flag, magnet/hash no
 
 ```bash
 npm run test:tpb4k-phase2a
-EXPECTED_VERSION=2.7.0-alpha.4 npm run validate:release
+EXPECTED_VERSION=2.7.0-alpha.7 npm run validate:release
 npm run smoke:jav262
 ```
 
@@ -266,3 +266,7 @@ Phase 2A acceptance requires deterministic pagination, header-only metadata auth
 - Source endpoints are HTTPS-only, same-origin, bounded, non-redirecting, and reject HTML.
 - Stripchat emits no partial catalog before Phase 7.
 - Render preview smoke checks manifest count and all 28 catalog endpoints.
+
+## TPB4K Phase 2C
+
+Run `npm run test:tpb4k-phase2c` for offline parser/security coverage and `npm run smoke:tpb4k-native` for mandatory live non-empty catalog proof. All stream responses remain empty in this phase.

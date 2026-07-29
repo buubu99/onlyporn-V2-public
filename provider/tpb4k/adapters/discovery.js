@@ -2,6 +2,7 @@
 
 const { normalizeFeedItem, parseJsonFeed, parseRssFeed } = require('../discovery-normalize');
 const { SourceHttpClient } = require('../source-http');
+const { createNativeAdapter } = require('../native-discovery');
 
 function createMemoryIndex() {
   const entries = new Map();
@@ -112,11 +113,16 @@ function createDiscoveryAdapters(options = {}) {
     config,
     fetchImpl: options.fetchImpl,
     checkDns: options.checkDns,
+    minRequestIntervalMs: options.minRequestIntervalMs,
+    maxRetries: options.maxRetries,
+    retryBaseDelayMs: options.retryBaseDelayMs,
+    now: options.now,
+    sleep: options.sleep,
   };
   const adapters = [
-    createJsonFeedAdapter({ ...common, id: 'pornrips', endpoint: config.discovery.pornrips }),
-    createJsonFeedAdapter({ ...common, id: 'yesporn', endpoint: config.discovery.yesporn }),
-    createJsonFeedAdapter({ ...common, id: 'hentai', endpoint: config.discovery.hentai }),
+    createNativeAdapter('pornrips', common),
+    createNativeAdapter('yesporn', common),
+    createNativeAdapter('hentai', common),
     createSukebeiAdapter({ ...common, endpoint: config.discovery.sukebei }),
     createStripchatGateAdapter(),
   ];

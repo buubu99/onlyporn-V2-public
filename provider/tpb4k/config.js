@@ -71,9 +71,9 @@ function readTpb4kConfig(env = process.env) {
       max: 10 * 1024 * 1024,
     }),
     discovery: Object.freeze({
-      pornrips: validateConfiguredEndpoint(env.TPB4K_PORNRIPS_CATALOG_URL, 'PornRips catalog endpoint'),
-      yesporn: validateConfiguredEndpoint(env.TPB4K_YESPORN_CATALOG_URL, 'YesPorn catalog endpoint'),
-      hentai: validateConfiguredEndpoint(env.TPB4K_HENTAI_CATALOG_URL, 'Hentai catalog endpoint'),
+      pornrips: 'https://pornrips.to/',
+      yesporn: 'https://yesporn.vip/',
+      hentai: 'https://hentaimama.io/',
       sukebei: validateConfiguredEndpoint(
         env.TPB4K_SUKEBEI_RSS_URL || 'https://sukebei.nyaa.si/?page=rss',
         'Sukebei RSS endpoint'
