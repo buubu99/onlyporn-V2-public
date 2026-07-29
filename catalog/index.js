@@ -7,6 +7,7 @@ const xvideosCatalog = require('./xvideos.json');
 const xnxxCatalog = require('./xnxx.json');
 const javhdpornCatalog = require('./javhdporn.json');
 const pornhubCatalog = require('./pornhub.json');
+const { isTpb4kEnabled, tpb4kCatalogs } = require('./tpb4k');
 
 function randomize(catalogs) {
   const arr = catalogs.map((_e, i) => i);
@@ -22,6 +23,7 @@ const catalogNames = [
   'xnxx',
   'javhdporn',
   'pornhub',
+  ...(isTpb4kEnabled() ? ['tpb4k'] : []),
 ];
 
 const catalogs = [
@@ -32,7 +34,8 @@ const catalogs = [
   xvideosCatalog,
   xnxxCatalog,
   javhdpornCatalog,
-  pornhubCatalog
+  pornhubCatalog,
+  ...(isTpb4kEnabled() ? tpb4kCatalogs : []),
 ];
 
 const addonEnabled = (id) => {
