@@ -174,3 +174,11 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Added protected `phncdn.com` HLS/MP4 relay support with Origin, Referer, User-Agent, Range support, relative child rewriting, and exact signed-query preservation.
 - Stream extraction always refreshes the video page so temporary CDN signatures are not reused from stale HTML.
 - Updated older regression tests to accept later semantic versions while retaining their original behavior assertions.
+
+## Hardening Phase 0 — 2.6.1
+
+- Replaced the relay's 45-minute per-child token model with 8-hour playback sessions.
+- HLS master, variant, key, map, and segment children now use HMAC-authenticated stateless tokens tied to one parent session.
+- A multi-hour variant with thousands of segments now consumes one in-memory session entry instead of one entry per segment.
+- Preserved provider-specific headers, host allowlists, signed query parameters, Range behavior, JAVHDPorn wrapper decoding, and all eight provider integrations.
+- Added long-playback, 2,000-segment capacity, nested-playlist reuse, and tamper-rejection regression tests.

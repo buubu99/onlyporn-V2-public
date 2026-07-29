@@ -199,3 +199,14 @@ The release is not considered complete until Render returns a non-empty SpankBan
 - Static release validator: JavaScript/Python syntax, catalog descriptors, required files, secret checks, and whitespace checks passed in the build environment.
 - Core isolated Pornhub tests: media-definition parsing, all-resolution stream creation, relay allowlist, manifest counts, and signed HLS child-query preservation passed.
 - Complete dependency-backed release tests remain mandatory in the supplied Mac deployment script before commit and push.
+
+## 2.6.1 Hardening Phase 0 validation
+
+Required gates:
+
+```bash
+npm run test:phase0
+EXPECTED_VERSION=2.6.1 npm run validate:release
+```
+
+Phase 0 additionally verifies that an 8-hour parent relay session can represent a 2,000-segment VOD playlist without increasing the in-memory session cache beyond one entry, that nested playlists retain the same session, and that modified child tokens are rejected.

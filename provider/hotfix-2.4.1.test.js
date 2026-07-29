@@ -64,13 +64,13 @@ test('HLS relay rewrites playlists, media segments, and key URIs to absolute rel
     entry
   );
 
-  const relayUrls = rewritten.match(/https:\/\/onlyporn\.example\/media\/[A-Za-z0-9_-]+\/[^"\s,]+/g) || [];
+  const relayUrls = rewritten.match(/https:\/\/onlyporn\.example\/media\/[A-Za-z0-9._-]+\/[^"\s,]+/g) || [];
   assert.equal(relayUrls.length, 4);
   assert.doesNotMatch(rewritten, /segments\/part-0001\.ts/);
   assert.doesNotMatch(rewritten, /\.\.\/720\/index\.m3u8/);
 
   const targets = relayUrls.map(url => {
-    const stored = mediaRelay._test.entries.get(tokenFromRelayUrl(url));
+    const stored = mediaRelay._test.resolveRelayEntry(tokenFromRelayUrl(url));
     assert.ok(stored);
     assert.equal(stored.provider, 'xvideos');
     assert.equal(stored.headers.Referer, entry.headers.Referer);
@@ -158,7 +158,7 @@ test('Eporner streams are relayed by OnlyPorn so signed media stays on the Rende
   assert.equal(response.streams.length, 1);
   assert.match(response.streams[0].url, /^https:\/\/onlyporn\.example\/media\//);
   assert.equal(response.streams[0].behaviorHints.notWebReady, false);
-  const stored = mediaRelay._test.entries.get(tokenFromRelayUrl(response.streams[0].url));
+  const stored = mediaRelay._test.resolveRelayEntry(tokenFromRelayUrl(response.streams[0].url));
   assert.match(stored.url, /h264/);
   assert.equal(stored.provider, 'eporner');
   assert.equal(stored.headers.Referer, page);

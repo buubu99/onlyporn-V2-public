@@ -108,6 +108,7 @@ const requiredFiles = [
   'provider/phase4.test.js',
   'provider/phase5.test.js',
   'provider/phase6.test.js',
+  'provider/phase0-hardening.test.js',
   'provider/hotfix-2.5.1.test.js',
   'provider/hotfix-2.5.2.test.js',
   'provider/hotfix-2.5.3.test.js',
