@@ -7,7 +7,10 @@ const xvideosCatalog = require('./xvideos.json');
 const xnxxCatalog = require('./xnxx.json');
 const javhdpornCatalog = require('./javhdporn.json');
 const pornhubCatalog = require('./pornhub.json');
-const { isTpb4kEnabled, tpb4kCatalogs } = require('./tpb4k');
+const {
+  isTpb4kEnabled,
+  tpb4kCatalogs: sourceTpb4kCatalogs,
+} = require('./tpb4k');
 
 function randomize(catalogs) {
   const arr = catalogs.map((_e, i) => i);
@@ -26,7 +29,72 @@ const catalogNames = [
   ...(isTpb4kEnabled() ? ['tpb4k'] : []),
 ];
 
-const catalogs = [
+const COMPACT_EPORNER_GENRES = [
+  '4k Porn',
+  'HD 1080p',
+  '60fps',
+  'Anal',
+  'POV',
+  'Amateur',
+  'Japanese',
+  'Asian Porn',
+  'Big Tits',
+  'Teens',
+  'Creampie',
+];
+
+const COMPACT_SPANKBANG_GENRES = [
+  'Trending',
+  'New',
+  'Popular',
+  'Upcoming',
+  '4K (Trending)',
+  '4K (New)',
+  '4K (Popular)',
+  'Milf (Trending)',
+  'Teen (Trending)',
+  'Amateur (Trending)',
+  'Asian (Trending)',
+  'Big Tits (Trending)',
+  'Anal (Trending)',
+  'Creampie (Trending)',
+];
+
+function compactLegacyCatalog(catalog) {
+  const compact = { ...catalog };
+
+  // `extraSupported` duplicates the entries already declared in `extra`.
+  delete compact.extraSupported;
+
+  if (Array.isArray(compact.extra)) {
+    compact.extra = compact.extra.map(item => {
+      if (item.name !== 'genre') return { ...item };
+
+      if (compact.id === 'eporner') {
+        return { name: 'genre', options: COMPACT_EPORNER_GENRES };
+      }
+
+      if (compact.id === 'spankbang') {
+        return { name: 'genre', options: COMPACT_SPANKBANG_GENRES };
+      }
+
+      return { ...item };
+    });
+  }
+
+  return compact;
+}
+
+function compactTpb4kCatalog(catalog) {
+  return {
+    id: catalog.id,
+    type: catalog.type,
+    name: catalog.name,
+    extra: [{ name: 'skip' }],
+  };
+}
+
+const legacyCatalogs = [
   ...epornerCatalogs,
   ...spankbangCatalogs,
   ...xhamsterCatalogs,
@@ -35,20 +103,24 @@ const catalogs = [
   xnxxCatalog,
   javhdpornCatalog,
   pornhubCatalog,
+].map(compactLegacyCatalog);
+
+const tpb4kCatalogs = sourceTpb4kCatalogs.map(compactTpb4kCatalog);
+
+const catalogs = [
+  ...legacyCatalogs,
   ...(isTpb4kEnabled() ? tpb4kCatalogs : []),
 ];
 
-const addonEnabled = (id) => {
-  return getActiveProvider(id) !== null;
-}
+const addonEnabled = id => getActiveProvider(id) !== null;
 
-const getActiveProvider = (id) => {
+const getActiveProvider = id => {
   const value = String(id || '');
 
   for (const name of catalogNames) {
     if (
       value === name ||
-      new RegExp(`^${name}(?:[.\-_:]|$)`, 'i').test(value) ||
+      new RegExp(`^${name}(?:[.\\-_:]|$)`, 'i').test(value) ||
       value.startsWith(`onlyporn:${name}:`)
     ) {
       return name;
@@ -56,11 +128,11 @@ const getActiveProvider = (id) => {
   }
 
   return null;
-}
+};
 
 module.exports = {
   catalogs,
   catalogNames,
   addonEnabled,
-  getActiveProvider
+  getActiveProvider,
 };

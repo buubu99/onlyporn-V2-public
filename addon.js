@@ -24,6 +24,12 @@ const manifest = {
   },
 };
 
+const manifestBytes = Buffer.byteLength(JSON.stringify(manifest), 'utf8');
+
+if (manifestBytes >= 8192) {
+  throw new Error(`OnlyPorn manifest is ${manifestBytes} bytes; it must remain below 8192 bytes`);
+}
+
 const builder = new addonBuilder(manifest);
 
 builder.defineCatalogHandler(args =>
@@ -53,6 +59,6 @@ builder.defineMetaHandler(args =>
     })
 );
 
-logger.info({ version: manifest.version, catalogs: manifest.catalogs.length }, 'OnlyPorn manifest loaded');
+logger.info({ version: manifest.version, catalogs: manifest.catalogs.length, manifestBytes }, 'OnlyPorn manifest loaded');
 
 module.exports = builder.getInterface();
