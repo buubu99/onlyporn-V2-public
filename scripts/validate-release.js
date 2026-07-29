@@ -107,6 +107,7 @@ const requiredFiles = [
   'provider/phase3.test.js',
   'provider/phase4.test.js',
   'provider/phase5.test.js',
+  'provider/phase6.test.js',
   'provider/hotfix-2.5.1.test.js',
   'provider/hotfix-2.5.2.test.js',
   'provider/hotfix-2.5.3.test.js',
@@ -116,14 +117,20 @@ const requiredFiles = [
   'provider/javhdporn-safari-impersonation.js',
   'provider/javhdporn-player.js',
   'provider/javhdporn.js',
+  'provider/pornhub-safari-impersonation.js',
+  'provider/pornhub.js',
   'provider/safari-impersonation.js',
   'requirements.txt',
   'scripts/install-python-deps.js',
   'scripts/javhdporn_jw_capture.js',
   'scripts/javhdporn_safari_fetch_helper.py',
   'scripts/live-smoke.js',
+  'scripts/pornhub_safari_fetch_helper.py',
   'scripts/safari_fetch_helper.py',
   'test/fixtures/hls/master.m3u8',
+  'test/fixtures/pornhub/catalog.html',
+  'test/fixtures/pornhub/video.html',
+  'test/fixtures/pornhub/mp4-response.json',
 ];
 for (const required of requiredFiles) {
   if (!fs.existsSync(path.join(ROOT, required))) errors.push(`Required release file missing: ${required}`);

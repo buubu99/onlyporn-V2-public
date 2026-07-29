@@ -95,8 +95,8 @@ test('JAVHDPorn media relay hosts and manifest wiring are present', () => {
   });
   assert.match(relayUrl, /^https:\/\/onlyporn\.example\/media\//);
   assert.equal(catalogNames.includes('javhdporn'), true);
-  assert.equal(catalogs.length, 8);
-  assert.equal(new Set(catalogs.map(item => item.id)).size, 8);
+  assert.equal(catalogs.length >= 8, true);
+  assert.equal(new Set(catalogs.map(item => item.id)).size, catalogs.length);
   assert.equal(getActiveProvider('onlyporn:javhdporn:test'), 'javhdporn');
   assert.equal(loadProvider('javhdporn').getName(), 'javhdporn');
 });

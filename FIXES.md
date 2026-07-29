@@ -163,3 +163,14 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Added second-layer decryption for JAV HD Porn `reserve[i].data` player values.
 - Prioritized reserve players before the primary player after live testing showed the primary Maxstream CDN returned HTTP 403 from Render while reserve player zero resolved to `streamhls.click`.
 - Removed raw JAV HLS fallback behavior; candidates rejected by the protected relay are now omitted.
+
+## Phase 6 — 2.6.0
+
+- Added Pornhub as the eighth provider and ninth catalog.
+- Added a provider-isolated persistent `curl_cffi` Chrome helper with public-access disclaimer cookies.
+- Added same-origin `viewkey` catalog IDs, catalog/search/pagination parsing, Open Graph/JSON-LD metadata, and duplicate filtering.
+- Added complete `mediaDefinitions` parsing for every signed HLS resolution.
+- Added optional `/video/get_media` expansion for direct MP4 resolutions without treating an empty array as a failure.
+- Added protected `phncdn.com` HLS/MP4 relay support with Origin, Referer, User-Agent, Range support, relative child rewriting, and exact signed-query preservation.
+- Stream extraction always refreshes the video page so temporary CDN signatures are not reused from stale HTML.
+- Updated older regression tests to accept later semantic versions while retaining their original behavior assertions.

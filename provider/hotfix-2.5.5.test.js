@@ -9,6 +9,16 @@ const mediaRelay = require('../media-relay');
 const createJavHdPorn = require('./javhdporn');
 
 const ROOT = path.resolve(__dirname, '..');
+
+function versionAtLeast(actual, minimum) {
+  const a = String(actual).split('.').map(Number);
+  const b = String(minimum).split('.').map(Number);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const delta = (a[index] || 0) - (b[index] || 0);
+    if (delta !== 0) return delta > 0;
+  }
+  return true;
+}
 mediaRelay.setPublicBase('https://onlyporn.example');
 
 test('SpankBang treats homepage bootstrap as best effort and trusts the requested route', () => {
@@ -110,8 +120,8 @@ test('JAVHDPorn keeps a relay-compatible reserve stream and filters the blocked 
   assert.equal(response.streams[0].behaviorHints.notWebReady, false);
 });
 
-test('OnlyPorn hotfix release reports version 2.5.5', () => {
+test('OnlyPorn retains hotfix 2.5.5 coverage in later releases', () => {
   const pkg = require('../package.json');
-  assert.equal(pkg.version, '2.5.5');
+  assert.equal(versionAtLeast(pkg.version, '2.5.5'), true);
   assert.match(pkg.scripts['test:release'], /hotfix-2\.5\.5\.test\.js/);
 });

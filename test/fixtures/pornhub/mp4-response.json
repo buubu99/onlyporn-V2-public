@@ -1,0 +1,12 @@
+[
+  {
+    "format": "mp4",
+    "quality": "1080",
+    "videoUrl": "https://cv-h.phncdn.com/videos/fixture/1080P_4000K_fixture.mp4?h=mp4a&e=9999999999"
+  },
+  {
+    "format": "mp4",
+    "quality": "720",
+    "videoUrl": "https://cv-h.phncdn.com/videos/fixture/720P_2000K_fixture.mp4?h=mp4b&e=9999999999"
+  }
+]

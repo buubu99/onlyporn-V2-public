@@ -1,0 +1,34 @@
+{
+  "type": "movie",
+  "name": "OnlyPorn: Pornhub",
+  "id": "pornhub",
+  "posterShape": "landscape",
+  "extra": [
+    { "name": "search" },
+    {
+      "name": "genre",
+      "options": [
+        "Amateur",
+        "Anal",
+        "Asian",
+        "Big Ass",
+        "Big Tits",
+        "Blowjob",
+        "Compilation",
+        "Creampie",
+        "Deepthroat",
+        "Ebony",
+        "Japanese",
+        "Latina",
+        "Lesbian",
+        "MILF",
+        "POV",
+        "Public",
+        "Reality",
+        "Teen"
+      ]
+    },
+    { "name": "skip" }
+  ],
+  "extraSupported": ["search", "genre", "skip"]
+}

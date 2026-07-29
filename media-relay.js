@@ -14,6 +14,7 @@ const PROVIDER_SUFFIXES = {
   eporner: ['eporner.com'],
   xvideos: ['xvideos.com', 'xvideos-cdn.com'],
   xnxx: ['xnxx.com', 'xnxx-cdn.com'],
+  pornhub: ['phncdn.com'],
   javhdporn: [
     'javhdporn.net',
     'pornfhd.com',

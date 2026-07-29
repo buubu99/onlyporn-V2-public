@@ -188,3 +188,14 @@ The release is not considered complete until Render returns a non-empty SpankBan
 - It verifies SpankBang no longer throws when the homepage warmup is challenged.
 - It verifies a blocked Maxstream candidate is not returned raw and a relay-compatible `streamhls.click` reserve candidate remains available.
 - Live acceptance requires a non-empty SpankBang catalog and an OnlyPorn `/media/` JAV stream URL.
+
+## 2.6.0 validation
+
+- Mac reconnaissance: Pornhub catalog and video pages returned HTTP 200; 44 unique viewkeys were found; `mediaDefinitions` exposed four HLS resolutions.
+- Render reconnaissance: catalog and video pages returned HTTP 200 through Chrome `curl_cffi`; 1080p/720p/480p/240p HLS definitions were parsed.
+- Render `/video/get_media` returned `[]` for one sample and was treated as an optional MP4 source rather than a playback failure.
+- Fresh Render HLS master and variant returned HTTP 200.
+- Fresh Render MPEG-TS segment returned HTTP 200 `video/MP2T`, 168824 bytes, and began with sync byte `0x47`.
+- Static release validator: JavaScript/Python syntax, catalog descriptors, required files, secret checks, and whitespace checks passed in the build environment.
+- Core isolated Pornhub tests: media-definition parsing, all-resolution stream creation, relay allowlist, manifest counts, and signed HLS child-query preservation passed.
+- Complete dependency-backed release tests remain mandatory in the supplied Mac deployment script before commit and push.

@@ -77,6 +77,10 @@ test('OnlyPorn retains the 2.5.1 Safari transport regression coverage', () => {
   const packageInfo = JSON.parse(
     fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')
   );
-  assert.match(packageInfo.version, /^2\.5\.[1-9]\d*$/);
+  const [major, minor, patch] = packageInfo.version.split('.').map(Number);
+  assert.ok(
+    major > 2 ||
+      (major === 2 && (minor > 5 || (minor === 5 && patch >= 1)))
+  );
   assert.match(packageInfo.scripts['test:release'], /hotfix-2\.5\.1\.test\.js/);
 });

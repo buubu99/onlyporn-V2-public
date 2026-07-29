@@ -1,18 +1,14 @@
 # OnlyPorn
 
-A self-hosted Stremio addon fork with Eporner, Porntrex, SpankBang, XVideos, XNXX, xHamster, and JAV HD Porn providers.
+A self-hosted Stremio addon fork with Eporner, Porntrex, SpankBang, XVideos, XNXX, xHamster, JAV HD Porn, and Pornhub providers.
 
-## Current release: 2.5.5
+## Current release: 2.6.0
 
-OnlyPorn v2.5.5 corrects two live-production regressions confirmed on Render:
+OnlyPorn v2.6.0 adds Pornhub as the eighth provider and ninth catalog while retaining the stable v2.5.5 SpankBang and JAV HD Porn fixes.
 
-- SpankBang homepage bootstrap is now best effort. A Cloudflare challenge on `/` no longer aborts a real catalog or video route that returns HTTP 200.
-- JAV HD Porn now decrypts the inner `reserve[i].data` player values returned by `/api/play/` and evaluates reserve players before the primary player.
-- Reserve player discovery can select the working `video1.javhdporn.net` → `streamhls.click` path when the primary player resolves to a Render-blocked Maxstream CDN.
-- HLS candidates rejected by the protected relay are dropped instead of being exposed as raw, unsupported Stremio links.
-- The existing protected HLS playlist rewriting and PNG-wrapped TikTok MPEG-TS decoding remain unchanged.
+Pornhub support includes public catalog/search/pagination, metadata, every unique signed HLS resolution, optional direct MP4 resolutions from `/video/get_media`, a provider-isolated Chrome `curl_cffi` session, and protected `phncdn.com` HLS/MP4 relay handling with exact signed-query preservation.
 
-See `HOTFIX_2.5.5.md` and `DEPLOY_2.5.5.md`.
+See `PHASE6_RELEASE.md` and `DEPLOY_2.6.0.md`.
 
 ## Runtime
 
@@ -22,12 +18,13 @@ See `HOTFIX_2.5.5.md` and `DEPLOY_2.5.5.md`.
 ## Commands
 
 ```bash
+npm run test:phase6
 npm run test:hotfix255
 npm run test:phase4
 npm run test:phase5
-npm run validate:release
-npm run smoke:live -- https://onlyporn-v2-public-k143.onrender.com 2.5.5
+EXPECTED_VERSION=2.6.0 npm run validate:release
+npm run smoke:live -- https://onlyporn-v2-public-k143.onrender.com 2.6.0
 npm start
 ```
 
-The release validator checks JavaScript and Python syntax, packaging, secret-bearing files, whitespace, catalog descriptors, and all provider regression tests. Live Render verification remains required because Cloudflare and media-CDN behavior are external runtime dependencies.
+The release validator checks JavaScript and Python syntax, packaging, secret-bearing files, whitespace, catalog descriptors, and all provider regression tests. Live Render verification remains required because Cloudflare, temporary signatures, and media-CDN behavior are external runtime dependencies.

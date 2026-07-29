@@ -20,6 +20,7 @@ const limits = {
   xvideos: 50,
   xnxx: 48,
   javhdporn: 24,
+  pornhub: 40,
 };
 
 function endpoint(pathname) {
@@ -58,11 +59,11 @@ function providerName(catalogId) {
 
   const catalogs = Array.isArray(manifest.catalogs) ? manifest.catalogs : [];
   console.log(`Catalogs declared: ${catalogs.length}`);
-  if (catalogs.length !== 8) failures.push(`Expected 8 catalogs, received ${catalogs.length}`);
+  if (catalogs.length !== 9) failures.push(`Expected 9 catalogs, received ${catalogs.length}`);
 
   for (const catalog of catalogs) {
     const id = catalog.id;
-    const firstUrl = endpoint(`/catalog/movie/${encodeURIComponent(id)}.json?phase5=${Date.now()}`);
+    const firstUrl = endpoint(`/catalog/movie/${encodeURIComponent(id)}.json?phase6=${Date.now()}`);
     try {
       const first = await getJson(firstUrl);
       const firstMetas = Array.isArray(first.metas) ? first.metas : [];
@@ -86,7 +87,7 @@ function providerName(catalogId) {
       let pageNote = '';
       if (limit) {
         const secondUrl = endpoint(
-          `/catalog/movie/${encodeURIComponent(id)}/skip=${limit}.json?phase5=${Date.now()}`
+          `/catalog/movie/${encodeURIComponent(id)}/skip=${limit}.json?phase6=${Date.now()}`
         );
         const second = await getJson(secondUrl);
         const secondMetas = Array.isArray(second.metas) ? second.metas : [];

@@ -8,25 +8,13 @@ const { captureJwPlayerSources } = require('./javhdporn-jw-config');
 
 const ROOT = path.resolve(__dirname, '..');
 
-
 function versionAtLeast(actual, minimum) {
-  const current = actual.split('.').map(Number);
-  const required = minimum.split('.').map(Number);
-
-  if (
-    current.length !== 3 ||
-    required.length !== 3 ||
-    current.some(value => !Number.isInteger(value)) ||
-    required.some(value => !Number.isInteger(value))
-  ) {
-    return false;
+  const a = String(actual).split('.').map(Number);
+  const b = String(minimum).split('.').map(Number);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const delta = (a[index] || 0) - (b[index] || 0);
+    if (delta !== 0) return delta > 0;
   }
-
-  for (let index = 0; index < 3; index += 1) {
-    if (current[index] > required[index]) return true;
-    if (current[index] < required[index]) return false;
-  }
-
   return true;
 }
 
@@ -72,11 +60,8 @@ test('JWPlayer capture emits a marked result and exits immediately', () => {
   assert.doesNotMatch(bridgeSource, /\.at\(-1\)/);
 });
 
-test('OnlyPorn hotfix release reports version 2.5.4', () => {
+test('OnlyPorn retains hotfix 2.5.4 coverage in later releases', () => {
   const pkg = require('../package.json');
-  assert.ok(
-    versionAtLeast(pkg.version, '2.5.4'),
-    `Expected version 2.5.4 or newer, detected ${pkg.version}`,
-  );
+  assert.equal(versionAtLeast(pkg.version, '2.5.4'), true);
   assert.match(pkg.scripts['test:release'], /hotfix-2\.5\.4\.test\.js/);
 });
