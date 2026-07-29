@@ -199,3 +199,20 @@ The release is not considered complete until Render returns a non-empty SpankBan
 - Static release validator: JavaScript/Python syntax, catalog descriptors, required files, secret checks, and whitespace checks passed in the build environment.
 - Core isolated Pornhub tests: media-definition parsing, all-resolution stream creation, relay allowlist, manifest counts, and signed HLS child-query preservation passed.
 - Complete dependency-backed release tests remain mandatory in the supplied Mac deployment script before commit and push.
+
+## 2.6.2 validation
+
+Live Render investigation on v2.6.0 completed the full three-layer JAVHDPorn pipeline for `fc2-ppv-3854676` and `fc2-ppv-4730094`. Both titles decoded one fresh HLS source on `akamai-cache-p01.vdcdn.xyz`. For both titles, the master playlist, first variant playlist, and first segment returned HTTP 200 from Render with the saved Safari-session Cookie, Origin, Referer, and User-Agent headers. The segments were named `seg0.webp`, reported `image/webp`, and contained valid aligned MPEG-TS beginning at byte zero with no wrapper.
+
+The focused hotfix suite validates:
+
+- exact and subdomain `vdcdn.xyz` approval only for JAVHDPorn;
+- rejection of lookalikes and unrelated `.xyz` hosts;
+- preservation of custom `#EXT-X-TOKEN` playlist lines;
+- `.webp` EXTINF objects classified as protected media segments;
+- raw MPEG-TS returned byte-identically as `video/mp2t`;
+- existing 70-byte PNG-wrapper removal remains operational;
+- Safari playback headers remain attached to relayed requests;
+- Hardening Phase 0 is absent from this release.
+
+Run `npm run test:hotfix262`, then `EXPECTED_VERSION=2.6.2 npm run validate:release`. Before commit and push, run `npm run smoke:jav262` from a network environment that can reach JAVHDPorn. The smoke command repeats all three decoding layers for the two investigated titles, verifies master, variant, and segment HTTP responses, validates MPEG-TS bytes, and confirms protected relay registration without printing signed URLs or cookies.

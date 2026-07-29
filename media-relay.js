@@ -21,6 +21,7 @@ const PROVIDER_SUFFIXES = {
     'storagexhd.com',
     'streamhls.click',
     'tiktokcdn.com',
+    'vdcdn.xyz',
   ],
 };
 
@@ -242,14 +243,30 @@ function stripPngWrappedTsBuffer(buffer) {
   return looksLikeTransportStream(payload) ? payload : null;
 }
 
-function isJavWrappedSegment(entry) {
+function isJavTransportSegment(entry) {
   if (entry?.provider !== 'javhdporn' || entry?.kind !== 'segment') return false;
   try {
     const hostname = new URL(entry.url).hostname.toLowerCase();
-    return hostname === 'tiktokcdn.com' || hostname.endsWith('.tiktokcdn.com');
+    return (
+      hostname === 'tiktokcdn.com' ||
+      hostname.endsWith('.tiktokcdn.com') ||
+      hostname === 'vdcdn.xyz' ||
+      hostname.endsWith('.vdcdn.xyz')
+    );
   } catch {
     return false;
   }
+}
+
+function normalizeJavTransportSegment(buffer) {
+  const input = Buffer.isBuffer(buffer) ? buffer : Buffer.from(buffer || '');
+  if (looksLikeTransportStream(input)) {
+    return { payload: input, wrapperBytes: 0 };
+  }
+
+  const payload = stripPngWrappedTsBuffer(input);
+  if (!payload) return null;
+  return { payload, wrapperBytes: input.length - payload.length };
 }
 
 async function upstreamRequest(entry, { method = 'GET', range, text = false, buffer = false } = {}) {
@@ -344,7 +361,7 @@ async function handleRequest(req, res) {
       return;
     }
 
-    if (isJavWrappedSegment(entry)) {
+    if (isJavTransportSegment(entry)) {
       const { response } = await upstreamRequest(entry, {
         method: 'GET',
         text: false,
@@ -356,29 +373,31 @@ async function handleRequest(req, res) {
         return;
       }
 
-      const wrapped = Buffer.from(response.data || '');
-      const payload = stripPngWrappedTsBuffer(wrapped);
-      if (!payload) {
-        res.status(502).type('text/plain').send('JAVHDPorn segment wrapper was not recognized');
+      const upstreamPayload = Buffer.from(response.data || '');
+      const normalized = normalizeJavTransportSegment(upstreamPayload);
+      if (!normalized) {
+        res.status(502).type('text/plain').send('JAVHDPorn segment payload was not recognized');
         return;
       }
 
       logger.debug(
         {
           provider: entry.provider,
-          wrapperBytes: wrapped.length - payload.length,
-          payloadBytes: payload.length,
+          wrapperBytes: normalized.wrapperBytes,
+          payloadBytes: normalized.payload.length,
         },
-        'JAVHDPorn PNG-wrapped MPEG-TS segment decoded'
+        normalized.wrapperBytes
+          ? 'JAVHDPorn PNG-wrapped MPEG-TS segment decoded'
+          : 'JAVHDPorn image-labelled MPEG-TS segment normalized'
       );
 
       res.status(200);
       res.setHeader('Content-Type', 'video/mp2t');
-      res.setHeader('Content-Length', payload.length);
+      res.setHeader('Content-Length', normalized.payload.length);
       res.setHeader('Accept-Ranges', 'none');
       res.setHeader('Cache-Control', 'no-store, max-age=0');
       if (req.method === 'HEAD') res.end();
-      else res.end(payload);
+      else res.end(normalized.payload);
       return;
     }
 
@@ -439,7 +458,8 @@ module.exports = {
   _test: {
     entries,
     hostnameAllowed,
-    isJavWrappedSegment,
+    isJavTransportSegment,
+    normalizeJavTransportSegment,
     kindFromPlaylistTag,
     kindFromUrl,
     normalizePublicBase,

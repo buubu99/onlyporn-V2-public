@@ -2,13 +2,13 @@
 
 A self-hosted Stremio addon fork with Eporner, Porntrex, SpankBang, XVideos, XNXX, xHamster, JAV HD Porn, and Pornhub providers.
 
-## Current release: 2.6.0
+## Current release: 2.6.2
 
-OnlyPorn v2.6.0 adds Pornhub as the eighth provider and ninth catalog while retaining the stable v2.5.5 SpankBang and JAV HD Porn fixes.
+OnlyPorn v2.6.2 is an isolated JAVHDPorn playback hotfix on top of the stable v2.6.0 release. It approves the production-proven `vdcdn.xyz` CDN only inside the JAVHDPorn relay profile and normalizes image-labelled `.webp` segments whose bytes are already valid MPEG-TS.
 
-Pornhub support includes public catalog/search/pagination, metadata, every unique signed HLS resolution, optional direct MP4 resolutions from `/video/get_media`, a provider-isolated Chrome `curl_cffi` session, and protected `phncdn.com` HLS/MP4 relay handling with exact signed-query preservation.
+The three-layer JAVHDPorn decoder, Safari transport, reserve-player ordering, existing `streamhls.click` and TikTok CDN behavior, PNG-wrapper removal, Maxstream rejection, Pornhub provider, 45-minute relay-token model, and 30-second upstream request timeout are unchanged.
 
-See `PHASE6_RELEASE.md` and `DEPLOY_2.6.0.md`.
+See `HOTFIX_2.6.2.md` and `DEPLOY_2.6.2.md`.
 
 ## Runtime
 
@@ -18,12 +18,14 @@ See `PHASE6_RELEASE.md` and `DEPLOY_2.6.0.md`.
 ## Commands
 
 ```bash
+npm run test:hotfix262
 npm run test:phase6
 npm run test:hotfix255
 npm run test:phase4
 npm run test:phase5
-EXPECTED_VERSION=2.6.0 npm run validate:release
-npm run smoke:live -- https://onlyporn-v2-public-k143.onrender.com 2.6.0
+EXPECTED_VERSION=2.6.2 npm run validate:release
+npm run smoke:jav262
+npm run smoke:live -- https://onlyporn-v2-public-k143.onrender.com 2.6.2
 npm start
 ```
 

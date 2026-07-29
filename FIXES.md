@@ -174,3 +174,13 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Added protected `phncdn.com` HLS/MP4 relay support with Origin, Referer, User-Agent, Range support, relative child rewriting, and exact signed-query preservation.
 - Stream extraction always refreshes the video page so temporary CDN signatures are not reused from stale HTML.
 - Updated older regression tests to accept later semantic versions while retaining their original behavior assertions.
+
+## Hotfix 2.6.2 — JAVHDPorn vdcdn playback
+
+- Added exact and subdomain approval for `vdcdn.xyz` only inside the JAVHDPorn protected media profile.
+- Kept lookalike domains, unrelated `.xyz` hosts, and use by other providers blocked.
+- Preserved the existing three-layer JAVHDPorn decoder, Safari cookies and headers, reserve-player ordering, Maxstream rejection, and custom HLS token lines.
+- Added byte-level normalization for `.webp`-named segments that are already aligned MPEG-TS at byte zero, returning them as `video/mp2t` without removing bytes.
+- Retained existing PNG-wrapped MPEG-TS removal, including the production-observed 70-byte wrapper path.
+- Added focused offline regression coverage and a live two-title smoke command.
+- Deliberately did not restore Hardening Phase 0; relay tokens remain on the stable v2.6.0 45-minute model until Phase 0 is reintroduced separately.
