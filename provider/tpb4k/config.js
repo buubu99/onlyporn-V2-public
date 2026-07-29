@@ -1,5 +1,7 @@
 'use strict';
 
+const { validateConfiguredEndpoint } = require('./source-http');
+
 const SECRET_NAMES = Object.freeze([
   'TPDB_API_KEY',
   'STASHDB_API_KEY',
@@ -33,6 +35,7 @@ function readTpb4kConfig(env = process.env) {
 
   return Object.freeze({
     enabled: booleanValue(env.TPB4K_ENABLED, false),
+    renderPreview: booleanValue(env.IS_PULL_REQUEST, false),
     catalogLimit: positiveInteger(env.TPB4K_CATALOG_LIMIT, 40, { min: 1, max: 100 }),
     minimumSeeders: positiveInteger(env.TPB4K_MIN_SEEDERS, 3, { min: 0, max: 100_000 }),
     requestTimeoutMs: positiveInteger(env.TPB4K_REQUEST_TIMEOUT_MS, 15_000, {
@@ -50,6 +53,31 @@ function readTpb4kConfig(env = process.env) {
     metadataCacheMaxEntries: positiveInteger(env.TPB4K_METADATA_CACHE_MAX_ENTRIES, 500, {
       min: 10,
       max: 5_000,
+    }),
+    discoveryCacheTtlMs: positiveInteger(env.TPB4K_DISCOVERY_CACHE_TTL_MS, 5 * 60 * 1000, {
+      min: 5_000,
+      max: 60 * 60 * 1000,
+    }),
+    discoveryNegativeTtlMs: positiveInteger(env.TPB4K_DISCOVERY_NEGATIVE_TTL_MS, 60 * 1000, {
+      min: 1_000,
+      max: 15 * 60 * 1000,
+    }),
+    discoveryCacheMaxEntries: positiveInteger(env.TPB4K_DISCOVERY_CACHE_MAX_ENTRIES, 250, {
+      min: 10,
+      max: 2_000,
+    }),
+    discoveryMaxResponseBytes: positiveInteger(env.TPB4K_DISCOVERY_MAX_RESPONSE_BYTES, 2_000_000, {
+      min: 64 * 1024,
+      max: 10 * 1024 * 1024,
+    }),
+    discovery: Object.freeze({
+      pornrips: validateConfiguredEndpoint(env.TPB4K_PORNRIPS_CATALOG_URL, 'PornRips catalog endpoint'),
+      yesporn: validateConfiguredEndpoint(env.TPB4K_YESPORN_CATALOG_URL, 'YesPorn catalog endpoint'),
+      hentai: validateConfiguredEndpoint(env.TPB4K_HENTAI_CATALOG_URL, 'Hentai catalog endpoint'),
+      sukebei: validateConfiguredEndpoint(
+        env.TPB4K_SUKEBEI_RSS_URL || 'https://sukebei.nyaa.si/?page=rss',
+        'Sukebei RSS endpoint'
+      ),
     }),
     tpdb: Object.freeze({
       configured: Boolean(tpdbApiKey),
@@ -72,6 +100,12 @@ function publicConfigStatus(config = readTpb4kConfig()) {
     requestTimeoutMs: config.requestTimeoutMs,
     tpdbConfigured: config.tpdb.configured,
     stashdbConfigured: config.stashdb.configured,
+    configuredDiscoverySources: Object.entries(config.discovery)
+      .filter(([, value]) => Boolean(value))
+      .map(([name]) => name)
+      .sort(),
+    stripchatPhaseRequired: 7,
+    renderPreview: config.renderPreview,
   });
 }
 

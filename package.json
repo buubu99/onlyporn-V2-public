@@ -1,6 +1,6 @@
 {
   "name": "OnlyPorn",
-  "version": "2.7.0-alpha.3",
+  "version": "2.7.0-alpha.4",
   "description": "Use your TV remote to its full potential!",
   "license": "MIT",
   "scripts": {
@@ -13,7 +13,7 @@
     "dev": "LOG_ENABLED=true LOG_LEVEL=info nodemon server.js",
     "test:phase1": "node --test provider/phase1.test.js",
     "test:phase2": "node --test provider/phase2.test.js",
-    "test:release": "node --test provider/phase1.test.js provider/phase2.test.js provider/catalog-hotfix.test.js provider/phase3.test.js provider/phase4.test.js provider/hotfix-2.4.1.test.js provider/hotfix-2.4.2.test.js provider/phase5.test.js provider/hotfix-2.5.1.test.js provider/hotfix-2.5.2.test.js provider/hotfix-2.5.3.test.js provider/hotfix-2.5.4.test.js provider/hotfix-2.5.5.test.js provider/phase6.test.js provider/hotfix-2.6.2.test.js provider/phase0-hardening.test.js provider/phase1-fail-closed.test.js provider/tpb4k-phase1.test.js provider/tpb4k-phase2a.test.js",
+    "test:release": "node --test provider/phase1.test.js provider/phase2.test.js provider/catalog-hotfix.test.js provider/phase3.test.js provider/phase4.test.js provider/hotfix-2.4.1.test.js provider/hotfix-2.4.2.test.js provider/phase5.test.js provider/hotfix-2.5.1.test.js provider/hotfix-2.5.2.test.js provider/hotfix-2.5.3.test.js provider/hotfix-2.5.4.test.js provider/hotfix-2.5.5.test.js provider/phase6.test.js provider/hotfix-2.6.2.test.js provider/phase0-hardening.test.js provider/phase1-fail-closed.test.js provider/tpb4k-phase1.test.js provider/tpb4k-phase2a.test.js provider/tpb4k-phase2b.test.js",
     "test:hotfix": "node --test provider/catalog-hotfix.test.js",
     "test:phase3": "node --test provider/phase3.test.js",
     "validate:release": "node scripts/validate-release.js && npm run test:release",
@@ -35,7 +35,10 @@
     "test:tpb4k-phase1": "node --test provider/tpb4k-phase1.test.js",
     "inspect:tpb4k": "node scripts/tpb4k-inspect.js",
     "test:tpb4k-phase2a": "node --test provider/tpb4k-phase2a.test.js",
-    "smoke:tpb4k-metadata": "node scripts/tpb4k-metadata-smoke.js"
+    "smoke:tpb4k-metadata": "node scripts/tpb4k-metadata-smoke.js",
+    "test:tpb4k-phase2b": "node --test provider/tpb4k-phase2b.test.js",
+    "smoke:tpb4k-discovery": "node scripts/tpb4k-discovery-smoke.js",
+    "smoke:tpb4k-render": "node scripts/tpb4k-render-smoke.js"
   },
   "dependencies": {
     "axios": "^1.13.6",

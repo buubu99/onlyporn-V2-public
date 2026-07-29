@@ -19,17 +19,23 @@ function registerAdapterIfAbsent(adapter) {
 
 function installBuiltInAdapters(options = {}) {
   const { createMetadataAdapters } = require('./adapters/metadata');
-  const bundle = createMetadataAdapters({
-    config: options.config || readTpb4kConfig(options.env || process.env),
+  const { createDiscoveryAdapters } = require('./adapters/discovery');
+  const config = options.config || readTpb4kConfig(options.env || process.env);
+  const metadata = createMetadataAdapters({ config, fetchImpl: options.fetchImpl });
+  const discovery = createDiscoveryAdapters({
+    config,
     fetchImpl: options.fetchImpl,
+    checkDns: options.checkDns,
   });
-  for (const adapter of bundle.adapters) registerAdapterIfAbsent(adapter);
+  for (const adapter of [...metadata.adapters, ...discovery.adapters]) registerAdapterIfAbsent(adapter);
   return Object.freeze({
-    installed: bundle.adapters.map(adapter => adapter.id),
-    configuredProviders: Object.entries(bundle.clients)
+    installed: [...metadata.adapters, ...discovery.adapters].map(adapter => adapter.id).sort(),
+    configuredProviders: Object.entries(metadata.clients)
       .filter(([, client]) => client.configured)
       .map(([id]) => id)
       .sort(),
+    configuredDiscoverySources: discovery.configuredSources,
+    phaseGates: discovery.phaseGates,
   });
 }
 

@@ -212,7 +212,7 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Added environment-only TPDB/StashDB configuration and secret-redacted status reporting.
 - Kept the feature disabled by default while source adapters are developed and validated.
 
-## 2.7.0-alpha.3 — TPB4K Phase 2A metadata core
+## 2.7.0-alpha.4 — TPB4K Phase 2A metadata core
 
 - Added environment-only Stash-box GraphQL clients for ThePornDB and StashDB.
 - Added bounded positive and negative metadata caching.
@@ -220,3 +220,11 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Added metadata normalization, artwork selection, and stable identity preservation.
 - Activated ThePornDB recent and 19 studio metadata adapters behind `TPB4K_ENABLED`.
 - Kept all Phase 2A stream resolution empty by design.
+
+## 2.7.0-alpha.4
+
+- Added bounded HTTPS-only metadata discovery feeds for the remaining Phase 2 sources.
+- Rejected HTML placeholders and secret-bearing endpoint query parameters.
+- Added deterministic pagination and in-memory metadata lookup.
+- Kept all Phase 2 stream resolution empty and Stripchat gated to Phase 7.
+- Added Render preview smoke validation for all 28 TPB4K catalog routes.

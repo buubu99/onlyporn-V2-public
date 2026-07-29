@@ -1,6 +1,6 @@
 # TPB4K Phase 2A — Metadata Core
 
-Version: `2.7.0-alpha.3`
+Version: `2.7.0-alpha.4`
 
 Phase 2A is an isolated metadata release on `feature/tpb4k-v2.7.0`. It must not be merged into production `main`.
 

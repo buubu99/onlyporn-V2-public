@@ -13,6 +13,8 @@ const summary = {
   catalogs: catalogDefinitions.length,
   adapters: listAdapters(),
   configuredMetadataProviders: adapterStatus.configuredProviders,
+  configuredDiscoverySources: adapterStatus.configuredDiscoverySources,
+  phaseGates: adapterStatus.phaseGates,
   config: publicConfigStatus(config),
   selectedCatalogIds: catalogDefinitions.map(item => item.id),
 };

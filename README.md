@@ -45,4 +45,8 @@ The feature is disabled by default with `TPB4K_ENABLED=false`. No live TPB4K sou
 
 ## TPB4K Phase 2A
 
-Version `2.7.0-alpha.3` adds the metadata core for ThePornDB and StashDB. It supports ThePornDB recent metadata and all 19 studio metadata queries with deterministic pagination, bounded caches, and stable scene identity. API keys remain environment-only. PornRips, Hentai, Stripchat, YesPorn, and Sukebei discovery remain later isolated work, and Phase 2A returns no TPB4K streams.
+Version `2.7.0-alpha.4` adds the metadata core for ThePornDB and StashDB. It supports ThePornDB recent metadata and all 19 studio metadata queries with deterministic pagination, bounded caches, and stable scene identity. API keys remain environment-only. PornRips, Hentai, Stripchat, YesPorn, and Sukebei discovery remain later isolated work, and Phase 2A returns no TPB4K streams.
+
+## TPB4K Phase 2B
+
+Alpha.4 adds optional metadata-only discovery feeds for PornRips, YesPorn, Hentai, and Sukebei plus a Render preview smoke suite. Stripchat remains gated to Phase 7.
