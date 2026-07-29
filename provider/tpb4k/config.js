@@ -39,10 +39,22 @@ function readTpb4kConfig(env = process.env) {
       min: 1_000,
       max: 30_000,
     }),
+    metadataCacheTtlMs: positiveInteger(env.TPB4K_METADATA_CACHE_TTL_MS, 10 * 60 * 1000, {
+      min: 5_000,
+      max: 24 * 60 * 60 * 1000,
+    }),
+    metadataNegativeTtlMs: positiveInteger(env.TPB4K_METADATA_NEGATIVE_TTL_MS, 2 * 60 * 1000, {
+      min: 1_000,
+      max: 60 * 60 * 1000,
+    }),
+    metadataCacheMaxEntries: positiveInteger(env.TPB4K_METADATA_CACHE_MAX_ENTRIES, 500, {
+      min: 10,
+      max: 5_000,
+    }),
     tpdb: Object.freeze({
       configured: Boolean(tpdbApiKey),
       apiKey: tpdbApiKey,
-      endpoint: endpoint(env.TPDB_API_URL, 'https://api.theporndb.net'),
+      endpoint: endpoint(env.TPDB_API_URL, 'https://theporndb.net/graphql'),
     }),
     stashdb: Object.freeze({
       configured: Boolean(stashdbApiKey),

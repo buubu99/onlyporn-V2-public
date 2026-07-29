@@ -211,3 +211,12 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Added ranking and deduplication favoring validated direct and cached high-resolution results.
 - Added environment-only TPDB/StashDB configuration and secret-redacted status reporting.
 - Kept the feature disabled by default while source adapters are developed and validated.
+
+## 2.7.0-alpha.3 — TPB4K Phase 2A metadata core
+
+- Added environment-only Stash-box GraphQL clients for ThePornDB and StashDB.
+- Added bounded positive and negative metadata caching.
+- Added deterministic recent/studio pagination without resolution filters.
+- Added metadata normalization, artwork selection, and stable identity preservation.
+- Activated ThePornDB recent and 19 studio metadata adapters behind `TPB4K_ENABLED`.
+- Kept all Phase 2A stream resolution empty by design.

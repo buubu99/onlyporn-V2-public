@@ -10,7 +10,7 @@ const {
 const { readTpb4kConfig, publicConfigStatus } = require('./tpb4k/config');
 const { decodeTpb4kId, encodeTpb4kId } = require('./tpb4k/id-codec');
 const { buildSceneIdentity } = require('./tpb4k/identity');
-const { getAdapter } = require('./tpb4k/index');
+const { getAdapter, installBuiltInAdapters } = require('./tpb4k/index');
 const { normalizeDiscoveryItem } = require('./tpb4k/source-contract');
 
 const TYPE = 'movie';
@@ -85,7 +85,7 @@ function toMetaResponse(item, id) {
       tpb4k: {
         source: item.source,
         sourceId: item.sourceId,
-        identity: identity.digest,
+        identity: item.sceneIdentity || identity.digest,
         releaseDate: identity.releaseDate,
         sceneCode: identity.sceneCode,
       },
@@ -97,6 +97,10 @@ class Tpb4kProvider {
   constructor(options = {}) {
     this.name = 'tpb4k';
     this.env = options.env || process.env;
+    this.fetchImpl = options.fetchImpl;
+    if (options.installBuiltIns !== false) {
+      installBuiltInAdapters({ env: this.env, fetchImpl: this.fetchImpl });
+    }
   }
 
   static create(options) {
@@ -137,12 +141,20 @@ class Tpb4kProvider {
 
     const config = readTpb4kConfig(this.env);
     const skip = Math.max(Number.parseInt(String(args.extra?.skip || 0), 10) || 0, 0);
-    const rawItems = await adapter.catalog({
-      catalog: definition,
-      skip,
-      limit: config.catalogLimit,
-      config,
-    });
+    let rawItems = [];
+    try {
+      rawItems = await adapter.catalog({
+        catalog: definition,
+        skip,
+        limit: config.catalogLimit,
+        config,
+      });
+    } catch {
+      logger().warn(
+        { provider: this.name, catalogId: definition.id, source: definition.source },
+        'TPB4K catalog adapter failed safely'
+      );
+    }
 
     const metas = (Array.isArray(rawItems) ? rawItems : [])
       .map(item => normalizeDiscoveryItem(adapter, { ...item, catalogId: definition.id }))
@@ -170,10 +182,20 @@ class Tpb4kProvider {
     const adapter = getAdapter(decoded.source);
     if (!adapter) return { meta: {} };
 
-    const item = normalizeDiscoveryItem(
-      adapter,
-      await adapter.meta({ sourceId: decoded.sourceId, catalogId: decoded.catalogId })
-    );
+    let rawItem = null;
+    try {
+      rawItem = await adapter.meta({
+        sourceId: decoded.sourceId,
+        catalogId: decoded.catalogId,
+        config: readTpb4kConfig(this.env),
+      });
+    } catch {
+      logger().warn(
+        { provider: this.name, source: decoded.source },
+        'TPB4K metadata adapter failed safely'
+      );
+    }
+    const item = normalizeDiscoveryItem(adapter, rawItem);
     if (!item) return { meta: {} };
     return { meta: toMetaResponse(item, args.id) };
   }
@@ -186,11 +208,19 @@ class Tpb4kProvider {
     if (!adapter) return { streams: [] };
 
     const config = readTpb4kConfig(this.env);
-    const rawCandidates = await adapter.resolve({
-      sourceId: decoded.sourceId,
-      catalogId: decoded.catalogId,
-      config,
-    });
+    let rawCandidates = [];
+    try {
+      rawCandidates = await adapter.resolve({
+        sourceId: decoded.sourceId,
+        catalogId: decoded.catalogId,
+        config,
+      });
+    } catch {
+      logger().warn(
+        { provider: this.name, source: decoded.source },
+        'TPB4K stream adapter failed safely'
+      );
+    }
 
     const normalized = (Array.isArray(rawCandidates) ? rawCandidates : [])
       .map(candidate => normalizeCandidate({ ...candidate, source: decoded.source }))

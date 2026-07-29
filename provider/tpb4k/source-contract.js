@@ -35,9 +35,13 @@ function normalizeDiscoveryItem(adapter, item = {}) {
     quality: String(item.quality || '').trim(),
     seeders: Number.parseInt(String(item.seeders ?? 0), 10) || 0,
     size: item.size ?? 0,
+    duration: Number.parseInt(String(item.duration ?? 0), 10) || 0,
+    sceneIdentity: String(item.sceneIdentity || '').trim(),
     provenance: Object.freeze({
       catalogId: String(item.catalogId || '').trim(),
       detailUrl: String(item.detailUrl || '').trim(),
+      metadataProvider: String(item.metadataProvider || '').trim(),
+      upstreamId: String(item.upstreamId || '').trim(),
     }),
   });
 }

@@ -42,3 +42,7 @@ The release validator checks JavaScript and Python syntax, packaging, secret-bea
 Version `2.7.0-alpha.2` contains the first TPB4K foundation phase. It defines the selected 28 catalogs, strict torrent/direct-media normalization, opaque IDs, scene identity, adapter contracts, and environment-only TPDB/StashDB configuration.
 
 The feature is disabled by default with `TPB4K_ENABLED=false`. No live TPB4K source adapter is included in this phase, so the production 2.6.4 provider/catalog set remains unchanged until individual sources pass fixtures and live validation.
+
+## TPB4K Phase 2A
+
+Version `2.7.0-alpha.3` adds the metadata core for ThePornDB and StashDB. It supports ThePornDB recent metadata and all 19 studio metadata queries with deterministic pagination, bounded caches, and stable scene identity. API keys remain environment-only. PornRips, Hentai, Stripchat, YesPorn, and Sukebei discovery remain later isolated work, and Phase 2A returns no TPB4K streams.
