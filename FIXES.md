@@ -202,3 +202,12 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Added a controlled HTTP 502 response with no raw child URL or signed query leakage.
 - Preserved Phase 0 eight-hour sessions, stateless child tokens, one-session cache behavior, and tamper rejection.
 - Preserved the v2.6.2 JAVHDPorn `vdcdn.xyz` hotfix, custom token lines, raw `.webp` MPEG-TS normalization, PNG-wrapper decoding, and all three decoder layers.
+
+## 2.7.0-alpha.1 — TPB4K Phase 1 foundation
+
+- Added the exact 28 TPB4K catalogs selected for the first OnlyPorn implementation.
+- Added strict candidate normalization so unresolved HTML/detail pages cannot become streams.
+- Added standard `infoHash`/tracker output for torrent candidates and explicit validation for direct media.
+- Added ranking and deduplication favoring validated direct and cached high-resolution results.
+- Added environment-only TPDB/StashDB configuration and secret-redacted status reporting.
+- Kept the feature disabled by default while source adapters are developed and validated.

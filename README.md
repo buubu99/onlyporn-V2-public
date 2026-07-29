@@ -36,3 +36,9 @@ npm start
 ```
 
 The release validator checks JavaScript and Python syntax, packaging, secret-bearing files, whitespace, catalog descriptors, and all provider regression tests. Live Render verification remains required because Cloudflare, temporary signatures, and media-CDN behavior are external runtime dependencies.
+
+## TPB4K integration development
+
+Version `2.7.0-alpha.1` contains the first TPB4K foundation phase. It defines the selected 28 catalogs, strict torrent/direct-media normalization, opaque IDs, scene identity, adapter contracts, and environment-only TPDB/StashDB configuration.
+
+The feature is disabled by default with `TPB4K_ENABLED=false`. No live TPB4K source adapter is included in this phase, so the production 2.6.4 provider/catalog set remains unchanged until individual sources pass fixtures and live validation.
