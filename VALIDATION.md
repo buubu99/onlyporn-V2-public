@@ -222,3 +222,9 @@ Run `npm run test:hotfix262`, then `EXPECTED_VERSION=2.6.2 npm run validate:rele
 The combined release must pass the focused Phase 0 suite and the focused v2.6.2 JAVHDPorn suite. The Phase 0 tests verify an eight-hour session lifetime, one cache entry for a 2,000-segment VOD, nested-playlist session reuse, signed child-token HTTP resolution, and tamper rejection. The v2.6.2 tests verify `vdcdn.xyz` provider isolation, token-line preservation, raw `.webp` MPEG-TS normalization, and existing PNG-wrapper decoding.
 
 Run `npm run test:phase0`, `npm run test:hotfix262`, and `EXPECTED_VERSION=2.6.3 npm run validate:release`. Before commit and push, `npm run smoke:jav262` must again pass both production-proven JAVHDPorn titles. After Render is live, both titles must play and one long video must seek beyond the previous 45-minute internal boundary.
+
+## 2.6.4 validation
+
+Hardening Phase 1 adds `provider/phase1-fail-closed.test.js`. The focused suite proves that approved playlist children still become authenticated relay URLs, while unapproved bare children, unapproved `URI="..."` attributes, and non-HTTPS children fail closed. The HTTP handler must return a controlled 502 with `X-OnlyPorn-Relay-Error: HLS_CHILD_REJECTED`, and the response body must not expose the rejected URL or signed query string.
+
+The same release must retain the Phase 0 eight-hour one-session architecture and the production-verified v2.6.2 JAVHDPorn `vdcdn.xyz` repair. Run `npm run test:hardening1`, `npm run test:phase0`, `npm run test:hotfix262`, and `EXPECTED_VERSION=2.6.4 npm run validate:release`. Before commit and push, `npm run smoke:jav262` must again pass both production-proven JAVHDPorn titles. After Render is live, verify those titles plus one Pornhub HLS stream and confirm no playlist response contains a raw external media URL.

@@ -7,6 +7,7 @@ const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const MAX_SESSIONS = 8000;
 const CHILD_TOKEN_VERSION = 'c1';
 const CHILD_TOKEN_SIGNATURE_BYTES = 18;
+const PLAYLIST_CHILD_ERROR_CODE = 'HLS_CHILD_REJECTED';
 const CHILD_TOKEN_SECRET = crypto.randomBytes(32);
 const MAX_REDIRECTS = 5;
 const PLAYLIST_MAX_BYTES = 4 * 1024 * 1024;
@@ -251,9 +252,20 @@ function resolveRelayEntry(token) {
   return entries.get(token) || resolveChildToken(token);
 }
 
+class PlaylistChildRelayError extends Error {
+  constructor(message, cause) {
+    super(message);
+    this.name = 'PlaylistChildRelayError';
+    this.code = PLAYLIST_CHILD_ERROR_CODE;
+    if (cause) this.cause = cause;
+  }
+}
+
 function resolveChildUrl(parentUrl, value) {
+  const childValue = String(value ?? '').trim();
+  if (!childValue) return '';
   try {
-    return new URL(value, parentUrl).toString();
+    return new URL(childValue, parentUrl).toString();
   } catch {
     return '';
   }
@@ -261,7 +273,10 @@ function resolveChildUrl(parentUrl, value) {
 
 function relayChild(entry, parentUrl, value, kind) {
   const resolved = resolveChildUrl(parentUrl, value);
-  if (!resolved) return value;
+  if (!resolved) {
+    throw new PlaylistChildRelayError('HLS playlist contains an invalid child URL');
+  }
+
   try {
     const publicBase = getPublicBase();
     if (!publicBase) throw new Error('Media relay public base URL is not initialized');
@@ -269,8 +284,12 @@ function relayChild(entry, parentUrl, value, kind) {
     const resolvedKind = kind || kindFromUrl(resolved);
     const token = createChildToken(sessionEntry, resolved, resolvedKind);
     return `${publicBase}/media/${token}/${filenameFor(resolvedKind)}`;
-  } catch {
-    return resolved;
+  } catch (error) {
+    if (error instanceof PlaylistChildRelayError) throw error;
+    throw new PlaylistChildRelayError(
+      'HLS playlist child URL could not be relayed safely',
+      error
+    );
   }
 }
 
@@ -454,7 +473,23 @@ async function handleRequest(req, res) {
         return;
       }
 
-      const rewritten = rewritePlaylist(content, finalUrl, entry);
+      let rewritten;
+      try {
+        rewritten = rewritePlaylist(content, finalUrl, entry);
+      } catch (error) {
+        if (error?.code !== PLAYLIST_CHILD_ERROR_CODE) throw error;
+        logger.warn(
+          {
+            provider: entry.provider,
+            code: error.code,
+            error: error.message,
+          },
+          'HLS playlist was rejected because a child URL could not be relayed safely'
+        );
+        res.setHeader('X-OnlyPorn-Relay-Error', PLAYLIST_CHILD_ERROR_CODE);
+        res.status(502).type('text/plain').send('HLS playlist could not be relayed safely');
+        return;
+      }
       res.status(200);
       res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
       res.setHeader('Cache-Control', 'no-store, max-age=0');
@@ -563,6 +598,7 @@ module.exports = {
   _test: {
     entries,
     MAX_SESSIONS,
+    PLAYLIST_CHILD_ERROR_CODE,
     SESSION_TTL_MS,
     createChildToken,
     hostnameAllowed,
@@ -572,6 +608,7 @@ module.exports = {
     kindFromUrl,
     normalizePublicBase,
     pngPayloadOffset,
+    relayChild,
     resolveRelayEntry,
     rewritePlaylist,
     stripPngWrappedTsBuffer,

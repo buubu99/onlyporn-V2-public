@@ -193,3 +193,12 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Preserved `vdcdn.xyz` approval, custom `#EXT-X-TOKEN` lines, raw `.webp` MPEG-TS normalization, and PNG-wrapper removal.
 - Preserved the three-layer JAVHDPorn decoding pipeline and 30-second AIOStreams timeout.
 - Render restarts still invalidate process-local sessions; restart-safe relay state remains a later hardening phase.
+
+## Hardening Phase 1 — 2.6.4
+
+- Removed the HLS playlist fail-open path that returned a resolved raw upstream URL when a child could not be protected by the relay.
+- Added a dedicated `HLS_CHILD_REJECTED` error for invalid, non-HTTPS, unapproved, or otherwise unrelayable playlist children.
+- Applied the same fail-closed rule to bare URI lines and quoted `URI="..."` attributes.
+- Added a controlled HTTP 502 response with no raw child URL or signed query leakage.
+- Preserved Phase 0 eight-hour sessions, stateless child tokens, one-session cache behavior, and tamper rejection.
+- Preserved the v2.6.2 JAVHDPorn `vdcdn.xyz` hotfix, custom token lines, raw `.webp` MPEG-TS normalization, PNG-wrapper decoding, and all three decoder layers.
