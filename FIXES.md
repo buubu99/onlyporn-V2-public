@@ -289,7 +289,7 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Preserves exact-origin checks, request spacing, caching, pagination checks, and intentionally empty stream output.
 
 
-## 2.7.0-alpha.13 — metadata-first studio rows and global explicit-label filter
+## 2.7.0-alpha.14 — metadata-first studio rows and global explicit-label filter
 
 - Replaced the 19 torrent-filename-first studio rows with direct TPDB/StashDB metadata catalogs.
 - Removed generic fallback posters from those rows; every returned card has real provider artwork.

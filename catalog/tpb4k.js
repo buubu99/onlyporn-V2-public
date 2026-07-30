@@ -148,10 +148,12 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.onlyfans.top',
     name: 'OnlyPorn: OnlyFans · Top',
-    source: 'studio-metadata',
+    source: 'platform-hybrid',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'OnlyFans',
+    metadataMode: 'platform-query',
+    metadataQueries: ['OnlyFans', 'Only Fans'],
   },
   {
     id: 'tpb4k.studio.playboyplus.top',

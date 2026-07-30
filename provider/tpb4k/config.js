@@ -55,6 +55,27 @@ function endpoint(value, fallback) {
   return url.toString().replace(/\/$/, '');
 }
 
+function sukebeiRssEndpoint(value) {
+  const configured = validateConfiguredEndpoint(
+    value || 'https://sukebei.nyaa.si/?page=rss&c=0_0&f=0',
+    'Sukebei RSS endpoint'
+  );
+  if (!configured) return '';
+  const url = new URL(configured);
+  if (url.hostname.toLowerCase() === 'sukebei.nyaa.si') {
+    url.searchParams.set('page', 'rss');
+    // Match the working TPB4K scraper contract. The upstream addon browses
+    // the all-category RSS feed and lets StashDB verification decide which
+    // torrent rows are valid JAV scenes.
+    url.searchParams.set('c', '0_0');
+    if (!url.searchParams.has('f')) url.searchParams.set('f', '0');
+    url.searchParams.delete('skip');
+    url.searchParams.delete('limit');
+    url.searchParams.delete('mode');
+  }
+  return url.toString();
+}
+
 function readTpb4kConfig(env = process.env) {
   const tpdbApiKey = String(env.TPDB_API_KEY || '').trim();
   const stashdbApiKey = String(env.STASHDB_API_KEY || '').trim();
@@ -125,6 +146,36 @@ function readTpb4kConfig(env = process.env) {
       4,
       { min: 1, max: 8 }
     ),
+    metadataProviderCircuitTtlMs: positiveInteger(
+      env.TPB4K_METADATA_PROVIDER_CIRCUIT_TTL_MS,
+      5 * 60 * 1000,
+      { min: 30_000, max: 60 * 60 * 1000 }
+    ),
+    sukebeiEnrichmentDeadlineMs: positiveInteger(
+      env.TPB4K_SUKEBEI_ENRICHMENT_DEADLINE_MS,
+      24_000,
+      { min: 4_000, max: 28_000 }
+    ),
+    sukebeiCodeLookupLimit: positiveInteger(env.TPB4K_SUKEBEI_CODE_LOOKUP_LIMIT, 40, {
+      min: 1,
+      max: 60,
+    }),
+    sukebeiTitleLookupLimit: positiveInteger(env.TPB4K_SUKEBEI_TITLE_LOOKUP_LIMIT, 4, {
+      min: 0,
+      max: 20,
+    }),
+    sukebeiLookupConcurrency: positiveInteger(env.TPB4K_SUKEBEI_LOOKUP_CONCURRENCY, 8, {
+      min: 1,
+      max: 10,
+    }),
+    sukebeiRssPages: positiveInteger(env.TPB4K_SUKEBEI_RSS_PAGES, 4, {
+      min: 1,
+      max: 8,
+    }),
+    sukebeiDetailImageLimit: positiveInteger(env.TPB4K_SUKEBEI_DETAIL_IMAGE_LIMIT, 20, {
+      min: 0,
+      max: 40,
+    }),
     contentFilterOverscanFactor: positiveInteger(env.ONLYPORN_FILTER_OVERSCAN_FACTOR, 3, {
       min: 1,
       max: 5,
@@ -153,10 +204,7 @@ function readTpb4kConfig(env = process.env) {
       pornrips: 'https://pornrips.to/',
       yesporn: 'https://yesporn.vip/',
       hentai: 'https://hentaimama.io/',
-      sukebei: validateConfiguredEndpoint(
-        env.TPB4K_SUKEBEI_RSS_URL || 'https://sukebei.nyaa.si/?page=rss',
-        'Sukebei RSS endpoint'
-      ),
+      sukebei: sukebeiRssEndpoint(env.TPB4K_SUKEBEI_RSS_URL),
     }),
     torrentIndex: Object.freeze({
       mirrors: endpointOrigins(env.TPB4K_TPB_MIRRORS),
@@ -213,4 +261,5 @@ module.exports = {
   publicConfigStatus,
   readTpb4kConfig,
   redactSecrets,
+  sukebeiRssEndpoint,
 };

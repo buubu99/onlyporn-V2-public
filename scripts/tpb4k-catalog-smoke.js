@@ -12,7 +12,7 @@ const FALLBACK_PATH = '/assets/tpb4k/studios/';
 const REQUIRED_STUDIOS = new Set([
   'BrazzersExxtra', 'Cum4K', 'DigitalPlayground', 'DorcelClub', 'MetArt',
   'MetArtX', 'Milfy', 'PlayboyPlus', 'SexArt', 'TheLifeErotic', 'Vixen',
-  'WowGirls', 'XVideosRED',
+  'WowGirls', 'XVideosRED', 'OnlyFans',
 ]);
 
 function percent(part, total) {
@@ -52,8 +52,12 @@ async function main() {
   const studios = catalogDefinitions.filter(item => item.mode === 'studio-top');
   if (!recent) throw new Error('TPDB Recent catalog is missing');
   if (studios.length !== 19) throw new Error(`Expected 19 studio catalogs, found ${studios.length}`);
-  if (!studios.every(item => item.source === 'studio-metadata' && item.lookupSource === 'torrent-index')) {
-    throw new Error('The 19 studio definitions are not metadata-first with torrent lookup provenance');
+  const architectureValid = studios.every(item =>
+    item.lookupSource === 'torrent-index' &&
+    (item.source === 'studio-metadata' || (item.studio === 'OnlyFans' && item.source === 'platform-hybrid'))
+  );
+  if (!architectureValid) {
+    throw new Error('The 19 studio definitions do not preserve metadata-first/hybrid catalog architecture with torrent lookup provenance');
   }
 
   clearAdapters();
@@ -91,7 +95,9 @@ async function main() {
 
   for (const definition of studios) {
     const started = Date.now();
-    const raw = await metadataAdapter.catalog({
+    const definitionAdapter = getAdapter(definition.source);
+    if (!definitionAdapter?.configured) throw new Error(`${definition.name}: source adapter is not configured`);
+    const raw = await definitionAdapter.catalog({
       catalog: definition,
       skip: 0,
       limit: config.catalogLimit,
@@ -104,12 +110,17 @@ async function main() {
     });
     const metas = Array.isArray(payload?.metas) ? payload.metas : [];
     const decoded = metas.map(item => decodeTpb4kId(item.id));
-    const diagnostics = metadataAdapter.diagnostics().metadataCatalog || {};
+    const adapterDiagnostics = definitionAdapter.diagnostics?.() || {};
+    const diagnostics = adapterDiagnostics.metadataCatalog || {};
+    const platformHybrid = adapterDiagnostics.platformHybrid || {};
     const safePosters = metas.filter(item => safeHttps(item.poster)).length;
     const genericPosters = metas.filter(item => fallbackPoster(item.poster)).length;
     const blockedVisible = metas.filter(item => evaluateContent(item, filterConfig).excluded).length;
     const correctIds = decoded.filter(item =>
-      item?.source === 'studio-metadata' && /^(?:tpdb|stashdb):/.test(String(item.sourceId || ''))
+      item?.source === definition.source &&
+      (definition.source === 'platform-hybrid'
+        ? /^(?:tpdb|stashdb|hiddenbay):/.test(String(item.sourceId || ''))
+        : /^(?:tpdb|stashdb):/.test(String(item.sourceId || '')))
     ).length;
     const correctStudio = metas.filter(item => Array.isArray(item.genres) && item.genres.includes(definition.studio)).length;
     const summary = {
@@ -127,6 +138,7 @@ async function main() {
       correctStudioGenres: correctStudio,
       explicitFilteredContentVisible: blockedVisible,
       metadataCatalog: diagnostics,
+      platformHybrid,
       elapsedMs: Date.now() - started,
       first: metas.slice(0, 3).map(item => ({
         title: item.name,
@@ -144,7 +156,7 @@ async function main() {
     }
     if (raw.length !== metas.length) failures.push(`${definition.name}: adapter/provider count mismatch`);
     if (safePosters !== metas.length) failures.push(`${definition.name}: missing safe HTTPS poster`);
-    if (genericPosters) failures.push(`${definition.name}: generic studio fallback leaked into metadata-first row`);
+    if (genericPosters && definition.studio !== 'OnlyFans') failures.push(`${definition.name}: generic studio fallback leaked into metadata-first row`);
     if (correctIds !== metas.length) failures.push(`${definition.name}: wrong metadata-first opaque IDs`);
     if (correctStudio !== metas.length) failures.push(`${definition.name}: wrong studio label`);
     if (blockedVisible) failures.push(`${definition.name}: explicitly excluded content remained visible`);

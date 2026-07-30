@@ -1,6 +1,6 @@
 # TPB4K metadata-first studio catalogs and global explicit-label filter
 
-Version: `2.7.0-alpha.13`
+Version: `2.7.0-alpha.14`
 
 ## Defects confirmed by alpha.12 production logs
 
@@ -108,7 +108,7 @@ npm run test:tpb4k-torrent-index
 npm run test:tpb4k-poster-enrichment
 TPB4K_ENABLED=true npm run smoke:tpb4k-catalog
 TPB4K_ENABLED=true npm run smoke:tpb4k-metadata-first
-EXPECTED_VERSION=2.7.0-alpha.13 npm run validate:release
+EXPECTED_VERSION=2.7.0-alpha.14 npm run validate:release
 npm run smoke:jav262
 ```
 

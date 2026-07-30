@@ -1,6 +1,6 @@
 # TPB4K studio catalogs — alpha.13
 
-Version: `2.7.0-alpha.13`
+Version: `2.7.0-alpha.14`
 
 The 19 selected `tpb4k.studio.*.top` rows are metadata-first catalogs. TPDB and
 StashDB provide the visible scene identity, title, date, performers, tags and

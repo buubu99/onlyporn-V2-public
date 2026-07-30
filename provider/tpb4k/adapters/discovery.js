@@ -5,6 +5,8 @@ const { SourceHttpClient } = require('../source-http');
 const { createNativeAdapter } = require('../native-discovery');
 const { createTorrentIndexAdapter } = require('../torrent-index');
 const { createStudioMetadataAdapter } = require('../studio-metadata');
+const { createSukebeiMetadataAdapter } = require('../sukebei-metadata');
+const { createPlatformHybridAdapter } = require('../platform-hybrid');
 
 function createMemoryIndex() {
   const entries = new Map();
@@ -57,39 +59,7 @@ function createJsonFeedAdapter(options) {
 }
 
 function createSukebeiAdapter(options) {
-  const index = createMemoryIndex();
-  const client = new SourceHttpClient({
-    id: 'sukebei',
-    endpoint: options.endpoint,
-    timeoutMs: options.config.requestTimeoutMs,
-    maxResponseBytes: options.config.discoveryMaxResponseBytes,
-    cacheTtlMs: options.config.discoveryCacheTtlMs,
-    negativeTtlMs: options.config.discoveryNegativeTtlMs,
-    cacheMaxEntries: options.config.discoveryCacheMaxEntries,
-    fetchImpl: options.fetchImpl,
-    checkDns: options.checkDns,
-    allowedContentTypes: ['application/rss+xml', 'application/xml', 'text/xml'],
-  });
-
-  return Object.freeze({
-    id: 'sukebei',
-    configured: client.configured,
-    async catalog({ skip, limit }) {
-      if (!client.configured) return [];
-      const payload = await client.fetchText(client.endpoint, { cacheKey: 'sukebei:rss' });
-      const records = parseRssFeed(payload)
-        .slice(skip, skip + limit)
-        .map((item, position) => normalizeFeedItem('sukebei', item, skip + position))
-        .filter(Boolean);
-      return index.remember(records);
-    },
-    async meta({ sourceId }) {
-      return index.get(sourceId);
-    },
-    async resolve() {
-      return [];
-    },
-  });
+  return createSukebeiMetadataAdapter(options);
 }
 
 function createStripchatGateAdapter() {
@@ -123,12 +93,19 @@ function createDiscoveryAdapters(options = {}) {
     metadataClients: options.metadataClients,
     env: options.env || process.env,
   };
+  const torrentIndex = createTorrentIndexAdapter(common);
+  const studioMetadata = createStudioMetadataAdapter(common);
+  const platformHybrid = createPlatformHybridAdapter({
+    metadataAdapter: studioMetadata,
+    torrentAdapter: torrentIndex,
+  });
   const adapters = [
     createNativeAdapter('pornrips', common),
     createNativeAdapter('yesporn', common),
     createNativeAdapter('hentai', common),
-    createTorrentIndexAdapter(common),
-    createStudioMetadataAdapter(common),
+    torrentIndex,
+    studioMetadata,
+    platformHybrid,
     createSukebeiAdapter({ ...common, endpoint: config.discovery.sukebei }),
     createStripchatGateAdapter(),
   ];

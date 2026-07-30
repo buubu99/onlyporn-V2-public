@@ -184,7 +184,7 @@ class Tpb4kProvider {
       rawItems = await adapter.catalog({
         catalog: definition,
         skip,
-        limit: definition.source === 'studio-metadata' ? config.catalogLimit : requestedLimit,
+        limit: ['studio-metadata', 'platform-hybrid'].includes(definition.source) ? config.catalogLimit : requestedLimit,
         config,
       });
     } catch (error) {
@@ -210,13 +210,19 @@ class Tpb4kProvider {
 
     let enrichment;
     let metadataCatalog;
+    let sukebeiMetadata;
+    let platformHybrid;
     try {
       const diagnostics = adapter.diagnostics?.() || {};
       enrichment = diagnostics.enrichment;
       metadataCatalog = diagnostics.metadataCatalog;
+      sukebeiMetadata = diagnostics.sukebeiMetadata;
+      platformHybrid = diagnostics.platformHybrid;
     } catch {
       enrichment = undefined;
       metadataCatalog = undefined;
+      sukebeiMetadata = undefined;
+      platformHybrid = undefined;
     }
 
     logger().info(
@@ -228,6 +234,8 @@ class Tpb4kProvider {
         config: publicConfigStatus(config),
         ...(enrichment ? { enrichment } : {}),
         ...(metadataCatalog ? { metadataCatalog } : {}),
+        ...(sukebeiMetadata ? { sukebeiMetadata } : {}),
+        ...(platformHybrid ? { platformHybrid } : {}),
         contentFilter: {
           removed: contentFiltered.removed,
           reasons: contentFiltered.reasons,

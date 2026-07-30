@@ -50,7 +50,11 @@ class StashBoxGraphqlClient {
     if (cached) return cached.negative ? null : cached.value;
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const requestedTimeoutMs = Number.parseInt(String(options.timeoutMs || ''), 10);
+    const timeoutMs = Number.isFinite(requestedTimeoutMs)
+      ? Math.min(Math.max(requestedTimeoutMs, 250), this.timeoutMs)
+      : this.timeoutMs;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response;
     try {
       response = await this.fetchImpl(this.endpoint, {

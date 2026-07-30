@@ -1,4 +1,4 @@
-# Deploy OnlyPorn 2.7.0-alpha.13
+# Deploy OnlyPorn 2.7.0-alpha.14
 
 Use the guarded deployment script distributed with the alpha.13 ZIP:
 

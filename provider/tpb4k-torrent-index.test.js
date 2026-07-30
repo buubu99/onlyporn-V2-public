@@ -138,10 +138,11 @@ test('a genuine empty TPB result table does not fall through to another mirror',
   assert.equal(calls.length, 1);
 });
 
-test('all 19 selected studio definitions are metadata-first with retained TPB lookup provenance', () => {
+test('18 studio rows are metadata-first and OnlyFans uses a metadata-first/torrent hybrid with retained TPB provenance', () => {
   const studios = catalogDefinitions.filter(item => item.mode === 'studio-top');
   assert.equal(studios.length, 19);
-  assert.equal(studios.every(item => item.source === 'studio-metadata'), true);
+  assert.equal(studios.filter(item => item.studio !== 'OnlyFans').every(item => item.source === 'studio-metadata'), true);
+  assert.equal(studios.find(item => item.studio === 'OnlyFans')?.source, 'platform-hybrid');
   assert.equal(studios.every(item => item.lookupSource === 'torrent-index'), true);
   assert.equal(new Set(studios.map(item => item.studio)).size, 19);
 });

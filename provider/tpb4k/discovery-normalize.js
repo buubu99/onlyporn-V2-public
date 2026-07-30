@@ -54,12 +54,15 @@ function normalizeFeedItem(source, item = {}, index = 0) {
     description: text(item.description || item.overview || item.summary),
     studio: text(item.studio?.name || item.studio || item.network),
     performers: names(item.performers || item.cast || item.models),
+    tags: names(item.tags || item.categories || item.labels),
+    contentTags: names(item.contentTags || item.tags || item.categories || item.labels),
+    contentClassificationKnown: Boolean((item.tags || item.categories || item.labels)?.length),
     releaseDate: text(item.releaseDate || item.release_date || item.date || item.published),
     sceneCode: text(item.sceneCode || item.scene_code || item.code),
     duration: Number.parseInt(String(item.duration ?? 0), 10) || 0,
     seeders: Number.parseInt(String(item.seeders ?? 0), 10) || 0,
     size: item.size || 0,
-    detailUrl: safeHttps(item.detailUrl || item.url || item.link),
+    detailUrl: [item.detailUrl, item.url, item.link].map(safeHttps).find(Boolean) || '',
     upstreamId: text(item.upstreamId || item.id || item.guid),
   });
 }
@@ -87,26 +90,65 @@ function tag(block, name) {
   return decodeXml(match?.[1] || '');
 }
 
+function tagAttribute(block, name, attribute) {
+  const escaped = name.replace(':', '\\:');
+  const match = String(block).match(new RegExp(`<${escaped}\\b[^>]*\\b${attribute}=[\"']([^\"']+)[\"'][^>]*>`, 'i'));
+  return decodeXml(match?.[1] || '');
+}
+
+function firstHttpsImage(value) {
+  const html = String(value || '');
+  const candidates = [];
+  for (const pattern of [
+    /<img\b[^>]*\bsrc=["']([^"']+)["']/gi,
+    /https:\/\/[^\s"'<>]+?\.(?:jpe?g|png|webp)(?:\?[^\s"'<>]*)?/gi,
+  ]) {
+    for (const match of html.matchAll(pattern)) candidates.push(match[1] || match[0]);
+  }
+  return candidates.map(safeHttps).find(Boolean) || '';
+}
+
+function repeatedTags(block, name) {
+  const escaped = name.replace(':', '\\:');
+  return [...String(block).matchAll(new RegExp(`<${escaped}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${escaped}>`, 'gi'))]
+    .map(match => decodeXml(match[1]))
+    .filter(Boolean);
+}
+
 function parseRssFeed(payload) {
   const xml = String(payload || '');
   const blocks = xml.match(/<item(?:\s[^>]*)?>[\s\S]*?<\/item>/gi) || [];
-  return blocks.map((block, index) => ({
-    id: tag(block, 'guid') || tag(block, 'link'),
-    guid: tag(block, 'guid'),
-    title: tag(block, 'title'),
-    description: tag(block, 'description'),
-    published: tag(block, 'pubDate'),
-    link: tag(block, 'link'),
-    seeders: tag(block, 'nyaa:seeders'),
-    size: tag(block, 'nyaa:size'),
-    index,
-  }));
+  return blocks.map((block, index) => {
+    const description = tag(block, 'description');
+    const poster = [
+      tagAttribute(block, 'media:thumbnail', 'url'),
+      tagAttribute(block, 'media:content', 'url'),
+      tagAttribute(block, 'enclosure', 'url'),
+      firstHttpsImage(description),
+    ].map(safeHttps).find(Boolean) || '';
+    return {
+      id: tag(block, 'guid') || tag(block, 'link'),
+      guid: tag(block, 'guid'),
+      title: tag(block, 'title'),
+      description,
+      poster,
+      background: poster,
+      published: tag(block, 'pubDate'),
+      link: tag(block, 'link'),
+      detailUrl: tag(block, 'guid') || tag(block, 'link'),
+      seeders: tag(block, 'nyaa:seeders'),
+      size: tag(block, 'nyaa:size'),
+      tags: repeatedTags(block, 'category'),
+      index,
+    };
+  });
 }
 
 module.exports = {
   decodeXml,
   normalizeFeedItem,
   parseJsonFeed,
+  firstHttpsImage,
   parseRssFeed,
   safeHttps,
   stableId,

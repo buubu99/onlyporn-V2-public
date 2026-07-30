@@ -23,7 +23,7 @@ const IDS = [
 
 const STUDIO_IDS = new Set(IDS.filter(id => id.startsWith('tpb4k.studio.')));
 const REQUIRED_NONEMPTY = new Set([
-  'tpb4k.tpdb.recent',
+  'tpb4k.tpdb.recent', 'tpb4k.sukebei.top', 'tpb4k.studio.onlyfans.top',
   'tpb4k.studio.brazzersexxtra.top', 'tpb4k.studio.cum4k.top',
   'tpb4k.studio.digitalplayground.top', 'tpb4k.studio.dorcelclub.top',
   'tpb4k.studio.metart.top', 'tpb4k.studio.metartx.top',
@@ -90,7 +90,7 @@ function isFallbackPoster(value) {
     if (STUDIO_IDS.has(id) && payload.metas.some(meta => meta.posterShape !== 'poster')) {
       throw new Error(`${id} returned a non-portrait poster shape`);
     }
-    const fallbackPosters = STUDIO_IDS.has(id)
+    const fallbackPosters = (STUDIO_IDS.has(id) || id === 'tpb4k.sukebei.top')
       ? payload.metas.filter(meta => isFallbackPoster(meta.poster)).length
       : 0;
     const realMetadataPosters = STUDIO_IDS.has(id) ? posters - fallbackPosters : posters;
@@ -107,16 +107,24 @@ function isFallbackPoster(value) {
   const studioResults = results.filter(result => STUDIO_IDS.has(result.id));
   const totalStudioCards = studioResults.reduce((sum, result) => sum + result.metas, 0);
   const totalRealMetadataPosters = studioResults.reduce((sum, result) => sum + result.realMetadataPosters, 0);
-  const totalFallbackPosters = studioResults.reduce((sum, result) => sum + result.fallbackPosters, 0);
+  const strictStudioResults = studioResults.filter(result => result.id !== 'tpb4k.studio.onlyfans.top');
+  const strictStudioCards = strictStudioResults.reduce((sum, result) => sum + result.metas, 0);
+  const strictRealMetadataPosters = strictStudioResults.reduce((sum, result) => sum + result.realMetadataPosters, 0);
+  const totalFallbackPosters = strictStudioResults.reduce((sum, result) => sum + result.fallbackPosters, 0);
+  const onlyFansFallbackPosters = studioResults.find(result => result.id === 'tpb4k.studio.onlyfans.top')?.fallbackPosters || 0;
   const nonEmptyStudioCatalogs = studioResults.filter(result => result.metas > 0).length;
   if (nonEmptyStudioCatalogs < 13) {
     throw new Error(`Only ${nonEmptyStudioCatalogs}/19 studio catalogs were non-empty`);
   }
   if (totalFallbackPosters !== 0) {
-    throw new Error(`${totalFallbackPosters} generic fallback poster(s) leaked into metadata-first studio catalogs`);
+    throw new Error(`${totalFallbackPosters} generic fallback poster(s) leaked into strict metadata-first studio catalogs`);
   }
-  if (totalStudioCards > 0 && totalRealMetadataPosters !== totalStudioCards) {
-    throw new Error('Not every studio card uses a real metadata poster');
+  const sukebeiResult = results.find(result => result.id === 'tpb4k.sukebei.top');
+  if (sukebeiResult?.fallbackPosters) {
+    throw new Error(`${sukebeiResult.fallbackPosters} generic Sukebei fallback poster(s) remained visible`);
+  }
+  if (strictStudioCards > 0 && strictRealMetadataPosters !== strictStudioCards) {
+    throw new Error('Not every strict metadata-first studio card uses a real metadata poster');
   }
 
   const firstPoster = results.length
@@ -139,8 +147,9 @@ function isFallbackPoster(value) {
     studioCards: totalStudioCards,
     realMetadataPosters: totalRealMetadataPosters,
     fallbackPosters: totalFallbackPosters,
+    onlyFansFallbackPosters,
     allReturnedCardsHavePosters: true,
-    allStudioCardsUseLiveMetadataPosters: totalStudioCards > 0 && totalRealMetadataPosters === totalStudioCards,
+    allStrictStudioCardsUseLiveMetadataPosters: strictStudioCards > 0 && strictRealMetadataPosters === strictStudioCards,
     firstVixenPosterReachable: Boolean(firstPoster),
     streamsNotRequiredForPhase2: true,
   }, null, 2));

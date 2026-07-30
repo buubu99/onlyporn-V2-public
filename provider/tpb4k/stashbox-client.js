@@ -57,6 +57,16 @@ query OnlyPornFindScene($id: ID!) {
 
 const QUERY_SCENES = queryDocument(EXTENDED_SCENE_FIELDS);
 const QUERY_SCENES_BASE = queryDocument(BASE_SCENE_FIELDS);
+
+function searchDocument(fields) {
+  return `
+query OnlyPornSearchScene($term: String!, $limit: Int) {
+  searchScene(term: $term, limit: $limit) { ${fields} }
+}`;
+}
+
+const SEARCH_SCENES = searchDocument(EXTENDED_SCENE_FIELDS);
+const SEARCH_SCENES_BASE = searchDocument(BASE_SCENE_FIELDS);
 const FIND_SCENE = findDocument(EXTENDED_SCENE_FIELDS);
 const FIND_SCENE_BASE = findDocument(BASE_SCENE_FIELDS);
 const FIND_STUDIO = `
@@ -115,6 +125,17 @@ function sceneInput(options = {}) {
     .trim();
   if (title) input.title = title;
 
+  const code = String(options.code || '')
+    .normalize('NFKC')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (code) {
+    input.code = {
+      value: code,
+      modifier: String(options.codeModifier || 'EQUALS').toUpperCase(),
+    };
+  }
+
   if (options.parentStudio) {
     input.parentStudio = String(options.parentStudio).replace(/\s+/g, ' ').trim();
   }
@@ -145,11 +166,18 @@ function schemaCompatibilityError(error) {
   );
 }
 
+function codeFilterCompatibilityError(error) {
+  return /(?:field|argument|input).*code.*(?:scenequeryinput|not defined|unknown)|scenequeryinput.*code/i.test(
+    String(error?.message || '')
+  );
+}
+
 class StashBoxMetadataClient {
   constructor(options = {}) {
     this.id = String(options.id || 'metadata').trim().toLowerCase();
     this.client = new StashBoxGraphqlClient({ ...options, name: this.id });
     this.extendedFieldsSupported = true;
+    this.codeFilterSupported = true;
   }
 
   get configured() {
@@ -202,18 +230,77 @@ class StashBoxMetadataClient {
 
   async queryScenes(options = {}) {
     if (!this.configured) return [];
-    const variables = { input: sceneInput(options) };
+
+    let effectiveOptions = { ...options };
+    if (effectiveOptions.code && !this.codeFilterSupported) {
+      effectiveOptions = {
+        ...effectiveOptions,
+        title: effectiveOptions.title || effectiveOptions.code,
+        code: undefined,
+      };
+    }
+
+    for (let compatibilityAttempt = 0; compatibilityAttempt < 2; compatibilityAttempt += 1) {
+      const variables = { input: sceneInput(effectiveOptions) };
+      let data;
+      if (this.extendedFieldsSupported) {
+        try {
+          data = await this.client.request(QUERY_SCENES, variables);
+        } catch (error) {
+          if (effectiveOptions.code && codeFilterCompatibilityError(error)) {
+            this.codeFilterSupported = false;
+            effectiveOptions = {
+              ...effectiveOptions,
+              title: effectiveOptions.title || effectiveOptions.code,
+              code: undefined,
+            };
+            continue;
+          }
+          if (!schemaCompatibilityError(error)) throw error;
+          this.extendedFieldsSupported = false;
+        }
+      }
+
+      if (!data) {
+        try {
+          data = await this.client.request(QUERY_SCENES_BASE, variables);
+        } catch (error) {
+          if (effectiveOptions.code && codeFilterCompatibilityError(error)) {
+            this.codeFilterSupported = false;
+            effectiveOptions = {
+              ...effectiveOptions,
+              title: effectiveOptions.title || effectiveOptions.code,
+              code: undefined,
+            };
+            continue;
+          }
+          throw error;
+        }
+      }
+      return Array.isArray(data?.queryScenes?.scenes) ? data.queryScenes.scenes : [];
+    }
+    return [];
+  }
+
+  async searchScenes(term, limit = 20, options = {}) {
+    if (!this.configured) return [];
+    const query = String(term || '').normalize('NFKC').replace(/\s+/g, ' ').trim();
+    if (!query) return [];
+    const variables = {
+      term: query,
+      limit: positiveInteger(limit, 20, 100),
+    };
     let data;
     if (this.extendedFieldsSupported) {
       try {
-        data = await this.client.request(QUERY_SCENES, variables);
+        data = await this.client.request(SEARCH_SCENES, variables, options);
       } catch (error) {
         if (!schemaCompatibilityError(error)) throw error;
         this.extendedFieldsSupported = false;
       }
     }
-    if (!data) data = await this.client.request(QUERY_SCENES_BASE, variables);
-    return Array.isArray(data?.queryScenes?.scenes) ? data.queryScenes.scenes : [];
+    if (!data) data = await this.client.request(SEARCH_SCENES_BASE, variables, options);
+    return Array.isArray(data?.searchScene) ? data.searchScene : [];
   }
 
   async findScene(id) {
@@ -245,9 +332,12 @@ module.exports = {
   QUERY_SCENES,
   QUERY_SCENES_BASE,
   QUERY_STUDIOS,
+  SEARCH_SCENES,
+  SEARCH_SCENES_BASE,
   SCENE_FIELDS,
   STUDIO_FIELDS,
   StashBoxMetadataClient,
+  codeFilterCompatibilityError,
   compactKey,
   exactStudioMatch,
   sceneInput,

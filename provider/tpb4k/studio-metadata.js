@@ -115,6 +115,26 @@ function studioEvidence(scene, normalized, requestedStudio, queryAlias, provider
   return Object.freeze({ accepted: false, reason: 'studio-unverified' });
 }
 
+function platformEvidence(scene = {}, normalized = {}, queries = []) {
+  const acceptedKeys = new Set((Array.isArray(queries) ? queries : [queries]).map(compactKey).filter(Boolean));
+  const values = [
+    normalized.title,
+    normalized.description,
+    normalized.studio,
+    ...(Array.isArray(normalized.tags) ? normalized.tags : []),
+    ...(Array.isArray(scene.tags) ? scene.tags.map(item => item?.name || item) : []),
+    ...(Array.isArray(scene.urls) ? scene.urls.map(item => item?.url || item) : []),
+    scene.title,
+    scene.details,
+    scene.description,
+  ];
+  const haystack = values.map(compactKey).filter(Boolean);
+  if (haystack.some(value => [...acceptedKeys].some(key => value.includes(key)))) {
+    return Object.freeze({ accepted: true, reason: 'explicit-platform-label' });
+  }
+  return Object.freeze({ accepted: false, reason: 'platform-unverified' });
+}
+
 function bindCatalogIdentity(provider, rawScene, normalized, studio) {
   const tags = normalizeTags([
     ...(Array.isArray(normalized.tags) ? normalized.tags : []),
@@ -186,6 +206,7 @@ function freezeDiagnostics(stats) {
     providerErrorReasons: Object.freeze({ ...stats.providerErrorReasons }),
     rejected: Object.freeze({ ...stats.rejected }),
     filterReasons: Object.freeze({ ...stats.filterReasons }),
+    providerCircuitOpen: Object.freeze({ ...(stats.providerCircuitOpen || {}) }),
   });
 }
 
@@ -213,6 +234,8 @@ function createStudioMetadataAdapter(options = {}) {
   const overscanFactor = Math.min(Math.max(Number(config.contentFilterOverscanFactor || 3), 1), 5);
   const runMetadataCall = createLimiter(config.metadataCatalogConcurrency || 4);
   const index = new Map();
+  const providerCircuit = new Map();
+  const providerCircuitTtlMs = Math.max(Number(config.metadataProviderCircuitTtlMs || 5 * 60 * 1000), 30_000);
   let lastDiagnostics = freezeDiagnostics({
     studio: '',
     records: 0,
@@ -225,22 +248,46 @@ function createStudioMetadataAdapter(options = {}) {
     providerErrorReasons: {},
     rejected: {},
     filterReasons: {},
+    providerCircuitOpen: {},
   });
+
+  function circuitOpen(provider) {
+    const until = Number(providerCircuit.get(provider) || 0);
+    if (!until) return false;
+    if (until <= Date.now()) {
+      providerCircuit.delete(provider);
+      return false;
+    }
+    return true;
+  }
+
+  function recordProviderFailure(provider, reason) {
+    if (provider === 'stashdb' && ['network', 'timeout', 'rate-limit'].includes(reason)) {
+      providerCircuit.set(provider, Date.now() + providerCircuitTtlMs);
+    }
+  }
 
   function remember(items) {
     for (const item of items) index.set(item.sourceId, item);
     return items;
   }
 
-  async function queryProvider(provider, studio, needed, stats) {
+  async function queryProvider(provider, catalog, studio, needed, stats) {
     const client = clients[provider];
     if (!client?.configured) return [];
-    const aliases = [...studioAliases(studio)].slice(0, 3);
+    if (circuitOpen(provider)) {
+      stats.providerCircuitOpen[provider] = (stats.providerCircuitOpen[provider] || 0) + 1;
+      return [];
+    }
+    const platformMode = catalog?.metadataMode === 'platform-query';
+    const aliases = platformMode
+      ? [...new Set([...(catalog?.metadataQueries || []), studio].map(compactText).filter(Boolean))].slice(0, 3)
+      : [...studioAliases(studio)].slice(0, 3);
     const output = [];
     const seenUpstream = new Set();
 
     let studioIds = [];
-    if (provider === 'stashdb') {
+    if (provider === 'stashdb' && !platformMode) {
       try {
         studioIds = typeof client.resolveStudioIds === 'function'
           ? await runMetadataCall(() => client.resolveStudioIds(aliases))
@@ -248,6 +295,7 @@ function createStudioMetadataAdapter(options = {}) {
       } catch (error) {
         stats.providerErrors[provider] = (stats.providerErrors[provider] || 0) + 1;
         const reason = classifyProviderError(error);
+        recordProviderFailure(provider, reason);
         stats.providerErrorReasons[`${provider}:${reason}`] =
           (stats.providerErrorReasons[`${provider}:${reason}`] || 0) + 1;
         return [];
@@ -260,24 +308,29 @@ function createStudioMetadataAdapter(options = {}) {
       }
     }
 
-    const queryAliases = provider === 'stashdb' ? [aliases[0] || studio] : aliases;
+    const queryAliases = provider === 'stashdb' && !platformMode ? [aliases[0] || studio] : aliases;
     for (const alias of queryAliases) {
       for (let page = 1; page <= maxPages; page += 1) {
         if (output.length >= needed) break;
         stats.requests += 1;
         let scenes;
         try {
-          scenes = await runMetadataCall(() => client.queryScenes({
-            page,
-            perPage: 100,
-            studio: alias,
-            studioIds,
-            sort: 'DATE',
-            orderBy: 'date',
-          }));
+          scenes = await runMetadataCall(() => client.queryScenes(platformMode
+            ? (provider === 'tpdb'
+              ? { page, perPage: 100, query: alias, sort: 'DATE', orderBy: 'date' }
+              : { page, perPage: 100, title: alias, sort: 'DATE' })
+            : {
+              page,
+              perPage: 100,
+              studio: alias,
+              studioIds,
+              sort: 'DATE',
+              orderBy: 'date',
+            }));
         } catch (error) {
           stats.providerErrors[provider] = (stats.providerErrors[provider] || 0) + 1;
           const reason = classifyProviderError(error);
+          recordProviderFailure(provider, reason);
           stats.providerErrorReasons[`${provider}:${reason}`] =
             (stats.providerErrorReasons[`${provider}:${reason}`] || 0) + 1;
           break;
@@ -292,7 +345,9 @@ function createStudioMetadataAdapter(options = {}) {
             stats.rejected['missing-poster'] = (stats.rejected['missing-poster'] || 0) + 1;
             continue;
           }
-          const evidence = studioEvidence(rawScene, normalized, studio, alias, provider);
+          const evidence = platformMode
+            ? platformEvidence(rawScene, normalized, aliases)
+            : studioEvidence(rawScene, normalized, studio, alias, provider);
           if (!evidence.accepted) {
             stats.rejected[evidence.reason] = (stats.rejected[evidence.reason] || 0) + 1;
             continue;
@@ -313,7 +368,8 @@ function createStudioMetadataAdapter(options = {}) {
     const safeLimit = Math.min(Math.max(Number.parseInt(String(limit || 40), 10) || 40, 1), 100);
     if (!studio || !providers.length) return [];
 
-    const cacheKey = `studio-metadata:${compactKey(studio)}:${safeSkip}:${safeLimit}:${filterConfig.enabled}:${filterConfig.blockGay}:${filterConfig.blockInterracial}:${filterConfig.blockUnknown}`;
+    const metadataMode = compactText(catalog?.metadataMode || 'studio');
+    const cacheKey = `studio-metadata:${compactKey(studio)}:${compactKey(metadataMode)}:${safeSkip}:${safeLimit}:${filterConfig.enabled}:${filterConfig.blockGay}:${filterConfig.blockInterracial}:${filterConfig.blockUnknown}`;
     const cached = cache.getEntry(cacheKey);
     if (cached && !cached.negative) {
       lastDiagnostics = freezeDiagnostics({
@@ -325,6 +381,7 @@ function createStudioMetadataAdapter(options = {}) {
 
     const stats = {
       studio,
+      metadataMode,
       records: 0,
       returned: 0,
       filtered: 0,
@@ -335,6 +392,7 @@ function createStudioMetadataAdapter(options = {}) {
       providerErrorReasons: {},
       rejected: {},
       filterReasons: {},
+      providerCircuitOpen: {},
     };
     const needed = Math.min(Math.max((safeSkip + safeLimit) * overscanFactor, safeLimit), 300);
     const byIdentity = new Map();
@@ -343,7 +401,7 @@ function createStudioMetadataAdapter(options = {}) {
     // performer metadata. The two providers run concurrently behind one shared
     // limiter, preventing the home screen from creating a metadata request storm.
     const providerResults = await Promise.all(
-      providers.map(provider => queryProvider(provider, studio, needed, stats))
+      providers.map(provider => queryProvider(provider, catalog, studio, needed, stats))
     );
     for (const records of providerResults) {
       for (const item of records) {
@@ -391,13 +449,15 @@ function createStudioMetadataAdapter(options = {}) {
     const definition = getCatalogDefinition(catalogId);
     const requestedStudio = normalizeStudioName(definition?.studio || normalized.studio);
     if (!requestedStudio) return null;
-    const evidence = studioEvidence(
-      rawScene,
-      normalized,
-      requestedStudio,
-      requestedStudio,
-      parsed.provider
-    );
+    const evidence = definition?.metadataMode === 'platform-query'
+      ? platformEvidence(rawScene, normalized, definition?.metadataQueries || [requestedStudio])
+      : studioEvidence(
+        rawScene,
+        normalized,
+        requestedStudio,
+        requestedStudio,
+        parsed.provider
+      );
     if (!evidence.accepted) return null;
     const bound = bindCatalogIdentity(parsed.provider, rawScene, normalized, requestedStudio);
     const evaluation = evaluateContent(bound, filterConfig);
@@ -427,6 +487,7 @@ module.exports = {
   createStudioMetadataAdapter,
   metadataMergeKey,
   parseSourceId,
+  platformEvidence,
   rawStudioNames,
   sortMetadata,
   studioEvidence,

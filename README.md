@@ -41,7 +41,7 @@ The release validator checks JavaScript and Python syntax, packaging, secret-bea
 
 ## TPB4K integration development
 
-Version `2.7.0-alpha.13` retains the 28 selected unified-resolution TPB4K
+Version `2.7.0-alpha.14` retains the 28 selected unified-resolution TPB4K
 catalogs and the 37-catalog enabled manifest. The 19 professional studio rows
 are now metadata-first TPDB/StashDB catalogs with real scene posters; torrent
 search remains stored only as Phase 3 lookup provenance. Generic purple cards
@@ -78,3 +78,16 @@ Default Render variables are documented in `.env.example`. Unknown/unclassified
 items remain allowed by default because some legacy providers do not expose
 classification tags. Enable `ONLYPORN_FILTER_UNKNOWN=true` only for a strict
 fail-closed policy that accepts the resulting loss of uncategorized content.
+
+
+## Phase 2 final cleanup (alpha.14)
+
+- Sukebei now keeps only cards with verified native or metadata artwork,
+  preferring exact scene-code matches and applying the global tag filter after
+  enrichment.
+- OnlyFans uses an explicit platform-metadata query with an honest torrent
+  fallback rather than a nonexistent studio binding.
+- Metadata-provider network circuits prevent a failed StashDB route from
+  repeatedly delaying otherwise healthy TPDB catalogs.
+- Phase 2 is ready for its final live deployment gate before Phase 3 torrent
+  detail-page and playable stream resolution begins.

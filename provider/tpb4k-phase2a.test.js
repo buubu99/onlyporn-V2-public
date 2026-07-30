@@ -295,7 +295,7 @@ test('TPDB recent catalog and meta handlers return stable metadata while stream 
       TPDB_REST_API_URL: 'https://api.theporndb.example',
     },
   });
-  assert.deepEqual(listAdapters(), ['hentai', 'pornrips', 'stripchat', 'studio-metadata', 'sukebei', 'torrent-index', 'tpdb', 'yesporn']);
+  assert.deepEqual(listAdapters(), ['hentai', 'platform-hybrid', 'pornrips', 'stripchat', 'studio-metadata', 'sukebei', 'torrent-index', 'tpdb', 'yesporn']);
 
   const catalog = await provider.handleCatalog({
     type: 'movie',
@@ -341,7 +341,8 @@ test('nineteen studio definitions are metadata-first catalogs with torrent looku
   });
   const studioDefinitions = catalogDefinitions.filter(item => item.mode === 'studio-top');
   assert.equal(studioDefinitions.length, 19);
-  assert.equal(studioDefinitions.every(item => item.source === 'studio-metadata'), true);
+  assert.equal(studioDefinitions.filter(item => item.studio !== 'OnlyFans').every(item => item.source === 'studio-metadata'), true);
+  assert.equal(studioDefinitions.find(item => item.studio === 'OnlyFans')?.source, 'platform-hybrid');
   assert.equal(studioDefinitions.every(item => item.lookupSource === 'torrent-index'), true);
   assert.deepEqual(bundle.adapters.map(item => item.id), ['tpdb']);
   assert.equal(calls.length, 0);
@@ -350,7 +351,7 @@ test('nineteen studio definitions are metadata-first catalogs with torrent looku
 test('Phase 2A release wiring preserves 28 catalogs, 37 feature catalogs, and prior hardening', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const relay = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
-  assert.equal(pkg.version, '2.7.0-alpha.13');
+  assert.equal(pkg.version, '2.7.0-alpha.14');
   assert.equal(catalogDefinitions.length, 28);
   assert.match(pkg.scripts['test:release'], /tpb4k-phase2a\.test\.js/);
   assert.match(relay, /const SESSION_TTL_MS = 8 \* 60 \* 60 \* 1000/);

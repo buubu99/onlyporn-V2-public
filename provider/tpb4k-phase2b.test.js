@@ -61,9 +61,9 @@ test('Stripchat remains an explicit Phase 7 gate with no partial catalog or play
 test('built-in adapter registry covers every Phase 2 source while preserving the Stripchat gate', () => {
   clearAdapters();
   const installed = installBuiltInAdapters({ env: { TPB4K_ENABLED: 'true' }, fetchImpl: async url => String(url).includes('sukebei') ? response(rssBody, 'application/rss+xml') : response('<html></html>', 'text/html'), checkDns: false });
-  assert.deepEqual(listAdapters(), ['hentai', 'pornrips', 'stripchat', 'studio-metadata', 'sukebei', 'torrent-index', 'tpdb', 'yesporn']);
+  assert.deepEqual(listAdapters(), ['hentai', 'platform-hybrid', 'pornrips', 'stripchat', 'studio-metadata', 'sukebei', 'torrent-index', 'tpdb', 'yesporn']);
   assert.equal(installed.phaseGates.stripchat, 7);
-  assert.deepEqual(installed.configuredDiscoverySources, ['hentai', 'pornrips', 'sukebei', 'torrent-index', 'yesporn']);
+  assert.deepEqual(installed.configuredDiscoverySources, ['hentai', 'platform-hybrid', 'pornrips', 'sukebei', 'torrent-index', 'yesporn']);
 });
 
 test('discovery and native smoke scripts are present and do not contain configured secrets', () => {
@@ -81,6 +81,6 @@ test('all 28 TPB4K catalog IDs remain unique and unified-resolution', () => {
 });
 
 test('Phase 2B release wiring retains the TPB torrent-index adapter', () => {
-  assert.equal(require('../package.json').version, '2.7.0-alpha.13');
+  assert.equal(require('../package.json').version, '2.7.0-alpha.14');
   assert.match(require('../package.json').scripts['test:release'], /tpb4k-phase2b\.test\.js/);
 });

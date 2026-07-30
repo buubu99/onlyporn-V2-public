@@ -101,7 +101,7 @@ test('every configured fallback poster is a valid 600x900 PNG asset', () => {
   }
 });
 
-test('alpha.13 retains bounded legacy enrichment for non-studio source cards', () => {
+test('alpha.14 retains bounded legacy enrichment for non-studio source cards', () => {
   const config = readTpb4kConfig({});
   assert.equal(config.metadataEnrichmentConcurrency, 10);
   assert.equal(config.metadataLookupTimeoutMs, 2500);

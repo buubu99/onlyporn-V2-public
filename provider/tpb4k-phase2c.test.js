@@ -140,7 +140,7 @@ test('detail parser enriches an opaque source path without changing source ident
 
 test('native adapters are always configured, fetch exact origins, paginate, and resolve no streams', async () => {
   const bundle = createDiscoveryAdapters({ config: readTpb4kConfig(env()), fetchImpl: nativeFetch, checkDns: false, minRequestIntervalMs: 0 });
-  assert.deepEqual(bundle.configuredSources, ['hentai', 'pornrips', 'sukebei', 'torrent-index', 'yesporn']);
+  assert.deepEqual(bundle.configuredSources, ['hentai', 'platform-hybrid', 'pornrips', 'sukebei', 'torrent-index', 'yesporn']);
   for (const [id, catalog] of [
     ['pornrips', { id: 'tpb4k.pornrips.recent', mode: 'recent' }],
     ['yesporn', { id: 'tpb4k.yesporn.recent', mode: 'recent' }],
@@ -220,10 +220,10 @@ test('challenge HTML and lookalike links fail closed instead of becoming catalog
   assert.equal(parsePornripsCatalog(lookalike).length, 0);
 });
 
-test('alpha.13 release wiring keeps native sources while studio catalogs are metadata-first', () => {
+test('alpha.14 release wiring keeps native sources while studio catalogs are metadata-first/hybrid', () => {
   const root = path.join(__dirname, '..');
   const pkg = require('../package.json');
-  assert.equal(pkg.version, '2.7.0-alpha.13');
+  assert.equal(pkg.version, '2.7.0-alpha.14');
   assert.match(pkg.scripts['test:release'], /tpb4k-phase2c\.test\.js/);
   assert.equal(pkg.scripts['smoke:tpb4k-native'], 'node scripts/tpb4k-native-smoke.js');
   assert.equal(pkg.scripts['smoke:tpb4k-hentai'], 'node scripts/tpb4k-hentai-live-smoke.js');

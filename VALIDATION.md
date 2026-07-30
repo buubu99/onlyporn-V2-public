@@ -321,7 +321,18 @@ npm run test:tpb4k-torrent-index
 npm run test:tpb4k-poster-enrichment
 TPB4K_ENABLED=true npm run smoke:tpb4k-catalog
 TPB4K_ENABLED=true npm run smoke:tpb4k-metadata-first
-EXPECTED_VERSION=2.7.0-alpha.13 npm run validate:release
+EXPECTED_VERSION=2.7.0-alpha.14 npm run validate:release
 ```
 
 Acceptance requires all 19 studio definitions to use `studio-metadata`, every returned studio card to carry real HTTPS provider artwork, zero generic fallback cards in those rows, provider-scoped metadata IDs, exact StashDB studio-ID filtering, preserved Phase 3 torrent lookup provenance, and global explicit-label filtering across catalog/search, metadata and stream responses. Filter tests must prove that no image analysis or performer-attribute inference is used. All retained JAVHDPorn and HLS hardening gates remain mandatory.
+
+
+## Alpha.14 Phase 2 final-cleanup gates
+
+- exact Sukebei scene-code extraction and metadata lookup;
+- native Sukebei image retention;
+- omission of unresolved Sukebei records with no generic artwork;
+- filter-after-enrichment validation;
+- non-empty OnlyFans platform-hybrid catalog;
+- metadata-provider circuit-breaker regression;
+- live Sukebei/OnlyFans smoke before commit and after Render deployment.
