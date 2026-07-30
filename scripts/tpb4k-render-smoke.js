@@ -22,7 +22,16 @@ const IDS = [
 ];
 
 const STUDIO_IDS = new Set(IDS.filter(id => id.startsWith('tpb4k.studio.')));
-const REQUIRED_NONEMPTY = new Set([...STUDIO_IDS, 'tpb4k.tpdb.recent']);
+const REQUIRED_NONEMPTY = new Set([
+  'tpb4k.tpdb.recent',
+  'tpb4k.studio.brazzersexxtra.top', 'tpb4k.studio.cum4k.top',
+  'tpb4k.studio.digitalplayground.top', 'tpb4k.studio.dorcelclub.top',
+  'tpb4k.studio.metart.top', 'tpb4k.studio.metartx.top',
+  'tpb4k.studio.milfy.top', 'tpb4k.studio.playboyplus.top',
+  'tpb4k.studio.sexart.top', 'tpb4k.studio.thelifeerotic.top',
+  'tpb4k.studio.vixen.top', 'tpb4k.studio.wowgirls.top',
+  'tpb4k.studio.xvideosred.top',
+]);
 const FALLBACK_PATH = '/assets/tpb4k/studios/';
 
 async function getResponse(url, label) {
@@ -99,8 +108,15 @@ function isFallbackPoster(value) {
   const totalStudioCards = studioResults.reduce((sum, result) => sum + result.metas, 0);
   const totalRealMetadataPosters = studioResults.reduce((sum, result) => sum + result.realMetadataPosters, 0);
   const totalFallbackPosters = studioResults.reduce((sum, result) => sum + result.fallbackPosters, 0);
-  if (totalStudioCards > 0 && totalRealMetadataPosters === 0) {
-    throw new Error('All studio cards used fallback artwork; no live metadata poster match was proven');
+  const nonEmptyStudioCatalogs = studioResults.filter(result => result.metas > 0).length;
+  if (nonEmptyStudioCatalogs < 13) {
+    throw new Error(`Only ${nonEmptyStudioCatalogs}/19 studio catalogs were non-empty`);
+  }
+  if (totalFallbackPosters !== 0) {
+    throw new Error(`${totalFallbackPosters} generic fallback poster(s) leaked into metadata-first studio catalogs`);
+  }
+  if (totalStudioCards > 0 && totalRealMetadataPosters !== totalStudioCards) {
+    throw new Error('Not every studio card uses a real metadata poster');
   }
 
   const firstPoster = results.length
@@ -119,11 +135,12 @@ function isFallbackPoster(value) {
     tpb4kCatalogs: tpbCatalogs.length,
     testedCatalogs: results.length,
     catalogs: results,
+    nonEmptyStudioCatalogs,
     studioCards: totalStudioCards,
     realMetadataPosters: totalRealMetadataPosters,
     fallbackPosters: totalFallbackPosters,
     allReturnedCardsHavePosters: true,
-    atLeastOneLiveMetadataPosterProven: totalRealMetadataPosters > 0,
+    allStudioCardsUseLiveMetadataPosters: totalStudioCards > 0 && totalRealMetadataPosters === totalStudioCards,
     firstVixenPosterReachable: Boolean(firstPoster),
     streamsNotRequiredForPhase2: true,
   }, null, 2));

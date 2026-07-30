@@ -116,6 +116,19 @@ function readTpb4kConfig(env = process.env) {
       min: 50,
       max: 98,
     }),
+    metadataCatalogMaxPages: positiveInteger(env.TPB4K_METADATA_CATALOG_MAX_PAGES, 3, {
+      min: 1,
+      max: 5,
+    }),
+    metadataCatalogConcurrency: positiveInteger(
+      env.TPB4K_METADATA_CATALOG_CONCURRENCY,
+      4,
+      { min: 1, max: 8 }
+    ),
+    contentFilterOverscanFactor: positiveInteger(env.ONLYPORN_FILTER_OVERSCAN_FACTOR, 3, {
+      min: 1,
+      max: 5,
+    }),
     posterAssetBaseUrl: endpoint(
       env.TPB4K_POSTER_ASSET_BASE_URL,
       'https://raw.githubusercontent.com/buubu99/onlyporn-V2-public/main/assets/tpb4k/studios'
@@ -177,6 +190,7 @@ function publicConfigStatus(config = readTpb4kConfig()) {
         .filter(([, value]) => Boolean(value))
         .map(([name]) => name),
       ...(config.torrentIndex?.mirrors?.length ? ['torrent-index'] : []),
+      ...(config.tpdb.configured || config.stashdb.configured ? ['studio-metadata'] : []),
     ].sort(),
     stripchatPhaseRequired: 7,
     renderPreview: config.renderPreview,

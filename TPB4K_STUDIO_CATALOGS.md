@@ -1,23 +1,30 @@
-# TPB4K studio catalogs — alpha.12
+# TPB4K studio catalogs — alpha.13
 
-Version: 2.7.0-alpha.12
+Version: `2.7.0-alpha.13`
 
-The 19 selected `tpb4k.studio.*.top` catalogs are torrent-result catalogs. They are not StashDB studio-scene queries.
+The 19 selected `tpb4k.studio.*.top` rows are metadata-first catalogs. TPDB and
+StashDB provide the visible scene identity, title, date, performers, tags and
+real HTTPS artwork. Unmatched torrent filenames and generic fallback cards are
+not displayed in these rows.
 
-The implementation follows the original TPB4K backend contract:
+Each returned scene keeps:
 
-- Search query: exact selected studio label.
-- Adult quality category: `507` (UHD/4K movies).
-- Sort code: `7` (seeders descending).
-- Page mapping: Stremio `skip` values map to TPB pages of 30 rows.
-- Mirror order: TheHiddenBay, ThePirateBay0, PirateBay Live.
-- Failover: transport errors, non-2xx responses, challenge/interstitial HTML, or pages without `#searchResult` fall through to the next mirror.
-- A real empty `#searchResult` table is accepted as a genuine empty search rather than hidden by failover.
-- Catalog output includes title, studio, resolution scope, seeders, size, upload text, a fixed-mirror detail URL, and a safe HTTPS poster.
-- Configured StashDB and TPDB clients enrich presentation metadata only after strict same-studio/title matching.
-- Unmatched results receive a committed 600×900 studio fallback poster, so non-empty catalogs have 100% poster coverage.
-- Magnet links and raw info hashes are retained only in the adapter's private in-memory index. Stremio IDs contain an irreversible SHA-256-derived opaque token.
-- Stream resolution remains intentionally empty at this checkpoint.
+- a provider-scoped metadata ID;
+- normalized studio, title, code and release date;
+- provider tags for the global explicit-label filter;
+- `lookupSource: torrent-index` and a bounded query for Phase 3;
+- no magnet, info hash, secret or assumed playable URL.
 
-TPDB Recent remains a separate catalog using ThePornDB REST with `Authorization: Bearer`.
-StashDB and TPDB are now optional enrichment sources only; neither replaces the 19 TPB studio listing transport or the original torrent identity.
+StashDB studio aliases are resolved to exact studio IDs before scenes are
+queried. TPDB uses the selected site/studio alias. Cross-provider duplicates are
+merged before filtering and pagination, allowing StashDB tags to classify a
+TPDB scene without changing its visible identity.
+
+A row may legitimately contain fewer than 40 entries when metadata coverage is
+smaller, the provider has no real poster, or the explicit-label filter removes
+records. It must never be padded with another scene's artwork or a purple
+placeholder.
+
+The original TPB category `507`, top-by-seeders sort `7` and mirror chain remain
+available for later torrent resolution. They no longer act as the catalog
+listing transport.

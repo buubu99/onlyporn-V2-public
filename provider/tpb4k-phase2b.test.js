@@ -26,7 +26,7 @@ test('configured optional endpoints require credential-free HTTPS and reject sec
 test('Phase 2B status exposes source names but never endpoint URLs or API credentials', () => {
   const config = readTpb4kConfig({ TPB4K_ENABLED: 'true', TPDB_API_KEY: 'tpdb-secret', STASHDB_API_KEY: 'stash-secret' });
   const status = publicConfigStatus(config);
-  assert.deepEqual(status.configuredDiscoverySources, ['hentai', 'pornrips', 'sukebei', 'torrent-index', 'yesporn']);
+  assert.deepEqual(status.configuredDiscoverySources, ['hentai', 'pornrips', 'studio-metadata', 'sukebei', 'torrent-index', 'yesporn']);
   assert.equal(JSON.stringify(status).includes('secret'), false);
   assert.equal(JSON.stringify(status).includes('pornrips.to'), false);
   assert.equal(status.stripchatPhaseRequired, 7);
@@ -61,7 +61,7 @@ test('Stripchat remains an explicit Phase 7 gate with no partial catalog or play
 test('built-in adapter registry covers every Phase 2 source while preserving the Stripchat gate', () => {
   clearAdapters();
   const installed = installBuiltInAdapters({ env: { TPB4K_ENABLED: 'true' }, fetchImpl: async url => String(url).includes('sukebei') ? response(rssBody, 'application/rss+xml') : response('<html></html>', 'text/html'), checkDns: false });
-  assert.deepEqual(listAdapters(), ['hentai', 'pornrips', 'stripchat', 'sukebei', 'torrent-index', 'tpdb', 'yesporn']);
+  assert.deepEqual(listAdapters(), ['hentai', 'pornrips', 'stripchat', 'studio-metadata', 'sukebei', 'torrent-index', 'tpdb', 'yesporn']);
   assert.equal(installed.phaseGates.stripchat, 7);
   assert.deepEqual(installed.configuredDiscoverySources, ['hentai', 'pornrips', 'sukebei', 'torrent-index', 'yesporn']);
 });
@@ -81,6 +81,6 @@ test('all 28 TPB4K catalog IDs remain unique and unified-resolution', () => {
 });
 
 test('Phase 2B release wiring retains the TPB torrent-index adapter', () => {
-  assert.equal(require('../package.json').version, '2.7.0-alpha.12');
+  assert.equal(require('../package.json').version, '2.7.0-alpha.13');
   assert.match(require('../package.json').scripts['test:release'], /tpb4k-phase2b\.test\.js/);
 });

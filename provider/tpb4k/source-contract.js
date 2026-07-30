@@ -29,6 +29,13 @@ function normalizeDiscoveryItem(adapter, item = {}) {
     description: String(item.description || '').trim(),
     studio: String(item.studio || '').trim(),
     performers: Array.isArray(item.performers) ? item.performers.map(String) : [],
+    tags: Array.isArray(item.tags)
+      ? item.tags.map(value => String(value?.name || value || '').trim()).filter(Boolean)
+      : [],
+    contentTags: Array.isArray(item.contentTags)
+      ? item.contentTags.map(value => String(value?.name || value || '').trim()).filter(Boolean)
+      : [],
+    contentClassificationKnown: Boolean(item.contentClassificationKnown),
     releaseDate: String(item.releaseDate || '').trim(),
     sceneCode: String(item.sceneCode || '').trim(),
     resolution: String(item.resolution || '').trim(),
@@ -42,6 +49,8 @@ function normalizeDiscoveryItem(adapter, item = {}) {
       detailUrl: String(item.detailUrl || '').trim(),
       metadataProvider: String(item.metadataProvider || '').trim(),
       upstreamId: String(item.upstreamId || '').trim(),
+      lookupSource: String(item.lookupSource || '').trim(),
+      lookupQuery: String(item.lookupQuery || '').trim(),
     }),
   });
 }

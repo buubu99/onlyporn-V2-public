@@ -59,6 +59,44 @@ function studioAliases(value) {
   return Object.freeze(output);
 }
 
+function normalizeTags(value) {
+  const values = Array.isArray(value) ? value : value ? [value] : [];
+  const output = [];
+  const seen = new Set();
+  for (const item of values) {
+    const name = String(
+      typeof item === 'string'
+        ? item
+        : item?.name || item?.label || item?.title || item?.value || ''
+    )
+      .normalize('NFKC')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const key = compactKey(name);
+    if (!name || !key || seen.has(key)) continue;
+    seen.add(key);
+    output.push(name);
+  }
+  return output.sort((left, right) => left.localeCompare(right));
+}
+
+function sceneTags(scene = {}) {
+  const values = [];
+  for (const collection of [
+    scene.tags,
+    scene.categories,
+    scene.acts,
+    scene.keywords,
+    scene.features,
+    scene.sex_acts,
+    scene.sexActs,
+  ]) {
+    if (Array.isArray(collection)) values.push(...collection);
+    else if (collection) values.push(collection);
+  }
+  return normalizeTags(values);
+}
+
 function normalizePerformers(value) {
   const list = Array.isArray(value) ? value : [];
   const names = list
@@ -170,6 +208,7 @@ function normalizeScene(provider, scene = {}) {
   const studio =
     studioCandidates.find(name => CANONICAL_STUDIOS.includes(name)) || studioCandidates[0] || '';
   const performers = normalizePerformers(scene.performers || scene.performer || []);
+  const tags = sceneTags(scene);
   const releaseDate = String(scene.release_date || scene.date || scene.releaseDate || '').trim();
   const sceneCode = String(scene.code || scene.sku || scene.sceneCode || '').trim();
   const images = sceneImages(scene);
@@ -185,6 +224,9 @@ function normalizeScene(provider, scene = {}) {
     background: chooseBackground(images),
     studio,
     performers,
+    tags,
+    contentTags: tags,
+    contentClassificationKnown: tags.length > 0,
     releaseDate,
     sceneCode,
     duration: Number.parseInt(String(scene.duration || 0), 10) || 0,
@@ -212,6 +254,17 @@ function mergeMetadataPreservingIdentity(sourceItem = {}, enrichment = {}) {
       Array.isArray(sourceItem.performers) && sourceItem.performers.length
         ? sourceItem.performers
         : normalizePerformers(enrichment.performers),
+    tags: normalizeTags([
+      ...(Array.isArray(sourceItem.tags) ? sourceItem.tags : []),
+      ...(Array.isArray(enrichment.tags) ? enrichment.tags : []),
+      ...(Array.isArray(enrichment.contentTags) ? enrichment.contentTags : []),
+    ]),
+    contentClassificationKnown: Boolean(
+      sourceItem.contentClassificationKnown ||
+      enrichment.contentClassificationKnown ||
+      (Array.isArray(sourceItem.tags) && sourceItem.tags.length) ||
+      (Array.isArray(enrichment.tags) && enrichment.tags.length)
+    ),
     releaseDate: sourceItem.releaseDate || enrichment.releaseDate || '',
     sceneCode: sourceItem.sceneCode || enrichment.sceneCode || '',
     sourceId: sourceItem.sourceId,
@@ -229,6 +282,8 @@ module.exports = {
   mergeMetadataPreservingIdentity,
   normalizePerformers,
   normalizeScene,
+  normalizeTags,
+  sceneTags,
   normalizeStudioName,
   safeHttpsUrl,
   sceneImages,

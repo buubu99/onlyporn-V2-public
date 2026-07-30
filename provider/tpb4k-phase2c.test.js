@@ -96,6 +96,38 @@ test('native page builders implement deterministic pagination and distinct Henta
   assert.equal(buildCatalogUrl('hentai', { mode: 'top' }, 2), 'https://hentaimama.io/hentai-series/page/2/?filter=rating');
 });
 
+test('native pagination keeps a stable deduplicated timeline when filter overscan exceeds the visible page', async () => {
+  const requestedPaths = [];
+  const pageHtml = page => {
+    const logicalPage = page === 2 ? 1 : page > 2 ? page - 1 : 1;
+    return `<!doctype html><html><body>${Array.from({ length: 40 }, (_, index) => {
+      const item = (logicalPage - 1) * 40 + index + 1;
+      return `<article class="post"><h2 class="entry-title"><a href="https://pornrips.to/scene-${item}/">Scene ${item}</a></h2><img src="https://pornrips.to/media/${item}.jpg"></article>`;
+    }).join('')}</body></html>`;
+  };
+  const fetchImpl = async url => {
+    const parsed = new URL(String(url));
+    requestedPaths.push(parsed.pathname);
+    const match = parsed.pathname.match(/^\/page\/(\d+)\/$/);
+    const page = match ? Number(match[1]) : 1;
+    return response(pageHtml(page));
+  };
+  const config = readTpb4kConfig(env());
+  const bundle = createDiscoveryAdapters({ config, fetchImpl, checkDns: false, minRequestIntervalMs: 0 });
+  const adapter = bundle.adapters.find(item => item.id === 'pornrips');
+  const catalog = { id: 'tpb4k.pornrips.recent', mode: 'recent' };
+  const first = await adapter.catalog({ catalog, skip: 0, limit: 100 });
+  const second = await adapter.catalog({ catalog, skip: 40, limit: 100 });
+  assert.deepEqual(requestedPaths.slice(0, 5), ['/', '/page/2/', '/page/3/', '/page/4/', '/page/5/']);
+  assert.equal(first.length, 100);
+  assert.equal(second.length, 100);
+  assert.equal(new Set(first.map(item => item.sourceId)).size, 100);
+  assert.equal(new Set(second.map(item => item.sourceId)).size, 100);
+  const firstVisible = new Set(first.slice(0, 40).map(item => item.sourceId));
+  assert.equal(second.filter(item => firstVisible.has(item.sourceId)).length, 0);
+  assert.equal(second[0].title, 'Scene 41');
+});
+
 test('detail parser enriches an opaque source path without changing source identity', () => {
   const item = parsePornripsCatalog(pornripsList)[0];
   const enriched = parseDetail('pornrips', detail, item.sourceId);
@@ -188,10 +220,10 @@ test('challenge HTML and lookalike links fail closed instead of becoming catalog
   assert.equal(parsePornripsCatalog(lookalike).length, 0);
 });
 
-test('alpha.10 release wiring keeps native live smoke, TPDB REST, and adds the original TPB studio catalog transport', () => {
+test('alpha.13 release wiring keeps native sources while studio catalogs are metadata-first', () => {
   const root = path.join(__dirname, '..');
   const pkg = require('../package.json');
-  assert.equal(pkg.version, '2.7.0-alpha.12');
+  assert.equal(pkg.version, '2.7.0-alpha.13');
   assert.match(pkg.scripts['test:release'], /tpb4k-phase2c\.test\.js/);
   assert.equal(pkg.scripts['smoke:tpb4k-native'], 'node scripts/tpb4k-native-smoke.js');
   assert.equal(pkg.scripts['smoke:tpb4k-hentai'], 'node scripts/tpb4k-hentai-live-smoke.js');

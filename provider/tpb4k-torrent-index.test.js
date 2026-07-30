@@ -138,32 +138,64 @@ test('a genuine empty TPB result table does not fall through to another mirror',
   assert.equal(calls.length, 1);
 });
 
-test('all 19 selected studio definitions are independent TPB 4K/top catalogs', () => {
+test('all 19 selected studio definitions are metadata-first with retained TPB lookup provenance', () => {
   const studios = catalogDefinitions.filter(item => item.mode === 'studio-top');
   assert.equal(studios.length, 19);
-  assert.equal(studios.every(item => item.source === 'torrent-index'), true);
+  assert.equal(studios.every(item => item.source === 'studio-metadata'), true);
+  assert.equal(studios.every(item => item.lookupSource === 'torrent-index'), true);
   assert.equal(new Set(studios.map(item => item.studio)).size, 19);
 });
 
-test('built-in provider exposes TPB studio catalog cards but keeps streams empty', async () => {
-  const html = page([
-    { title: 'Vixen Scene One 2160p', hash: HASH_A, seeders: 35 },
-    { title: 'Vixen Scene Two 4K', hash: HASH_B, seeders: 20 },
-  ]);
-  const fetchImpl = async url => {
-    const host = new URL(String(url)).hostname;
-    if (['thehiddenbay.com', 'thepiratebay0.org', 'piratebay.live'].includes(host)) return response(html);
-    if (host.includes('sukebei')) return response('<?xml version="1.0"?><rss><channel></channel></rss>', 200, 'application/rss+xml');
+test('built-in provider exposes metadata-first studio cards and retains the TPB adapter for Phase 3', async () => {
+  const metadataScenes = [
+    {
+      id: 'vixen-1',
+      title: 'Scene One',
+      date: '2026-07-29',
+      site: { name: 'Vixen' },
+      tags: [{ name: 'Romantic' }],
+      images: [{ url: 'https://images.example/vixen-1.jpg', width: 600, height: 900 }],
+    },
+    {
+      id: 'vixen-2',
+      title: 'Scene Two',
+      date: '2026-07-28',
+      site: { name: 'Vixen' },
+      tags: [{ name: 'Outdoor' }],
+      images: [{ url: 'https://images.example/vixen-2.jpg', width: 600, height: 900 }],
+    },
+  ];
+  const fetchImpl = async (url, request = {}) => {
+    const parsed = new URL(String(url));
+    if (parsed.hostname === 'api.theporndb.example') {
+      const match = parsed.pathname.match(/\/scenes\/([^/]+)$/);
+      const data = match
+        ? metadataScenes.find(item => item.id === decodeURIComponent(match[1]))
+        : metadataScenes;
+      const body = JSON.stringify({ data });
+      return {
+        ok: true,
+        status: 200,
+        headers: { get: name => String(name).toLowerCase() === 'content-type' ? 'application/json' : String(name).toLowerCase() === 'content-length' ? String(Buffer.byteLength(body)) : '' },
+        async text() { return body; },
+      };
+    }
+    if (parsed.hostname.includes('sukebei')) return response('<?xml version="1.0"?><rss><channel></channel></rss>', 200, 'application/rss+xml');
     return response('<html></html>');
   };
+  const runtimeEnv = env({
+    TPDB_API_KEY: 'fixture-key',
+    TPDB_REST_API_URL: 'https://api.theporndb.example',
+  });
   clearAdapters();
-  installBuiltInAdapters({ env: env(), fetchImpl, checkDns: false, minRequestIntervalMs: 0 });
+  installBuiltInAdapters({ env: runtimeEnv, fetchImpl, checkDns: false, minRequestIntervalMs: 0 });
   assert.equal(listAdapters().includes('torrent-index'), true);
-  const adapter = getAdapter('torrent-index');
-  assert.equal(adapter.category, '507');
-  assert.equal(adapter.sort, '7');
+  assert.equal(listAdapters().includes('studio-metadata'), true);
+  const torrentAdapter = getAdapter('torrent-index');
+  assert.equal(torrentAdapter.category, '507');
+  assert.equal(torrentAdapter.sort, '7');
 
-  const provider = new Tpb4kProvider({ env: env(), fetchImpl, installBuiltIns: false });
+  const provider = new Tpb4kProvider({ env: runtimeEnv, fetchImpl, installBuiltIns: false });
   const catalog = await provider.handleCatalog({
     type: 'movie',
     id: 'tpb4k.studio.vixen.top',
@@ -171,16 +203,15 @@ test('built-in provider exposes TPB studio catalog cards but keeps streams empty
   });
   assert.equal(catalog.metas.length, 2);
   assert.equal(catalog.metas[0].posterShape, 'poster');
-  assert.match(catalog.metas[0].poster, /^https:\/\/raw\.githubusercontent\.com\//);
-  assert.match(catalog.metas[0].poster, /vixen\.png$/);
+  assert.match(catalog.metas[0].poster, /^https:\/\/images\.example\//);
+  assert.doesNotMatch(catalog.metas[0].poster, /assets\/tpb4k\/studios/);
   assert.equal(catalog.metas[0].genres.includes('Vixen'), true);
-  assert.match(catalog.metas[0].description, /Seeders: 35/);
   const decoded = decodeTpb4kId(catalog.metas[0].id);
-  assert.equal(decoded.source, 'torrent-index');
-  assert.match(decoded.sourceId, /^hiddenbay:/);
+  assert.equal(decoded.source, 'studio-metadata');
+  assert.match(decoded.sourceId, /^tpdb:/);
   const meta = await provider.handleMeta({ type: 'movie', id: catalog.metas[0].id });
-  assert.equal(meta.meta.name, 'Vixen Scene One 2160p');
-  assert.match(meta.meta.poster, /vixen\.png$/);
+  assert.match(meta.meta.poster, /^https:\/\/images\.example\//);
   assert.equal(meta.meta.posterShape, 'poster');
+  assert.equal(meta.meta.extra.tpb4k.lookupSource, 'torrent-index');
   assert.deepEqual(await provider.handleStream({ type: 'movie', id: catalog.metas[0].id }), { streams: [] });
 });

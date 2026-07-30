@@ -101,7 +101,7 @@ test('every configured fallback poster is a valid 600x900 PNG asset', () => {
   }
 });
 
-test('alpha.12 configuration makes all catalog records eligible within a bounded deadline', () => {
+test('alpha.13 retains bounded legacy enrichment for non-studio source cards', () => {
   const config = readTpb4kConfig({});
   assert.equal(config.metadataEnrichmentConcurrency, 10);
   assert.equal(config.metadataLookupTimeoutMs, 2500);
@@ -110,16 +110,16 @@ test('alpha.12 configuration makes all catalog records eligible within a bounded
   assert.equal('metadataEnrichmentLimit' in config, false);
 });
 
-test('StashDB scene input supports title and provider-friendly parent-studio aliases', () => {
+test('StashDB scene input supports exact studio IDs plus optional title search', () => {
   const input = sceneInput({
     page: 1,
     perPage: 20,
-    studio: 'XVideos RED',
+    studioIds: ['xvideos-red-id'],
     title: 'Cruella Pregnant Teen',
   });
-  assert.equal(input.parentStudio, 'XVideos RED');
   assert.equal(input.title, 'Cruella Pregnant Teen');
-  assert.equal(input.text, undefined);
+  assert.deepEqual(input.studios, { value: ['xvideos-red-id'], modifier: 'INCLUDES' });
+  assert.equal(Object.hasOwn(input, 'parentStudio'), false);
 });
 
 test('TPDB REST scene search sends q, site, year and Bearer authorization', async () => {

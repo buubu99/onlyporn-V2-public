@@ -306,3 +306,22 @@ EXPECTED_VERSION=2.7.0-alpha.12 npm run validate:release
 Acceptance requires every returned studio card to be enrichment-eligible,
 `skipped=0`, complete safe HTTPS poster coverage, preserved source identity,
 and no negative caching of provider errors or timeouts.
+
+
+## TPB4K metadata-first catalogs and content filtering — alpha.13
+
+```bash
+npm run test:content-filter
+npm run test:tpb4k-studio-metadata
+npm run test:tpb4k-phase1
+npm run test:tpb4k-phase2a
+npm run test:tpb4k-phase2b
+npm run test:tpb4k-phase2c
+npm run test:tpb4k-torrent-index
+npm run test:tpb4k-poster-enrichment
+TPB4K_ENABLED=true npm run smoke:tpb4k-catalog
+TPB4K_ENABLED=true npm run smoke:tpb4k-metadata-first
+EXPECTED_VERSION=2.7.0-alpha.13 npm run validate:release
+```
+
+Acceptance requires all 19 studio definitions to use `studio-metadata`, every returned studio card to carry real HTTPS provider artwork, zero generic fallback cards in those rows, provider-scoped metadata IDs, exact StashDB studio-ID filtering, preserved Phase 3 torrent lookup provenance, and global explicit-label filtering across catalog/search, metadata and stream responses. Filter tests must prove that no image analysis or performer-attribute inference is used. All retained JAVHDPorn and HLS hardening gates remain mandatory.

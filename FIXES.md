@@ -287,3 +287,16 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Accepts a HentaiMama page containing incidental Cloudflare script markers only when genuine article and `/tvshows/` catalog evidence is also present.
 - Groups all duplicate `/tvshows/<slug>/` anchors by path and extracts the enclosing article, so the empty poster anchor cannot hide the later title anchor.
 - Preserves exact-origin checks, request spacing, caching, pagination checks, and intentionally empty stream output.
+
+
+## 2.7.0-alpha.13 — metadata-first studio rows and global explicit-label filter
+
+- Replaced the 19 torrent-filename-first studio rows with direct TPDB/StashDB metadata catalogs.
+- Removed generic fallback posters from those rows; every returned card has real provider artwork.
+- Corrected StashDB catalog queries to resolve exact studio IDs and use `SceneQueryInput.studios`.
+- Added scene tags and cross-provider metadata merging before filtering and pagination.
+- Preserved torrent-index lookup provenance for Phase 3 without treating metadata as playback.
+- Added a central explicit-label filter covering catalog/search, meta, poster exposure and streams.
+- Added default male-male/gay, bisexual-male and explicit interracial/black-male/BBC label exclusions.
+- Added optional custom tag and unknown-classification policies without image or attribute inference.
+- Added bounded metadata pagination/concurrency, safe diagnostics and production metadata-first smoke gates.

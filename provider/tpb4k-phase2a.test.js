@@ -102,17 +102,17 @@ function createMetadataFetch(options = {}) {
     const input = body.variables.input;
     const id = options.sameIdentity
       ? `stashdb-${input.page}`
-      : `stashdb-${input.parentStudio || 'recent'}-${input.page}`;
+      : `stashdb-${input.text || 'recent'}-${input.page}`;
     const overrides = options.sameIdentity
       ? {
           title: 'Shared Metadata Scene',
           release_date: '2026-07-02',
-          studio: { id: 'studio-shared', name: input.parentStudio || 'Vixen', parent: null },
+          studio: { id: 'studio-shared', name: input.text || 'Vixen', parent: null },
         }
       : {
           studio: {
             id: 'studio-stashdb',
-            name: input.parentStudio || 'StashDB',
+            name: input.text || 'StashDB',
             parent: null,
           },
         };
@@ -206,13 +206,13 @@ test('live stash-box scene query selects URL object values and surfaces GraphQL 
 
 test('scene query pagination and studio filters never add a resolution constraint', () => {
   const studioId = '11111111-2222-3333-4444-555555555555';
-  const input = sceneInput({ page: 3, perPage: 40, studio: studioId, sort: 'POPULARITY' });
+  const input = sceneInput({ page: 3, perPage: 40, studioIds: [studioId], sort: 'POPULARITY' });
   assert.deepEqual(input, {
     page: 3,
     per_page: 40,
     direction: 'DESC',
     sort: 'POPULARITY',
-    parentStudio: studioId,
+    studios: { value: [studioId], modifier: 'INCLUDES' },
   });
   assert.doesNotMatch(JSON.stringify(input), /2160|1080|resolution|4k/i);
 });
@@ -295,7 +295,7 @@ test('TPDB recent catalog and meta handlers return stable metadata while stream 
       TPDB_REST_API_URL: 'https://api.theporndb.example',
     },
   });
-  assert.deepEqual(listAdapters(), ['hentai', 'pornrips', 'stripchat', 'sukebei', 'torrent-index', 'tpdb', 'yesporn']);
+  assert.deepEqual(listAdapters(), ['hentai', 'pornrips', 'stripchat', 'studio-metadata', 'sukebei', 'torrent-index', 'tpdb', 'yesporn']);
 
   const catalog = await provider.handleCatalog({
     type: 'movie',
@@ -327,7 +327,7 @@ test('TPDB recent catalog and meta handlers return stable metadata while stream 
   assert.equal(calls.every(call => !call.url.includes('tpdb-fixture')), true);
 });
 
-test('nineteen studio definitions are independent torrent-index catalogs, not metadata-provider queries', async () => {
+test('nineteen studio definitions are metadata-first catalogs with torrent lookup provenance', async () => {
   const { calls, fetchImpl } = createMetadataFetch({ sameIdentity: true });
   const bundle = createMetadataAdapters({
     config: readTpb4kConfig({
@@ -341,7 +341,8 @@ test('nineteen studio definitions are independent torrent-index catalogs, not me
   });
   const studioDefinitions = catalogDefinitions.filter(item => item.mode === 'studio-top');
   assert.equal(studioDefinitions.length, 19);
-  assert.equal(studioDefinitions.every(item => item.source === 'torrent-index'), true);
+  assert.equal(studioDefinitions.every(item => item.source === 'studio-metadata'), true);
+  assert.equal(studioDefinitions.every(item => item.lookupSource === 'torrent-index'), true);
   assert.deepEqual(bundle.adapters.map(item => item.id), ['tpdb']);
   assert.equal(calls.length, 0);
 });
@@ -349,7 +350,7 @@ test('nineteen studio definitions are independent torrent-index catalogs, not me
 test('Phase 2A release wiring preserves 28 catalogs, 37 feature catalogs, and prior hardening', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const relay = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
-  assert.equal(pkg.version, '2.7.0-alpha.12');
+  assert.equal(pkg.version, '2.7.0-alpha.13');
   assert.equal(catalogDefinitions.length, 28);
   assert.match(pkg.scripts['test:release'], /tpb4k-phase2a\.test\.js/);
   assert.match(relay, /const SESSION_TTL_MS = 8 \* 60 \* 60 \* 1000/);

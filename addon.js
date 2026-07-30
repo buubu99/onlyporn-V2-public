@@ -1,8 +1,18 @@
 const { addonBuilder } = require('stremio-addon-sdk');
 const { loadProvider } = require('./provider');
 const packageInfo = require('./package.json');
-const { catalogs } = require('./catalog');
+const { catalogs: sourceCatalogs } = require('./catalog');
 const logger = require('./logger');
+const {
+  filterCatalogResponse,
+  filterManifestCatalogs,
+  filterMetaResponse,
+  filterStreamResponse,
+  readContentFilterConfig,
+} = require('./provider/content-filter');
+
+const contentFilter = readContentFilterConfig(process.env);
+const manifestFilter = filterManifestCatalogs(sourceCatalogs, contentFilter);
 
 const manifest = {
   id: 'org.masterchief.onlyporn',
@@ -17,7 +27,7 @@ const manifest = {
 
   resources: ['catalog', 'stream', 'meta'],
   types: ['movie'],
-  catalogs,
+  catalogs: [...manifestFilter.catalogs],
 
   behaviorHints: {
     adult: true,
@@ -32,33 +42,82 @@ if (manifestBytes >= 8192) {
 
 const builder = new addonBuilder(manifest);
 
-builder.defineCatalogHandler(args =>
-  loadProvider(args.id)
-    .handleCatalog(args)
-    .catch(error => {
-      logger.error({ error: error.message, catalogId: args.id }, 'Catalog handler failed');
-      return { metas: [] };
-    })
-);
+function logFiltered(resource, args, result) {
+  if (!result.removed) return;
+  logger.info(
+    {
+      resource,
+      catalogId: resource === 'catalog' ? args.id : undefined,
+      contentId: resource === 'catalog' ? undefined : args.id,
+      removed: result.removed,
+      reasons: result.reasons,
+    },
+    'Global explicit-tag content filter removed results'
+  );
+}
 
-builder.defineStreamHandler(args =>
-  loadProvider(args.id)
-    .handleStream(args)
-    .catch(error => {
-      logger.error({ error: error.message, contentId: args.id }, 'Stream handler failed');
-      return { streams: [] };
-    })
-);
+builder.defineCatalogHandler(async args => {
+  try {
+    const response = await loadProvider(args.id).handleCatalog(args);
+    const filtered = filterCatalogResponse(response, contentFilter);
+    logFiltered('catalog', args, filtered);
+    return filtered.response;
+  } catch (error) {
+    logger.error({ error: error.message, catalogId: args.id }, 'Catalog handler failed');
+    return { metas: [] };
+  }
+});
 
-builder.defineMetaHandler(args =>
-  loadProvider(args.id)
-    .handleMeta(args)
-    .catch(error => {
-      logger.error({ error: error.message, contentId: args.id }, 'Metadata handler failed');
-      return { meta: {} };
-    })
-);
+builder.defineStreamHandler(async args => {
+  try {
+    const provider = loadProvider(args.id);
+    try {
+      const metadata = await provider.handleMeta(args);
+      const preflight = filterMetaResponse(metadata, contentFilter);
+      if (preflight.removed) {
+        logFiltered('stream', args, preflight);
+        return { streams: [] };
+      }
+    } catch {
+      // Metadata preflight is best-effort. Explicit labels on the returned
+      // stream candidates are still filtered below.
+    }
+    const response = await provider.handleStream(args);
+    const filtered = filterStreamResponse(response, contentFilter);
+    logFiltered('stream', args, filtered);
+    return filtered.response;
+  } catch (error) {
+    logger.error({ error: error.message, contentId: args.id }, 'Stream handler failed');
+    return { streams: [] };
+  }
+});
 
-logger.info({ version: manifest.version, catalogs: manifest.catalogs.length, manifestBytes }, 'OnlyPorn manifest loaded');
+builder.defineMetaHandler(async args => {
+  try {
+    const response = await loadProvider(args.id).handleMeta(args);
+    const filtered = filterMetaResponse(response, contentFilter);
+    logFiltered('meta', args, filtered);
+    return filtered.response;
+  } catch (error) {
+    logger.error({ error: error.message, contentId: args.id }, 'Metadata handler failed');
+    return { meta: {} };
+  }
+});
+
+logger.info(
+  {
+    version: manifest.version,
+    catalogs: manifest.catalogs.length,
+    manifestBytes,
+    contentFilter: {
+      enabled: contentFilter.enabled,
+      blockGay: contentFilter.blockGay,
+      blockInterracial: contentFilter.blockInterracial,
+      blockUnknown: contentFilter.blockUnknown,
+      removedManifestOptions: manifestFilter.removedOptions,
+    },
+  },
+  'OnlyPorn manifest loaded'
+);
 
 module.exports = builder.getInterface();

@@ -28,6 +28,7 @@ const SOURCES = Object.freeze({
 
 const NATIVE_MIN_REQUEST_INTERVAL_MS = 350;
 const NATIVE_MAX_RETRIES = 1;
+const NATIVE_MAX_CATALOG_PAGES_PER_REQUEST = 12;
 
 function createNativeClient(id, config, options = {}) {
   const source = SOURCES[id];
@@ -320,6 +321,7 @@ function buildCatalogUrl(source, catalog, page) {
 function createNativeAdapter(source, options = {}) {
   const client = createNativeClient(source, options.config, options);
   const index = new Map();
+  const catalogWindows = new Map();
   const parser = source === 'pornrips' ? parsePornripsCatalog : source === 'yesporn' ? parseYespornCatalog : parseHentaiCatalog;
   return Object.freeze({
     id: source,
@@ -327,13 +329,48 @@ function createNativeAdapter(source, options = {}) {
     native: true,
     origin: SOURCES[source].origin,
     async catalog({ catalog, skip = 0, limit = 40 }) {
-      const page = pageNumber(skip, limit);
-      const url = buildCatalogUrl(source, catalog, page);
-      const payload = safeHtml(await client.fetchText(url, { cacheKey: `${source}:${catalog?.mode || 'recent'}:${page}` }), source);
-      if (!payload) return [];
-      const records = parser(payload).slice(0, limit);
-      for (const record of records) index.set(record.sourceId, record);
-      return records;
+      const safeSkip = Math.max(Number.parseInt(String(skip || 0), 10) || 0, 0);
+      const safeLimit = Math.max(Number.parseInt(String(limit || 40), 10) || 40, 1);
+      const targetEnd = safeSkip + safeLimit;
+      const catalogKey = String(catalog?.id || `${source}:${catalog?.mode || 'recent'}`);
+      let state = catalogWindows.get(catalogKey);
+      if (!state) {
+        state = { nextPage: 1, records: [], seen: new Set() };
+        catalogWindows.set(catalogKey, state);
+      }
+
+      // Build one stable, deduplicated source timeline and slice it by the
+      // Stremio skip. The global content filter can request an overscan limit
+      // of 100 while the visible page remains 40; deriving the upstream page
+      // from that overscan limit caused skip=40 to request page one again.
+      // Keeping a canonical timeline also tolerates WordPress page overlap
+      // when new posts shift between page requests.
+      let pagesFetched = 0;
+      while (
+        state.records.length < targetEnd
+        && pagesFetched < NATIVE_MAX_CATALOG_PAGES_PER_REQUEST
+      ) {
+        const page = state.nextPage;
+        const url = buildCatalogUrl(source, catalog, page);
+        const payload = safeHtml(
+          await client.fetchText(url, { cacheKey: `${source}:${catalog?.mode || 'recent'}:${page}` }),
+          source
+        );
+        if (!payload) break;
+        const pageRecords = parser(payload);
+        if (!pageRecords.length) break;
+        state.nextPage += 1;
+        pagesFetched += 1;
+        for (const record of pageRecords) {
+          if (!record?.sourceId || state.seen.has(record.sourceId)) continue;
+          state.seen.add(record.sourceId);
+          state.records.push(record);
+        }
+      }
+
+      const window = state.records.slice(safeSkip, targetEnd);
+      for (const record of window) index.set(record.sourceId, record);
+      return window;
     },
     async meta({ sourceId }) {
       const remembered = index.get(String(sourceId || ''));
@@ -351,6 +388,7 @@ function createNativeAdapter(source, options = {}) {
 }
 
 module.exports = {
+  NATIVE_MAX_CATALOG_PAGES_PER_REQUEST,
   NATIVE_MAX_RETRIES,
   NATIVE_MIN_REQUEST_INTERVAL_MS,
   SOURCES,

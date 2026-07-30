@@ -41,22 +41,40 @@ The release validator checks JavaScript and Python syntax, packaging, secret-bea
 
 ## TPB4K integration development
 
-Version `2.7.0-alpha.12` retains the original TPB4K foundation and all 28 selected unified-resolution catalogs. The feature is controlled by `TPB4K_ENABLED`; with it enabled the addon exposes 37 total catalogs, including the 28 TPB4K catalogs. Alpha.12 removes the alpha.11 eight-card enrichment cap, makes every returned studio card eligible for strict TPDB/StashDB matching, and keeps TPB4K stream resolution intentionally empty until Phase 3.
+Version `2.7.0-alpha.13` retains the 28 selected unified-resolution TPB4K
+catalogs and the 37-catalog enabled manifest. The 19 professional studio rows
+are now metadata-first TPDB/StashDB catalogs with real scene posters; torrent
+search remains stored only as Phase 3 lookup provenance. Generic purple cards
+are no longer returned in those rows.
 
-## TPB4K Phase 2A
+Alpha.13 also installs one global explicit-label content filter at the addon
+boundary. It filters catalog/search results, metadata, posters and streams using
+provided tags/categories and strong explicit text labels. It never analyzes an
+image or infers a person's attributes. The default configuration blocks
+explicit male-male/gay or bisexual-male labels and explicit
+interracial/black-male/African-American-male/BBC labels.
 
-Version `2.7.0-alpha.12` retains the alpha.10 TPB-compatible studio architecture: each of the 19 selected studio catalogs searches UHD category 507, sorted by seeders with order code 7, using the fixed TheHiddenBay / ThePirateBay0 / PirateBay Live chain. Poster enrichment now uses provider-friendly studio aliases, full-date and year-only title parsing, cached studio pools, targeted matching for every unmatched card, bounded concurrency, and a request-wide metadata deadline. Network failures are not negative-cached. Clean studio fallbacks remain available only when a verified match is unavailable. Magnets and info hashes remain private, and TPB4K stream resolution remains intentionally empty until Phase 3.
+The feature remains controlled by `TPB4K_ENABLED`. TPB4K playback resolution is
+still intentionally empty until Phase 3 produces verified torrent identities.
 
-See `TPB4K_POSTER_ENRICHMENT.md` and `DEPLOY_TPB4K_POSTER_ENRICHMENT.md`.
+See `TPB4K_METADATA_FIRST_FILTERS.md` and
+`DEPLOY_TPB4K_METADATA_FIRST_FILTERS.md`.
 
-## TPB4K Phase 2B
+## Metadata-first studio catalogs
 
-Alpha.4 adds optional metadata-only discovery feeds for PornRips, YesPorn, Hentai, and Sukebei plus a Render preview smoke suite. Stripchat remains gated to Phase 7.
+The 19 `tpb4k.studio.*.top` definitions use `source: studio-metadata` and
+`lookupSource: torrent-index`. TPDB is queried by site/studio identity, while
+StashDB first resolves exact studio IDs and then uses the schema's studio-ID
+criterion. Both providers contribute real posters, tags, performers and dates.
+Records without a real poster are omitted rather than replaced by a placeholder.
 
-### TPB4K native metadata acquisition
+The TPB/HiddenBay adapter, category `507`, sort `7`, opaque torrent identity and
+mirror failover remain available for Phase 3 resolution and regression tests;
+they no longer determine which cards are visible in the 19 metadata rows.
 
-PornRips, YesPorn, and HentaiMama catalog metadata is acquired directly from fixed audited HTTPS origins. No external JSON feed URLs are required. Playback resolution begins in later TPB4K phases.
+## Global explicit-label filter
 
-### TPB studio catalog transport
-
-The 19 `tpb4k.studio.*.top` catalogs do not come from StashDB. They use TPB-style HTML search paths `/search/{studio}/{page}/7/507`. `TPB4K_TPB_MIRRORS` may override the comma-separated mirror order for operations, but only bare credential-free HTTPS origins are accepted.
+Default Render variables are documented in `.env.example`. Unknown/unclassified
+items remain allowed by default because some legacy providers do not expose
+classification tags. Enable `ONLYPORN_FILTER_UNKNOWN=true` only for a strict
+fail-closed policy that accepts the resulting loss of uncategorized content.

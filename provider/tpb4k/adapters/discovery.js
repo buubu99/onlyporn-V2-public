@@ -4,6 +4,7 @@ const { normalizeFeedItem, parseJsonFeed, parseRssFeed } = require('../discovery
 const { SourceHttpClient } = require('../source-http');
 const { createNativeAdapter } = require('../native-discovery');
 const { createTorrentIndexAdapter } = require('../torrent-index');
+const { createStudioMetadataAdapter } = require('../studio-metadata');
 
 function createMemoryIndex() {
   const entries = new Map();
@@ -120,12 +121,14 @@ function createDiscoveryAdapters(options = {}) {
     now: options.now,
     sleep: options.sleep,
     metadataClients: options.metadataClients,
+    env: options.env || process.env,
   };
   const adapters = [
     createNativeAdapter('pornrips', common),
     createNativeAdapter('yesporn', common),
     createNativeAdapter('hentai', common),
     createTorrentIndexAdapter(common),
+    createStudioMetadataAdapter(common),
     createSukebeiAdapter({ ...common, endpoint: config.discovery.sukebei }),
     createStripchatGateAdapter(),
   ];

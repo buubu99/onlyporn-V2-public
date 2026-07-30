@@ -24,6 +24,7 @@ function installBuiltInAdapters(options = {}) {
   const metadata = createMetadataAdapters({ config, fetchImpl: options.fetchImpl });
   const discovery = createDiscoveryAdapters({
     config,
+    env: options.env || process.env,
     fetchImpl: options.fetchImpl,
     checkDns: options.checkDns,
     minRequestIntervalMs: options.minRequestIntervalMs,

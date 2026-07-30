@@ -1,3 +1,7 @@
+# Historical checkpoint: alpha.11/alpha.12 torrent-poster enrichment
+
+> Superseded for the 19 studio catalogs by `TPB4K_METADATA_FIRST_FILTERS.md` in alpha.13. This document remains for regression history and non-studio fallback behavior.
+
 # TPB4K complete studio poster enrichment — alpha.12
 
 Version: `2.7.0-alpha.12`
