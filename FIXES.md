@@ -1,3 +1,14 @@
+## 2.7.0-alpha.12 — full-card TPB4K poster matching
+
+- Removed the alpha.11 eight-card enrichment cap; every returned studio card is eligible.
+- Added cached per-studio metadata pools and targeted lookups for unmatched records.
+- Added provider-friendly aliases for all 19 studio names.
+- Added full-date, compact-date, and year-only title parsing.
+- Added bounded concurrency, request-wide metadata deadline, and safe diagnostics.
+- Network errors and timeouts are no longer negative-cached.
+- Replaced text-heavy fallback posters with clean branded assets.
+- Preserved torrent identity, existing providers, manifest counts, and Phase 3 stream gate.
+
 ## 2.7.0-alpha.11 — TPB4K poster enrichment completion
 
 - Added strict StashDB/TPDB artwork matching for the 19 TPB studio catalogs.

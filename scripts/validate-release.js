@@ -166,6 +166,7 @@ const requiredFiles = [
   'scripts/tpb4k-metadata-smoke.js',
   'scripts/tpb4k-discovery-smoke.js',
   'scripts/tpb4k-render-smoke.js',
+  'scripts/tpb4k-poster-coverage-smoke.js',
   'scripts/javhdporn-vdcdn-smoke.js',
   'scripts/javhdporn_jw_capture.js',
   'scripts/javhdporn_safari_fetch_helper.py',

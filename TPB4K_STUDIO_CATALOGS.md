@@ -1,6 +1,6 @@
-# TPB4K studio catalogs — alpha.11
+# TPB4K studio catalogs — alpha.12
 
-Version: 2.7.0-alpha.11
+Version: 2.7.0-alpha.12
 
 The 19 selected `tpb4k.studio.*.top` catalogs are torrent-result catalogs. They are not StashDB studio-scene queries.
 

@@ -81,6 +81,6 @@ test('all 28 TPB4K catalog IDs remain unique and unified-resolution', () => {
 });
 
 test('Phase 2B release wiring retains the TPB torrent-index adapter', () => {
-  assert.equal(require('../package.json').version, '2.7.0-alpha.11');
+  assert.equal(require('../package.json').version, '2.7.0-alpha.12');
   assert.match(require('../package.json').scripts['test:release'], /tpb4k-phase2b\.test\.js/);
 });

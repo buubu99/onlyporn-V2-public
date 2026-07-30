@@ -169,6 +169,25 @@ async function main() {
     if (posters !== raw.length) failures.push(`${definition.name}: poster coverage is not 100%`);
     if (portraitCards !== metas.length) failures.push(`${definition.name}: non-portrait poster shape`);
     if (realMetadataPosters + fallbackPosters !== raw.length) failures.push(`${definition.name}: unknown poster provenance`);
+    const enrichment = diagnostics.enrichment || {};
+    if (Number(enrichment.eligible) !== raw.length) {
+      failures.push(`${definition.name}: not every returned card was eligible for metadata enrichment`);
+    }
+    if (Number(enrichment.skipped || 0) !== 0) {
+      failures.push(`${definition.name}: fixed-limit poster skipping is still active`);
+    }
+    if (config.tpdb.configured || config.stashdb.configured) {
+      const evaluated = Number(enrichment.attempted || 0) + Number(enrichment.cacheHits || 0);
+      if (evaluated !== raw.length) {
+        failures.push(`${definition.name}: enrichment did not evaluate every returned card`);
+      }
+      if (Number(enrichment.deadlineFallbacks || 0) > 0) {
+        warnings.push(`${definition.name}: ${enrichment.deadlineFallbacks} card(s) reached the metadata deadline`);
+      }
+      if (raw.length && realMetadataPosters === 0) {
+        warnings.push(`${definition.name}: no real metadata posters matched in this live run`);
+      }
+    }
     if (privateFieldsLeaked) failures.push(`${definition.name}: magnet/info-hash leaked from catalog adapter`);
   }
 

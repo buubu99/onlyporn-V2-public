@@ -1,27 +1,25 @@
-# Deploy TPB4K poster enrichment — alpha.11
+# Deploy TPB4K full poster matching — alpha.12
 
-Use the supplied guarded Mac Terminal script:
+Candidate: `2.7.0-alpha.12`
 
-`DEPLOY_ONLYPORN_TPB4K_POSTER_ENRICHMENT_2.7.0_ALPHA11.sh`
+The guarded deployment script must start from GitHub `main` at
+`2.7.0-alpha.11`. It creates a remote backup branch, installs the exact
+candidate ZIP, runs syntax and focused tests, runs the complete retained
+release validation, performs live TPDB/StashDB studio catalog validation,
+rechecks JAVHDPorn and native TPB4K smoke paths, commits, pushes `main`, and
+then verifies Render.
 
-The script requires the matching source ZIP in `~/Downloads`, verifies its SHA-256, verifies GitHub `main` is still the expected alpha.10 manifest-hotfix commit, creates and pushes a backup branch, installs the candidate, runs syntax and regression gates, performs live catalog checks with rotated metadata keys, commits the exact tested tree, pushes GitHub `main`, waits for Render, and validates live poster coverage.
+The deployment aborts before pushing when:
 
-Run one command block:
+- GitHub `main` does not report `2.7.0-alpha.11`;
+- the ZIP checksum does not match;
+- the working tree contains unexpected changes;
+- any returned studio card is not eligible for enrichment;
+- fixed-limit poster skipping is detected;
+- poster coverage or identity validation fails;
+- a secret-bearing file or entered key is detected in source;
+- the manifest exceeds the SDK limit;
+- any retained release test fails.
 
-```bash
-chmod +x "$HOME/Downloads/DEPLOY_ONLYPORN_TPB4K_POSTER_ENRICHMENT_2.7.0_ALPHA11.sh"
-bash "$HOME/Downloads/DEPLOY_ONLYPORN_TPB4K_POSTER_ENRICHMENT_2.7.0_ALPHA11.sh"
-```
-
-The script aborts without pushing when:
-
-- `main` is not the expected base commit;
-- the working tree is dirty;
-- the ZIP checksum or required-file inventory differs;
-- generated/private files are staged;
-- any deterministic or live gate fails;
-- an active secret value is found in the source tree;
-- the Render manifest does not publish alpha.11 with 37 total / 28 TPB4K catalogs;
-- a live returned TPB4K card lacks a safe HTTPS poster.
-
-Do not enter the previously exposed TPDB or StashDB values. Rotate them first and use only the replacements when the script prompts.
+Use rotated TPDB and StashDB keys. The script accepts them through hidden
+Terminal input and never writes their values to the repository.

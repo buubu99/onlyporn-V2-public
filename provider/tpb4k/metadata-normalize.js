@@ -2,27 +2,29 @@
 
 const { buildSceneIdentity } = require('./identity');
 
-const CANONICAL_STUDIOS = Object.freeze([
-  'BrazzersExxtra',
-  'Cum4K',
-  'DevilsFilm',
-  'DigitalPlayground',
-  'DorcelClub',
-  'MetArt',
-  'MetArtX',
-  'Milfty',
-  'Milfy',
-  'NewSensations',
-  'PornMegaLoad',
-  'OnlyFans',
-  'PlayboyPlus',
-  'SexMex',
-  'TheLifeErotic',
-  'Vixen',
-  'WowGirls',
-  'SexArt',
-  'XVideosRED',
-]);
+const STUDIO_ALIASES = Object.freeze({
+  BrazzersExxtra: Object.freeze(['Brazzers Exxtra', 'BrazzersExxtra', 'Brazzers Extra']),
+  Cum4K: Object.freeze(['Cum 4K', 'Cum4K']),
+  DevilsFilm: Object.freeze(["Devil's Film", 'Devils Film', 'DevilsFilm']),
+  DigitalPlayground: Object.freeze(['Digital Playground', 'DigitalPlayground']),
+  DorcelClub: Object.freeze(['Dorcel Club', 'DorcelClub', 'Marc Dorcel']),
+  MetArt: Object.freeze(['MetArt', 'Met Art']),
+  MetArtX: Object.freeze(['MetArt X', 'MetArtX', 'Met Art X']),
+  Milfty: Object.freeze(['Milfty', 'MILFTY', 'Milf TY']),
+  Milfy: Object.freeze(['Milfy', 'MILFY']),
+  NewSensations: Object.freeze(['New Sensations', 'NewSensations']),
+  PornMegaLoad: Object.freeze(['Porn Mega Load', 'PornMegaLoad']),
+  OnlyFans: Object.freeze(['OnlyFans', 'Only Fans']),
+  PlayboyPlus: Object.freeze(['Playboy Plus', 'PlayboyPlus']),
+  SexMex: Object.freeze(['SexMex', 'Sex Mex']),
+  TheLifeErotic: Object.freeze(['The Life Erotic', 'TheLifeErotic']),
+  Vixen: Object.freeze(['Vixen']),
+  WowGirls: Object.freeze(['Wow Girls', 'WowGirls']),
+  SexArt: Object.freeze(['SexArt', 'Sex Art']),
+  XVideosRED: Object.freeze(['XVideos RED', 'XVideosRed', 'XVideosRED', 'XVideos Red']),
+});
+
+const CANONICAL_STUDIOS = Object.freeze(Object.keys(STUDIO_ALIASES));
 
 function compactKey(value) {
   return String(value || '')
@@ -31,11 +33,30 @@ function compactKey(value) {
     .replace(/[^\p{L}\p{N}]+/gu, '');
 }
 
-const STUDIO_BY_KEY = new Map(CANONICAL_STUDIOS.map(name => [compactKey(name), name]));
+const STUDIO_BY_KEY = new Map();
+for (const canonical of CANONICAL_STUDIOS) {
+  STUDIO_BY_KEY.set(compactKey(canonical), canonical);
+  for (const alias of STUDIO_ALIASES[canonical]) STUDIO_BY_KEY.set(compactKey(alias), canonical);
+}
 
 function normalizeStudioName(value) {
   const text = String(value || '').replace(/\s+/g, ' ').trim();
   return STUDIO_BY_KEY.get(compactKey(text)) || text;
+}
+
+function studioAliases(value) {
+  const canonical = normalizeStudioName(value);
+  const aliases = STUDIO_ALIASES[canonical] || [canonical];
+  const output = [];
+  const seen = new Set();
+  for (const candidate of [...aliases, canonical]) {
+    const text = String(candidate || '').replace(/\s+/g, ' ').trim();
+    const key = text.toLowerCase();
+    if (!text || seen.has(key)) continue;
+    seen.add(key);
+    output.push(text);
+  }
+  return Object.freeze(output);
 }
 
 function normalizePerformers(value) {
@@ -202,6 +223,7 @@ function mergeMetadataPreservingIdentity(sourceItem = {}, enrichment = {}) {
 
 module.exports = {
   CANONICAL_STUDIOS,
+  STUDIO_ALIASES,
   chooseBackground,
   choosePoster,
   mergeMetadataPreservingIdentity,
@@ -210,4 +232,5 @@ module.exports = {
   normalizeStudioName,
   safeHttpsUrl,
   sceneImages,
+  studioAliases,
 };

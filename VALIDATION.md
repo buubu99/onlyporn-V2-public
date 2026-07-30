@@ -293,3 +293,16 @@ TPB4K_ENABLED=true npm run smoke:tpb4k-catalog
 ```
 
 Acceptance requires 100% safe HTTPS poster coverage for every returned TPDB Recent and studio-catalog card, consistent portrait poster shape, no metadata studio conflict, no torrent identity mutation, valid committed 600×900 fallback PNGs, no secret-bearing poster URL, and preserved empty TPB4K stream behavior. The post-deploy Render smoke additionally verifies that a live poster URL returns an image response and that the manifest remains 37 total / 28 TPB4K catalogs.
+
+## TPB4K full poster matching — alpha.12
+
+```bash
+npm run test:tpb4k-poster-enrichment
+npm run test:tpb4k-torrent-index
+TPB4K_ENABLED=true TPB4K_CATALOG_LIMIT=40 npm run smoke:tpb4k-catalog
+EXPECTED_VERSION=2.7.0-alpha.12 npm run validate:release
+```
+
+Acceptance requires every returned studio card to be enrichment-eligible,
+`skipped=0`, complete safe HTTPS poster coverage, preserved source identity,
+and no negative caching of provider errors or timeouts.

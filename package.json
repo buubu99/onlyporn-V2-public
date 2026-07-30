@@ -1,6 +1,6 @@
 {
   "name": "OnlyPorn",
-  "version": "2.7.0-alpha.11",
+  "version": "2.7.0-alpha.12",
   "description": "Use your TV remote to its full potential!",
   "license": "MIT",
   "scripts": {
@@ -44,7 +44,8 @@
     "smoke:tpb4k-hentai": "node scripts/tpb4k-hentai-live-smoke.js",
     "test:tpb4k-torrent-index": "node --test provider/tpb4k-torrent-index.test.js",
     "smoke:tpb4k-catalog": "node scripts/tpb4k-catalog-smoke.js",
-    "test:tpb4k-poster-enrichment": "node --test provider/tpb4k-poster-enrichment.test.js"
+    "test:tpb4k-poster-enrichment": "node --test provider/tpb4k-poster-enrichment.test.js",
+    "smoke:tpb4k-posters": "node scripts/tpb4k-poster-coverage-smoke.js"
   },
   "dependencies": {
     "axios": "^1.13.6",

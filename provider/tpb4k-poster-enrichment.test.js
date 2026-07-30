@@ -5,6 +5,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const test = require('node:test');
 const { buildSceneIdentity } = require('./tpb4k/identity');
+const { readTpb4kConfig } = require('./tpb4k/config');
+const { normalizeStudioName, studioAliases } = require('./tpb4k/metadata-normalize');
 const { sceneInput } = require('./tpb4k/stashbox-client');
 const { TpdbRestClient } = require('./tpb4k/tpdb-rest-client');
 const {
@@ -19,21 +21,56 @@ function headers(contentType = 'application/json') {
   return { get: name => String(name).toLowerCase() === 'content-type' ? contentType : '' };
 }
 
-test('torrent title cleanup extracts release date and removes technical release tags', () => {
+function scene(id, title, studio, date = '2026-07-29') {
+  return {
+    id,
+    title,
+    release_date: date,
+    details: 'Verified metadata',
+    studio: { name: studio },
+    images: [{ url: `https://images.example/${id}.jpg`, width: 600, height: 900 }],
+    performers: [],
+  };
+}
+
+test('torrent title cleanup extracts full dates, compact dates and year-only prefixes', () => {
   assert.deepEqual(extractTitleDate(
     'Vixen 26 07 29 Cruella The Night Shift XXX 2160p WEB-DL x265',
     'Vixen'
   ), {
     releaseDate: '2026-07-29',
+    releaseYear: '2026',
     remaining: 'Cruella The Night Shift XXX 2160p WEB-DL x265',
   });
-  assert.deepEqual(normalizeSearchTitle(
-    'Vixen 26 07 29 Cruella The Night Shift XXX 2160p WEB-DL x265',
-    'Vixen'
+  assert.deepEqual(extractTitleDate(
+    'XVideosRED 2025 Cruella Pregnant Teen',
+    'XVideosRED'
   ), {
-    query: 'Cruella The Night Shift',
-    releaseDate: '2026-07-29',
+    releaseDate: '',
+    releaseYear: '2025',
+    remaining: 'Cruella Pregnant Teen',
   });
+  assert.deepEqual(extractTitleDate('Sex Art 20260716 Alice Example', 'SexArt'), {
+    releaseDate: '2026-07-16',
+    releaseYear: '2026',
+    remaining: 'Alice Example',
+  });
+  assert.deepEqual(normalizeSearchTitle(
+    'XVideosRED 2025 Cruella Pregnant Teen XXX 2160p WEB-DL x265 PRT',
+    'XVideosRED'
+  ), {
+    query: 'Cruella Pregnant Teen',
+    releaseDate: '',
+    releaseYear: '2025',
+  });
+});
+
+test('studio aliases canonicalize compact TPB names and provide provider-friendly queries', () => {
+  assert.equal(normalizeStudioName('XVideos Red'), 'XVideosRED');
+  assert.equal(normalizeStudioName('Digital Playground'), 'DigitalPlayground');
+  assert.equal(normalizeStudioName("Devil's Film"), 'DevilsFilm');
+  assert.equal(studioAliases('XVideosRED')[0], 'XVideos RED');
+  assert.equal(studioAliases('DigitalPlayground')[0], 'Digital Playground');
 });
 
 test('fallback posters are stable credential-free HTTPS repository assets', () => {
@@ -64,15 +101,24 @@ test('every configured fallback poster is a valid 600x900 PNG asset', () => {
   }
 });
 
-test('StashDB scene input supports strict title and parent-studio searching', () => {
+test('alpha.12 configuration makes all catalog records eligible within a bounded deadline', () => {
+  const config = readTpb4kConfig({});
+  assert.equal(config.metadataEnrichmentConcurrency, 10);
+  assert.equal(config.metadataLookupTimeoutMs, 2500);
+  assert.equal(config.metadataEnrichmentDeadlineMs, 16000);
+  assert.equal(config.metadataPoolSize, 100);
+  assert.equal('metadataEnrichmentLimit' in config, false);
+});
+
+test('StashDB scene input supports title and provider-friendly parent-studio aliases', () => {
   const input = sceneInput({
     page: 1,
-    perPage: 12,
-    studio: 'Vixen',
-    title: 'Cruella The Night Shift',
+    perPage: 20,
+    studio: 'XVideos RED',
+    title: 'Cruella Pregnant Teen',
   });
-  assert.equal(input.parentStudio, 'Vixen');
-  assert.equal(input.title, 'Cruella The Night Shift');
+  assert.equal(input.parentStudio, 'XVideos RED');
+  assert.equal(input.title, 'Cruella Pregnant Teen');
   assert.equal(input.text, undefined);
 });
 
@@ -98,7 +144,7 @@ test('TPDB REST scene search sends q, site, year and Bearer authorization', asyn
     studio: 'Vixen',
     year: 2026,
     page: 1,
-    perPage: 12,
+    perPage: 20,
     orderBy: 'date',
   });
   const url = new URL(observedUrl);
@@ -109,113 +155,165 @@ test('TPDB REST scene search sends q, site, year and Bearer authorization', asyn
   assert.equal(observedAuth, 'Bearer test-token');
 });
 
-test('metadata matcher accepts strong same-studio title containment and rejects conflicts', () => {
+test('metadata matcher accepts aliases and strong title/date evidence but rejects studio conflicts', () => {
   const source = {
     sourceId: 'hiddenbay:abc',
-    title: 'Vixen 26 07 29 Cruella The Night Shift XXX 2160p',
-    studio: 'Vixen',
-    releaseDate: '2026-07-29',
+    title: 'XVideosRED 2025 Cruella Pregnant Teen XXX 2160p',
+    studio: 'XVideosRED',
   };
   const normalized = {
-    title: 'Cruella: The Night Shift',
-    studio: 'Vixen',
-    releaseDate: '2026-07-29',
+    title: 'Cruella Pregnant Teen',
+    studio: 'XVideos RED',
+    releaseDate: '2025-06-10',
     poster: 'https://images.example/poster.jpg',
     sceneCode: '',
   };
-  const accepted = scoreMetadataCandidate(source, { studio: { name: 'Vixen' } }, normalized);
+  const accepted = scoreMetadataCandidate(source, { site: { name: 'XVideos Red' } }, normalized);
   assert.equal(accepted.accepted, true);
   assert.ok(accepted.score >= 0.8, accepted);
 
   const rejected = scoreMetadataCandidate(
     source,
-    { studio: { name: 'DigitalPlayground' } },
+    { studio: { name: 'Digital Playground' } },
     { ...normalized, studio: 'DigitalPlayground' }
   );
   assert.equal(rejected.accepted, false);
   assert.equal(rejected.reason, 'studio-conflict');
 });
 
-test('poster enricher uses verified metadata without changing torrent identity', async () => {
+test('poster enricher uses a single studio pool and preserves all 40 torrent identities', async () => {
   let requests = 0;
-  const source = Object.freeze({
-    sourceId: 'hiddenbay:0123456789',
-    title: 'Vixen 26 07 29 Cruella The Night Shift XXX 2160p',
+  const items = Array.from({ length: 40 }, (_, index) => Object.freeze({
+    sourceId: `hiddenbay:pool-${index}`,
+    title: `Vixen 2025 Fixture Scene ${index}`,
     description: 'TPB result',
     studio: 'Vixen',
-    releaseDate: '2026-07-29',
-    detailUrl: 'https://thehiddenbay.com/torrent/1/example',
-  });
-  const identity = buildSceneIdentity(source).digest;
+    detailUrl: `https://thehiddenbay.com/torrent/${index}/fixture`,
+  }));
+  const pool = items.map((item, index) => scene(`pool-${index}`, `Fixture Scene ${index}`, 'Vixen', '2025-06-10'));
   const enricher = createPosterEnricher({
-    config: {
-      metadataMatchThreshold: 72,
-      metadataEnrichmentConcurrency: 2,
-      metadataLookupTimeoutMs: 2000,
-      metadataCacheTtlMs: 60000,
-      metadataNegativeTtlMs: 10000,
-      metadataCacheMaxEntries: 20,
-    },
+    config: { metadataLookupTimeoutMs: 2000, metadataEnrichmentDeadlineMs: 12000 },
     clients: {
       stashdb: {
         configured: true,
         async queryScenes(options) {
           requests += 1;
           assert.equal(options.studio, 'Vixen');
-          assert.equal(options.title, 'Cruella The Night Shift');
-          return [{
-            id: 'scene-1',
-            title: 'Cruella The Night Shift',
-            release_date: '2026-07-29',
-            details: 'Verified metadata',
-            studio: { name: 'Vixen' },
-            images: [{ url: 'https://images.example/vixen-poster.jpg', width: 600, height: 900 }],
-            performers: [{ performer: { name: 'Cruella' } }],
-          }];
+          assert.equal(options.title, undefined);
+          return pool;
         },
       },
       tpdb: { configured: false },
     },
   });
 
-  const first = await enricher.enrichItems([source]);
-  assert.equal(first.items[0].sourceId, source.sourceId);
-  assert.equal(first.items[0].title, source.title);
-  assert.equal(first.items[0].poster, 'https://images.example/vixen-poster.jpg');
-  assert.equal(first.items[0].posterSource, 'metadata:stashdb');
-  assert.equal(first.items[0].sceneIdentity, identity);
-  assert.equal(first.stats.matched, 1);
-
-  const second = await enricher.enrichItems([source]);
-  assert.equal(second.items[0].poster, 'https://images.example/vixen-poster.jpg');
-  assert.equal(second.stats.cacheHits, 1);
+  const result = await enricher.enrichItems(items);
+  assert.equal(result.items.length, 40);
+  assert.equal(result.stats.eligible, 40);
+  assert.equal(result.stats.attempted, 40);
+  assert.equal(result.stats.skipped, 0);
+  assert.equal(result.stats.matched, 40);
+  assert.equal(result.stats.poolMatches, 40);
+  assert.equal(result.stats.fallback, 0);
   assert.equal(requests, 1);
+  for (let index = 0; index < items.length; index += 1) {
+    assert.equal(result.items[index].sourceId, items[index].sourceId);
+    assert.equal(result.items[index].title, items[index].title);
+    assert.equal(result.items[index].sceneIdentity, buildSceneIdentity(items[index]).digest);
+    assert.equal(result.items[index].posterSource, 'metadata:stashdb');
+  }
 });
 
-test('poster enrichment bounds live metadata work and immediately falls back for remaining cards', async () => {
-  let requests = 0;
-  const items = Array.from({ length: 12 }, (_, index) => ({
-    sourceId: `hiddenbay:bounded-${index}`,
-    title: `Vixen 26 07 ${String(index + 1).padStart(2, '0')} Fixture Scene ${index}`,
-    studio: 'Vixen',
+test('all 40 unmatched pool records receive targeted lookup eligibility without a fixed item cap', async () => {
+  let poolRequests = 0;
+  let targetedRequests = 0;
+  const items = Array.from({ length: 40 }, (_, index) => ({
+    sourceId: `hiddenbay:target-${index}`,
+    title: `XVideosRED 2025 Target Scene ${index}`,
+    studio: 'XVideosRED',
   }));
   const enricher = createPosterEnricher({
-    config: { metadataEnrichmentLimit: 3, metadataLookupTimeoutMs: 1000 },
+    config: {
+      metadataEnrichmentConcurrency: 12,
+      metadataLookupTimeoutMs: 2000,
+      metadataEnrichmentDeadlineMs: 15000,
+    },
     clients: {
-      stashdb: { configured: true, async queryScenes() { requests += 1; return []; } },
+      stashdb: {
+        configured: true,
+        async queryScenes(options) {
+          if (!options.title) {
+            poolRequests += 1;
+            return [];
+          }
+          targetedRequests += 1;
+          const index = Number(options.title.match(/(\d+)$/)?.[1]);
+          return [scene(`target-${index}`, `Target Scene ${index}`, 'XVideos Red', '2025-04-01')];
+        },
+      },
       tpdb: { configured: false },
     },
   });
   const result = await enricher.enrichItems(items);
-  assert.equal(result.items.length, 12);
-  assert.equal(requests, 3);
-  assert.equal(result.stats.attempted, 3);
-  assert.equal(result.stats.skipped, 9);
-  assert.equal(result.stats.fallback, 12);
-  assert.equal(result.items.every(item => item.posterSource === 'fallback:studio'), true);
+  assert.equal(result.stats.eligible, 40);
+  assert.equal(result.stats.attempted, 40);
+  assert.equal(result.stats.skipped, 0);
+  assert.equal(result.stats.targetedMatches, 40);
+  assert.equal(result.stats.matched, 40);
+  assert.equal(result.stats.fallback, 0);
+  assert.equal(poolRequests, 2);
+  assert.equal(targetedRequests, 40);
+  assert.equal(result.items.every(item => item.posterSource === 'metadata:stashdb'), true);
 });
 
-test('poster enricher guarantees a branded fallback when metadata is unavailable', async () => {
+test('network errors and timeouts are not negative-cached', async () => {
+  let requests = 0;
+  const item = { sourceId: 'hiddenbay:retry', title: 'Vixen 2025 Retry Scene', studio: 'Vixen' };
+  const enricher = createPosterEnricher({
+    config: { metadataLookupTimeoutMs: 1000, metadataEnrichmentDeadlineMs: 5000 },
+    clients: {
+      stashdb: {
+        configured: true,
+        async queryScenes() {
+          requests += 1;
+          throw new Error('temporary upstream failure');
+        },
+      },
+      tpdb: { configured: false },
+    },
+  });
+  const first = await enricher.enrichItems([item]);
+  const afterFirst = requests;
+  const second = await enricher.enrichItems([item]);
+  assert.equal(first.items[0].posterSource, 'fallback:studio');
+  assert.equal(second.items[0].posterSource, 'fallback:studio');
+  assert.ok(requests > afterFirst, { requests, afterFirst });
+  assert.equal(first.stats.notFound, 0);
+  assert.equal(second.stats.negativeCacheHits, 0);
+});
+
+test('confirmed metadata not-found is briefly negative-cached', async () => {
+  let requests = 0;
+  const item = { sourceId: 'hiddenbay:not-found', title: 'Vixen 2025 Missing Scene', studio: 'Vixen' };
+  const enricher = createPosterEnricher({
+    config: { metadataNegativeTtlMs: 60000, metadataLookupTimeoutMs: 1000 },
+    clients: {
+      stashdb: {
+        configured: true,
+        async queryScenes() { requests += 1; return []; },
+      },
+      tpdb: { configured: false },
+    },
+  });
+  const first = await enricher.enrichItems([item]);
+  const afterFirst = requests;
+  const second = await enricher.enrichItems([item]);
+  assert.equal(first.stats.notFound, 1);
+  assert.equal(second.stats.negativeCacheHits, 1);
+  assert.equal(requests, afterFirst);
+});
+
+test('poster enricher guarantees a clean branded fallback when metadata is unavailable', async () => {
   const source = Object.freeze({
     sourceId: 'hiddenbay:fallback',
     title: 'DigitalPlayground 26 04 23 Sarah Arabic The Drifter Part 2 2160p',
@@ -229,4 +327,5 @@ test('poster enricher guarantees a branded fallback when metadata is unavailable
   assert.match(result.items[0].poster, /digitalplayground\.png$/);
   assert.equal(result.items[0].posterSource, 'fallback:studio');
   assert.equal(result.stats.fallback, 1);
+  assert.equal(result.stats.skipped, 0);
 });

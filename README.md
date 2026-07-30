@@ -4,7 +4,7 @@ A self-hosted Stremio addon fork with Eporner, Porntrex, SpankBang, XVideos, XNX
 
 ## Stable provider baseline: 2.6.4
 
-## Current TPB4K candidate: 2.7.0-alpha.11
+## Current TPB4K candidate: 2.7.0-alpha.12
 
 OnlyPorn v2.6.4 adds Hardening Phase 1 on top of the production-verified v2.6.3 relay-session repair and v2.6.2 JAVHDPorn `vdcdn.xyz` hotfix.
 
@@ -41,11 +41,11 @@ The release validator checks JavaScript and Python syntax, packaging, secret-bea
 
 ## TPB4K integration development
 
-Version `2.7.0-alpha.11` retains the original TPB4K foundation and all 28 selected unified-resolution catalogs. The feature is controlled by `TPB4K_ENABLED`; with it enabled the addon exposes 37 total catalogs, including the 28 TPB4K catalogs. Alpha.11 completes the missing poster-enrichment layer while TPB4K stream resolution remains intentionally empty until Phase 3.
+Version `2.7.0-alpha.12` retains the original TPB4K foundation and all 28 selected unified-resolution catalogs. The feature is controlled by `TPB4K_ENABLED`; with it enabled the addon exposes 37 total catalogs, including the 28 TPB4K catalogs. Alpha.12 removes the alpha.11 eight-card enrichment cap, makes every returned studio card eligible for strict TPDB/StashDB matching, and keeps TPB4K stream resolution intentionally empty until Phase 3.
 
 ## TPB4K Phase 2A
 
-Version `2.7.0-alpha.11` retains the alpha.10 TPB-compatible studio architecture: each of the 19 selected studio catalogs searches UHD category 507, sorted by seeders with order code 7, using the fixed TheHiddenBay / ThePirateBay0 / PirateBay Live chain. It now enriches those torrent records with strictly matched StashDB/TPDB artwork while preserving the original torrent identity. Every returned TPB4K card is guaranteed a safe HTTPS poster through committed source/studio fallback PNGs when upstream artwork is missing. Magnets and info hashes remain private, and TPB4K stream resolution remains intentionally empty until Phase 3.
+Version `2.7.0-alpha.12` retains the alpha.10 TPB-compatible studio architecture: each of the 19 selected studio catalogs searches UHD category 507, sorted by seeders with order code 7, using the fixed TheHiddenBay / ThePirateBay0 / PirateBay Live chain. Poster enrichment now uses provider-friendly studio aliases, full-date and year-only title parsing, cached studio pools, targeted matching for every unmatched card, bounded concurrency, and a request-wide metadata deadline. Network failures are not negative-cached. Clean studio fallbacks remain available only when a verified match is unavailable. Magnets and info hashes remain private, and TPB4K stream resolution remains intentionally empty until Phase 3.
 
 See `TPB4K_POSTER_ENRICHMENT.md` and `DEPLOY_TPB4K_POSTER_ENRICHMENT.md`.
 

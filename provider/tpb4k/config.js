@@ -82,17 +82,36 @@ function readTpb4kConfig(env = process.env) {
     }),
     metadataEnrichmentConcurrency: positiveInteger(
       env.TPB4K_METADATA_ENRICHMENT_CONCURRENCY,
-      4,
-      { min: 1, max: 8 }
+      10,
+      { min: 1, max: 16 }
     ),
-    metadataEnrichmentLimit: positiveInteger(env.TPB4K_METADATA_ENRICHMENT_LIMIT, 8, {
+    metadataLookupTimeoutMs: positiveInteger(env.TPB4K_METADATA_LOOKUP_TIMEOUT_MS, 2_500, {
+      min: 750,
+      max: 8_000,
+    }),
+    metadataEnrichmentDeadlineMs: positiveInteger(
+      env.TPB4K_METADATA_ENRICHMENT_DEADLINE_MS,
+      16_000,
+      { min: 4_000, max: 25_000 }
+    ),
+    metadataPoolSize: positiveInteger(env.TPB4K_METADATA_POOL_SIZE, 100, {
+      min: 20,
+      max: 100,
+    }),
+    metadataPoolAliasLimit: positiveInteger(env.TPB4K_METADATA_POOL_ALIAS_LIMIT, 2, {
       min: 1,
-      max: 24,
+      max: 3,
     }),
-    metadataLookupTimeoutMs: positiveInteger(env.TPB4K_METADATA_LOOKUP_TIMEOUT_MS, 2_000, {
-      min: 1_000,
-      max: 10_000,
-    }),
+    metadataTargetedAliasLimit: positiveInteger(
+      env.TPB4K_METADATA_TARGETED_ALIAS_LIMIT,
+      2,
+      { min: 1, max: 3 }
+    ),
+    metadataPoolCacheMaxEntries: positiveInteger(
+      env.TPB4K_METADATA_POOL_CACHE_MAX_ENTRIES,
+      100,
+      { min: 10, max: 500 }
+    ),
     metadataMatchThreshold: positiveInteger(env.TPB4K_METADATA_MATCH_THRESHOLD, 72, {
       min: 50,
       max: 98,

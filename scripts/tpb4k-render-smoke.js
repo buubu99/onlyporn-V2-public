@@ -23,6 +23,7 @@ const IDS = [
 
 const STUDIO_IDS = new Set(IDS.filter(id => id.startsWith('tpb4k.studio.')));
 const REQUIRED_NONEMPTY = new Set([...STUDIO_IDS, 'tpb4k.tpdb.recent']);
+const FALLBACK_PATH = '/assets/tpb4k/studios/';
 
 async function getResponse(url, label) {
   const controller = new AbortController();
@@ -50,6 +51,17 @@ function safePoster(value) {
   }
 }
 
+function isFallbackPoster(value) {
+  const safe = safePoster(value);
+  if (!safe) return false;
+  try {
+    const url = new URL(safe);
+    return url.pathname.includes(FALLBACK_PATH);
+  } catch {
+    return false;
+  }
+}
+
 (async () => {
   const manifest = await getJson('/manifest.json');
   const tpbCatalogs = (manifest.catalogs || []).filter(item => String(item.id).startsWith('tpb4k.'));
@@ -69,14 +81,28 @@ function safePoster(value) {
     if (STUDIO_IDS.has(id) && payload.metas.some(meta => meta.posterShape !== 'poster')) {
       throw new Error(`${id} returned a non-portrait poster shape`);
     }
+    const fallbackPosters = STUDIO_IDS.has(id)
+      ? payload.metas.filter(meta => isFallbackPoster(meta.poster)).length
+      : 0;
+    const realMetadataPosters = STUDIO_IDS.has(id) ? posters - fallbackPosters : posters;
     results.push({
       id,
       metas: payload.metas.length,
       posters,
+      realMetadataPosters,
+      fallbackPosters,
       posterPercent: payload.metas.length ? 100 : 0,
       elapsedMs: Date.now() - started,
     });
   }
+  const studioResults = results.filter(result => STUDIO_IDS.has(result.id));
+  const totalStudioCards = studioResults.reduce((sum, result) => sum + result.metas, 0);
+  const totalRealMetadataPosters = studioResults.reduce((sum, result) => sum + result.realMetadataPosters, 0);
+  const totalFallbackPosters = studioResults.reduce((sum, result) => sum + result.fallbackPosters, 0);
+  if (totalStudioCards > 0 && totalRealMetadataPosters === 0) {
+    throw new Error('All studio cards used fallback artwork; no live metadata poster match was proven');
+  }
+
   const firstPoster = results.length
     ? (await getJson(`/catalog/movie/${encodeURIComponent('tpb4k.studio.vixen.top')}/skip=0.json`)).metas?.[0]?.poster
     : '';
@@ -93,7 +119,11 @@ function safePoster(value) {
     tpb4kCatalogs: tpbCatalogs.length,
     testedCatalogs: results.length,
     catalogs: results,
+    studioCards: totalStudioCards,
+    realMetadataPosters: totalRealMetadataPosters,
+    fallbackPosters: totalFallbackPosters,
     allReturnedCardsHavePosters: true,
+    atLeastOneLiveMetadataPosterProven: totalRealMetadataPosters > 0,
     firstVixenPosterReachable: Boolean(firstPoster),
     streamsNotRequiredForPhase2: true,
   }, null, 2));

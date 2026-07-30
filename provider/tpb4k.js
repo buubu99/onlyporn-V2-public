@@ -179,6 +179,13 @@ class Tpb4kProvider {
       .slice(0, config.catalogLimit)
       .map(item => toMetaPreview(item, definition.id, config));
 
+    let enrichment;
+    try {
+      enrichment = adapter.diagnostics?.()?.enrichment;
+    } catch {
+      enrichment = undefined;
+    }
+
     logger().info(
       {
         provider: this.name,
@@ -186,6 +193,7 @@ class Tpb4kProvider {
         source: definition.source,
         metas: metas.length,
         config: publicConfigStatus(config),
+        ...(enrichment ? { enrichment } : {}),
       },
       'TPB4K catalog normalized'
     );
