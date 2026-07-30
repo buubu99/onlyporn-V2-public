@@ -46,6 +46,11 @@ function stableId(source, item, index = 0) {
 function normalizeFeedItem(source, item = {}, index = 0) {
   const title = text(item.title || item.name);
   if (!title) return null;
+  const rawHash = text(item.infoHash || item.hash);
+  const infoHash = /^[a-f0-9]{40}$/i.test(rawHash) ? rawHash.toLowerCase() : '';
+  const magnetLink = /^magnet:\?/i.test(text(item.magnet || item.magnetLink))
+    ? text(item.magnet || item.magnetLink)
+    : '';
   return Object.freeze({
     sourceId: stableId(source, item, index),
     title,
@@ -64,6 +69,9 @@ function normalizeFeedItem(source, item = {}, index = 0) {
     size: item.size || 0,
     detailUrl: [item.detailUrl, item.url, item.link].map(safeHttps).find(Boolean) || '',
     upstreamId: text(item.upstreamId || item.id || item.guid),
+    infoHash,
+    magnetLink,
+    trackers: Array.isArray(item.trackers) ? item.trackers.map(text).filter(Boolean) : [],
   });
 }
 
@@ -120,6 +128,8 @@ function parseRssFeed(payload) {
   const blocks = xml.match(/<item(?:\s[^>]*)?>[\s\S]*?<\/item>/gi) || [];
   return blocks.map((block, index) => {
     const description = tag(block, 'description');
+    const infoHash = tag(block, 'nyaa:infoHash') || tag(block, 'infoHash');
+    const link = tag(block, 'link');
     const poster = [
       tagAttribute(block, 'media:thumbnail', 'url'),
       tagAttribute(block, 'media:content', 'url'),
@@ -134,10 +144,12 @@ function parseRssFeed(payload) {
       poster,
       background: poster,
       published: tag(block, 'pubDate'),
-      link: tag(block, 'link'),
-      detailUrl: tag(block, 'guid') || tag(block, 'link'),
+      link,
+      detailUrl: tag(block, 'guid') || link,
       seeders: tag(block, 'nyaa:seeders'),
       size: tag(block, 'nyaa:size'),
+      ...(infoHash ? { infoHash } : {}),
+      ...(/^magnet:\?/i.test(link) ? { magnetLink: link } : {}),
       tags: repeatedTags(block, 'category'),
       index,
     };

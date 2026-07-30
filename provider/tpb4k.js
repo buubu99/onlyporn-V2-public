@@ -288,17 +288,21 @@ class Tpb4kProvider {
     if (args.type !== TYPE || !this.enabled()) return { streams: [] };
     const decoded = decodeTpb4kId(args.id);
     if (!decoded) return { streams: [] };
-    const adapter = getAdapter(decoded.source);
-    if (!adapter) return { streams: [] };
+    const sourceAdapter = getAdapter(decoded.source);
+    if (!sourceAdapter) return { streams: [] };
+    const definition = getCatalogDefinition(decoded.catalogId);
+    const resolverAdapter = getAdapter(definition?.lookupSource || decoded.source);
+    if (!resolverAdapter) return { streams: [] };
 
     const config = readTpb4kConfig(this.env);
+    let rawItem = null;
     try {
-      const rawItem = await adapter.meta({
+      rawItem = await sourceAdapter.meta({
         sourceId: decoded.sourceId,
         catalogId: decoded.catalogId,
         config,
       });
-      const item = normalizeDiscoveryItem(adapter, rawItem);
+      const item = normalizeDiscoveryItem(sourceAdapter, rawItem);
       const evaluation = item ? evaluateContent(item, this.contentFilter) : null;
       if (evaluation?.excluded) {
         logger().info(
@@ -313,20 +317,29 @@ class Tpb4kProvider {
     }
     let rawCandidates = [];
     try {
-      rawCandidates = await adapter.resolve({
+      rawCandidates = await resolverAdapter.resolve({
         sourceId: decoded.sourceId,
         catalogId: decoded.catalogId,
+        catalog: definition,
+        item: rawItem,
         config,
       });
     } catch {
       logger().warn(
-        { provider: this.name, source: decoded.source },
+        {
+          provider: this.name,
+          source: decoded.source,
+          resolver: resolverAdapter.id,
+        },
         'TPB4K stream adapter failed safely'
       );
     }
 
     const normalized = (Array.isArray(rawCandidates) ? rawCandidates : [])
-      .map(candidate => normalizeCandidate({ ...candidate, source: decoded.source }))
+      .map(candidate => normalizeCandidate({
+        ...candidate,
+        source: candidate?.source || resolverAdapter.id || decoded.source,
+      }))
       .filter(candidate => {
         if (candidate.kind === 'invalid') return false;
         if (['p2p', 'uncached-torrent'].includes(candidate.kind)) {
@@ -343,6 +356,7 @@ class Tpb4kProvider {
       {
         provider: this.name,
         source: decoded.source,
+        resolver: resolverAdapter.id,
         sourceId: decoded.sourceId,
         candidates: normalized.length,
         streams: streams.length,

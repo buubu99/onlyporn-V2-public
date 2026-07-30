@@ -1,6 +1,7 @@
 'use strict';
 
 const { BoundedTtlCache } = require('./cache');
+const { normalizeInfoHash, parseMagnet } = require('./candidate');
 const { normalizeFeedItem, parseRssFeed } = require('./discovery-normalize');
 const {
   mergeMetadataPreservingIdentity,
@@ -10,6 +11,7 @@ const {
 } = require('./metadata-normalize');
 const { normalizeSearchTitle, significantTokens } = require('./poster-enrichment');
 const { SourceHttpClient, normalizeContentType } = require('./source-http');
+const { detectResolution, extractMagnetFromHtml } = require('./torrent-index');
 const { assertSafeHttpsUrl } = require('../url-security');
 const { evaluateContent, readContentFilterConfig } = require('../content-filter');
 
@@ -1175,14 +1177,55 @@ function createSukebeiMetadataAdapter(options = {}) {
     return index.get(String(sourceId || '')) || null;
   }
 
+  async function resolve({ sourceId }) {
+    const source = index.get(String(sourceId || ''));
+    if (!source) return [];
+
+    let magnet = parseMagnet(source.magnetLink);
+    let infoHash = normalizeInfoHash(source.infoHash || magnet?.infoHash);
+    let magnetLink = magnet ? source.magnetLink : '';
+    let trackers = magnet?.trackers || source.trackers || [];
+    let filename = magnet?.displayName || source.title;
+
+    if (!infoHash && detailClient?.configured && safeHttpsUrl(source.detailUrl)) {
+      let html = '';
+      try {
+        html = await detailClient.fetchText(source.detailUrl, {
+          cacheKey: `sukebei:detail:${source.sourceId}`,
+        });
+      } catch {
+        return [];
+      }
+      const detail = extractMagnetFromHtml(html);
+      if (!detail?.infoHash) return [];
+      infoHash = detail.infoHash;
+      magnetLink = detail.magnetLink;
+      trackers = detail.trackers;
+      filename = detail.filename || filename;
+    }
+    if (!infoHash) return [];
+
+    return [Object.freeze({
+      source: 'sukebei',
+      sourceId: source.sourceId,
+      title: source.title,
+      filename,
+      magnet: magnetLink,
+      infoHash,
+      trackers: Object.freeze([...(trackers || [])]),
+      seeders: source.seeders,
+      size: source.size,
+      resolution: detectResolution(filename || source.title),
+      detailUrl: source.detailUrl,
+    })];
+  }
+
   return Object.freeze({
     id: 'sukebei',
     configured: client.configured,
     catalog,
     meta,
-    async resolve() {
-      return [];
-    },
+    resolve,
     diagnostics() {
       return Object.freeze({ sukebeiMetadata: lastDiagnostics });
     },

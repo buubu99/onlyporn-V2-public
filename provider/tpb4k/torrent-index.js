@@ -1,15 +1,24 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const { buildSceneIdentity } = require('./identity');
+const { normalizeInfoHash, parseMagnet } = require('./candidate');
 const { SourceHttpClient } = require('./source-http');
-const { createPosterEnricher, extractTitleDate } = require('./poster-enrichment');
+const {
+  createPosterEnricher,
+  extractTitleDate,
+  normalizeSearchTitle,
+  significantTokens,
+} = require('./poster-enrichment');
 
 const DEFAULT_TPB_MIRRORS = Object.freeze([
   'https://thehiddenbay.com',
   'https://thepiratebay0.org',
   'https://piratebay.live',
 ]);
+const DEFAULT_1337X_MIRRORS = Object.freeze(['https://1337xx.to']);
 const TPB_UHD_CATEGORY = '507';
+const TPB_ADULT_CATEGORY = '500';
 const TPB_TOP_SORT = '7';
 const TPB_PAGE_SIZE = 30;
 
@@ -54,9 +63,7 @@ function buildStudioSearchPath(studio, page = 1, options = {}) {
 }
 
 function extractInfoHash(value) {
-  const text = String(value || '');
-  const match = text.match(/(?:^|[?&])xt=urn:btih:([a-z0-9]{32}|[a-f0-9]{40})(?:&|$)/i);
-  return match ? match[1].toLowerCase() : '';
+  return parseMagnet(value)?.infoHash || normalizeInfoHash(value);
 }
 
 function stableTorrentId(item = {}) {
@@ -80,10 +87,6 @@ function detectResolution(title) {
   return '';
 }
 
-function isExplicitLowerResolution(title) {
-  return ['1080p', '720p', '480p'].includes(detectResolution(title));
-}
-
 function parseDescriptionLine(value) {
   const text = compactText(value);
   const uploaded = text.match(/Uploaded\s+(.+?)(?:,|$)/i)?.[1] || '';
@@ -102,15 +105,43 @@ function absoluteHttpsUrl(value, baseOrigin) {
   try {
     const url = new URL(raw, `${baseOrigin}/`);
     if (url.protocol !== 'https:' || url.username || url.password) return '';
+    if (url.origin !== new URL(baseOrigin).origin) return '';
     return url.toString();
   } catch {
     return '';
   }
 }
 
+function build1337SearchPath(query, page = 1) {
+  const text = compactText(query);
+  if (!text) throw new Error('A 1337x search term is required');
+  const normalizedPage = Math.max(Number.parseInt(String(page), 10) || 1, 1);
+  return `/search/${encodeURIComponent(text)}/${normalizedPage}/`;
+}
+
 function parseInteger(value) {
   const number = Number.parseInt(String(value || '').replace(/[^0-9-]/g, ''), 10);
   return Number.isFinite(number) && number >= 0 ? number : 0;
+}
+
+function torrentSizeBytes(value) {
+  if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
+  const match = compactText(value).match(
+    /([0-9]+(?:\.[0-9]+)?)\s*(b|kb|kib|mb|mib|gb|gib|tb|tib)\b/i
+  );
+  if (!match) return 0;
+  const powers = {
+    b: 0,
+    kb: 1,
+    kib: 1,
+    mb: 2,
+    mib: 2,
+    gb: 3,
+    gib: 3,
+    tb: 4,
+    tib: 4,
+  };
+  return Math.round(Number(match[1]) * 1024 ** powers[match[2].toLowerCase()]);
 }
 
 function decodeHtml(value) {
@@ -210,6 +241,89 @@ function parseTpbSearchPage(html, baseOrigin) {
   return Object.freeze({ tablePresent: true, records: Object.freeze(records) });
 }
 
+function extractMagnetFromHtml(html) {
+  for (const match of String(html || '').matchAll(/<a\b[^>]*>/gi)) {
+    const tag = match[0];
+    for (const name of ['href', 'data-magnet', 'data-url']) {
+      const magnetLink = attribute(tag, name);
+      const parsed = parseMagnet(magnetLink);
+      if (!parsed) continue;
+      return Object.freeze({
+        magnetLink,
+        infoHash: parsed.infoHash,
+        filename: parsed.displayName,
+        trackers: Object.freeze(parsed.trackers),
+      });
+    }
+  }
+  return null;
+}
+
+function parseTorrentDetailPage(html) {
+  return extractMagnetFromHtml(html);
+}
+
+function hasClass(block, className) {
+  const open = String(block || '').match(/^<[a-z0-9]+\b[^>]*>/i)?.[0] || '';
+  return attribute(open, 'class').split(/\s+/).includes(className);
+}
+
+function stableIndexerId(source, record = {}) {
+  const hash = extractInfoHash(record.magnetLink || record.infoHash);
+  const identity = hash || [
+    compactText(record.detailUrl),
+    compactText(record.title),
+    compactText(record.size),
+  ].join('|');
+  return `${source}:${crypto.createHash('sha256').update(identity).digest('hex').slice(0, 40)}`;
+}
+
+function parse1337SearchPage(html, baseOrigin) {
+  const table = tagBlocks(String(html || ''), 'table')
+    .find(block => hasClass(block, 'table-list'));
+  if (!table) return Object.freeze({ tablePresent: false, records: [] });
+
+  const records = [];
+  for (const row of tagBlocks(table, 'tr')) {
+    const cells = tagBlocks(row, 'td');
+    if (!cells.length) continue;
+    let nameAnchor = '';
+    for (const anchor of tagBlocks(cells[0], 'a')) {
+      const open = anchor.match(/^<a\b[^>]*>/i)?.[0] || '';
+      const href = attribute(open, 'href');
+      if (/\/torrent\//i.test(href)) {
+        nameAnchor = anchor;
+        break;
+      }
+    }
+    if (!nameAnchor) continue;
+    const open = nameAnchor.match(/^<a\b[^>]*>/i)?.[0] || '';
+    const title = stripHtml(nameAnchor.replace(/^<a\b[^>]*>|<\/a>$/gi, ''));
+    const detailUrl = absoluteHttpsUrl(attribute(open, 'href'), baseOrigin);
+    if (!title || !detailUrl) continue;
+
+    const cellByClass = className => cells.find(cell => hasClass(cell, className)) || '';
+    const record = {
+      title,
+      detailUrl,
+      magnetLink: '',
+      infoHash: '',
+      seeders: parseInteger(stripHtml(cellByClass('coll-2') || cellByClass('seeds'))),
+      leechers: parseInteger(stripHtml(cellByClass('coll-3') || cellByClass('leeches'))),
+      size: stripHtml(cellByClass('coll-4') || cellByClass('size')),
+      uploadedAt: stripHtml(cellByClass('coll-date')),
+      uploader: stripHtml(cellByClass('coll-5')),
+      category: stripHtml(cells[0].match(/<span\b[\s\S]*?<\/span>/i)?.[0] || ''),
+      resolution: detectResolution(title),
+      mirror: baseOrigin,
+      indexer: '1337x',
+    };
+    record.sourceId = stableIndexerId('1337x', record);
+    records.push(Object.freeze(record));
+  }
+  return Object.freeze({ tablePresent: true, records: Object.freeze(records) });
+}
+
 function publicTorrentItem(record, catalog) {
   const studio = compactText(catalog?.studio);
   const resolution = record.resolution || '4K';
@@ -259,6 +373,9 @@ function createTorrentIndexAdapter(options = {}) {
   const mirrors = normalizeMirrorOrigins(
     options.mirrors || config.torrentIndex?.mirrors || DEFAULT_TPB_MIRRORS
   );
+  const x1337Mirrors = normalizeMirrorOrigins(
+    options.x1337Mirrors || config.torrentIndex?.x1337Mirrors || DEFAULT_1337X_MIRRORS
+  );
   const common = {
     timeoutMs: config.requestTimeoutMs,
     maxResponseBytes: config.discoveryMaxResponseBytes,
@@ -272,6 +389,7 @@ function createTorrentIndexAdapter(options = {}) {
     accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
     minRequestIntervalMs: options.minRequestIntervalMs ?? 350,
     maxRetries: options.maxRetries ?? 1,
+    maxRedirects: options.maxRedirects ?? 3,
     retryBaseDelayMs: options.retryBaseDelayMs ?? 400,
     now: options.now,
     sleep: options.sleep,
@@ -279,6 +397,14 @@ function createTorrentIndexAdapter(options = {}) {
   const clients = mirrors.map((origin, index) => ({
     origin,
     client: new SourceHttpClient({ ...common, id: `torrent-index-${index + 1}`, endpoint: `${origin}/` }),
+  }));
+  const x1337Clients = x1337Mirrors.map((origin, index) => ({
+    origin,
+    client: new SourceHttpClient({
+      ...common,
+      id: `torrent-index-1337x-${index + 1}`,
+      endpoint: `${origin}/`,
+    }),
   }));
   const privateIndex = createPrivateIndex();
   const posterEnricher = createPosterEnricher({
@@ -288,13 +414,19 @@ function createTorrentIndexAdapter(options = {}) {
   });
   let lastDiagnostic = Object.freeze({});
 
-  async function fetchSearchPage(path, cacheKey) {
+  async function fetchSearchPage(path, cacheKey, deadlineAt = Infinity) {
     const attempts = [];
     for (const entry of clients) {
+      const remainingMs = deadlineAt - Date.now();
+      if (Number.isFinite(deadlineAt) && remainingMs <= 0) {
+        attempts.push({ mirror: entry.origin, outcome: 'request-deadline' });
+        break;
+      }
       let html = '';
       try {
         html = await entry.client.fetchText(`${entry.origin}${path}`, {
           cacheKey: `${entry.origin}:${cacheKey}`,
+          ...(Number.isFinite(deadlineAt) ? { timeoutMs: Math.max(remainingMs, 250) } : {}),
         });
       } catch (error) {
         attempts.push({ mirror: entry.origin, outcome: 'error', error: compactText(error?.message) });
@@ -316,6 +448,70 @@ function createTorrentIndexAdapter(options = {}) {
     throw new Error(`All TPB mirrors failed for ${path}${summary ? ` (${summary})` : ''}`);
   }
 
+  async function fetch1337SearchPage(path, cacheKey, deadlineAt = Infinity) {
+    const attempts = [];
+    for (const entry of x1337Clients) {
+      const remainingMs = deadlineAt - Date.now();
+      if (Number.isFinite(deadlineAt) && remainingMs <= 0) {
+        attempts.push({ mirror: entry.origin, outcome: 'request-deadline' });
+        break;
+      }
+      let html = '';
+      try {
+        html = await entry.client.fetchText(`${entry.origin}${path}`, {
+          cacheKey: `${entry.origin}:${cacheKey}`,
+          ...(Number.isFinite(deadlineAt) ? { timeoutMs: Math.max(remainingMs, 250) } : {}),
+        });
+      } catch (error) {
+        attempts.push({ mirror: entry.origin, outcome: 'error', error: compactText(error?.message) });
+        continue;
+      }
+      if (!html) {
+        attempts.push({ mirror: entry.origin, outcome: 'empty-response' });
+        continue;
+      }
+      const parsed = parse1337SearchPage(html, entry.origin);
+      if (!parsed.tablePresent) {
+        attempts.push({ mirror: entry.origin, outcome: 'no-results-table' });
+        continue;
+      }
+      attempts.push({ mirror: entry.origin, outcome: 'accepted', records: parsed.records.length });
+      return { ...parsed, mirror: entry.origin, attempts };
+    }
+    const summary = attempts.map(item => `${item.mirror}:${item.outcome}`).join(' | ');
+    throw new Error(`All 1337x mirrors failed for ${path}${summary ? ` (${summary})` : ''}`);
+  }
+
+  async function fetchDetail(record, deadlineAt = Infinity) {
+    const entries = record.indexer === '1337x' ? x1337Clients : clients;
+    let detail;
+    try {
+      detail = new URL(record.detailUrl);
+    } catch {
+      return null;
+    }
+    const primary = entries.find(candidate => candidate.origin === detail.origin);
+    if (!primary) return null;
+    const ordered = [primary, ...entries.filter(candidate => candidate !== primary)];
+    for (const entry of ordered) {
+      const remainingMs = deadlineAt - Date.now();
+      if (Number.isFinite(deadlineAt) && remainingMs <= 0) break;
+      const target = `${entry.origin}${detail.pathname}${detail.search}`;
+      try {
+        const html = await entry.client.fetchText(target, {
+          cacheKey: `${record.indexer || 'hiddenbay'}:detail:${record.sourceId}:${entry.origin}`,
+          ...(Number.isFinite(deadlineAt) ? { timeoutMs: Math.max(remainingMs, 250) } : {}),
+        });
+        if (!html) continue;
+        const parsed = parseTorrentDetailPage(html);
+        if (parsed) return parsed;
+      } catch {
+        // One mirror failing must not suppress a valid detail page elsewhere.
+      }
+    }
+    return null;
+  }
+
   async function loadWindow(catalog, skip, limit) {
     const normalizedSkip = Math.max(Number.parseInt(String(skip || 0), 10) || 0, 0);
     const normalizedLimit = Math.min(Math.max(Number.parseInt(String(limit || 40), 10) || 40, 1), 100);
@@ -324,16 +520,19 @@ function createTorrentIndexAdapter(options = {}) {
     const output = [];
     const seen = new Set();
     const diagnostics = [];
+    const deadlineAt = Date.now() + Math.min(
+      Math.max(Number(config.requestTimeoutMs || 15_000) + 5_000, 5_000),
+      25_000
+    );
 
-    while (output.length < normalizedLimit) {
+    while (output.length < normalizedLimit && Date.now() < deadlineAt) {
       const path = buildStudioSearchPath(catalog.studio, page, {
         category: config.torrentIndex?.category || TPB_UHD_CATEGORY,
         sort: config.torrentIndex?.sort || TPB_TOP_SORT,
       });
-      const result = await fetchSearchPage(path, `${catalog.id}:page:${page}`);
+      const result = await fetchSearchPage(path, `${catalog.id}:page:${page}`, deadlineAt);
       diagnostics.push({ page, path, mirror: result.mirror, records: result.records.length, attempts: result.attempts });
-      const usable = result.records.filter(record => !isExplicitLowerResolution(record.title));
-      const pageWindow = usable.slice(offset);
+      const pageWindow = result.records.slice(offset);
       offset = 0;
       for (const record of pageWindow) {
         if (seen.has(record.sourceId)) continue;
@@ -361,10 +560,236 @@ function createTorrentIndexAdapter(options = {}) {
     return enrichment.items;
   }
 
+  function sceneQueries(item = {}, catalog = {}) {
+    const identity = buildSceneIdentity(item);
+    const studio = compactText(item.studio || catalog.studio);
+    const title = normalizeSearchTitle(item.title, studio).query;
+    const values = [
+      identity.sceneCode,
+      [studio, title].map(compactText).filter(Boolean).join(' '),
+      compactText(item.lookupQuery),
+    ];
+    const output = [];
+    const seen = new Set();
+    for (const value of values) {
+      const query = compactText(value).slice(0, 180);
+      const key = query.toLowerCase();
+      if (query.length < 3 || seen.has(key)) continue;
+      seen.add(key);
+      output.push(query);
+      if (output.length >= 2) break;
+    }
+    return output;
+  }
+
+  function compactComparable(value) {
+    return compactText(value).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
+  }
+
+  function recordMatchesScene(record, item = {}, catalog = {}) {
+    const identity = buildSceneIdentity(item);
+    const recordKey = compactComparable(record.title);
+    const codeKey = compactComparable(identity.sceneCode);
+    if (codeKey) return recordKey.includes(codeKey);
+
+    const studio = compactText(item.studio || catalog.studio);
+    const studioKey = compactComparable(studio);
+    const studioEvidence = Boolean(studioKey && recordKey.includes(studioKey));
+    const expectedTokens = significantTokens(item.title, studio);
+    const actualTokens = new Set(significantTokens(record.title, studio));
+    if (!expectedTokens.length) return false;
+    const overlap = expectedTokens.filter(token => actualTokens.has(token)).length;
+    const coverage = overlap / expectedTokens.length;
+    if (expectedTokens.length === 1) {
+      return expectedTokens[0].length >= 3 && overlap === 1 && studioEvidence;
+    }
+    return coverage >= 0.75 && (studioEvidence || coverage === 1);
+  }
+
+  async function searchIndexers(query, catalogId, deadlineAt) {
+    const key = crypto.createHash('sha256').update(query).digest('hex').slice(0, 16);
+    const searches = [
+      {
+        source: 'hiddenbay',
+        run: () => fetchSearchPage(
+          buildStudioSearchPath(query, 1, {
+            category: config.torrentIndex?.resolutionCategory || TPB_ADULT_CATEGORY,
+            sort: config.torrentIndex?.sort || TPB_TOP_SORT,
+          }),
+          `${catalogId || 'stream'}:resolve:${key}:hiddenbay`,
+          deadlineAt
+        ),
+      },
+      {
+        source: '1337x',
+        run: () => fetch1337SearchPage(
+          build1337SearchPath(query, 1),
+          `${catalogId || 'stream'}:resolve:${key}:1337x`,
+          deadlineAt
+        ),
+      },
+    ];
+    const settled = await Promise.allSettled(searches.map(search => search.run()));
+    const records = [];
+    const diagnostics = [];
+    settled.forEach((result, index) => {
+      const source = searches[index].source;
+      if (result.status === 'rejected') {
+        diagnostics.push({
+          source,
+          outcome: 'error',
+          error: compactText(result.reason?.message || result.reason),
+        });
+        return;
+      }
+      diagnostics.push({
+        source,
+        outcome: 'accepted',
+        records: result.value.records.length,
+        mirror: result.value.mirror,
+      });
+      for (const record of result.value.records) {
+        records.push(Object.freeze({ ...record, indexer: source }));
+      }
+    });
+    return Object.freeze({
+      records: Object.freeze(records),
+      diagnostics: Object.freeze(diagnostics),
+    });
+  }
+
+  async function mapLimited(values, limit, mapper) {
+    const output = new Array(values.length);
+    let next = 0;
+    async function worker() {
+      while (next < values.length) {
+        const index = next;
+        next += 1;
+        output[index] = await mapper(values[index], index);
+      }
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(Math.max(limit, 1), values.length) }, () => worker())
+    );
+    return output;
+  }
+
+  async function resolveRecord(record, deadlineAt = Infinity) {
+    if (!record || Date.now() >= deadlineAt) return null;
+    let parsed = parseMagnet(record.magnetLink);
+    if (!parsed) {
+      try {
+        parsed = await fetchDetail(record, deadlineAt);
+      } catch {
+        return null;
+      }
+    }
+    if (!parsed?.infoHash) return null;
+    return Object.freeze({
+      source: record.indexer || 'hiddenbay',
+      sourceId: record.sourceId,
+      title: record.title || parsed.filename,
+      filename: parsed.filename || record.title,
+      magnet: record.magnetLink || parsed.magnetLink,
+      infoHash: parsed.infoHash,
+      trackers: Object.freeze([...(parsed.trackers || [])]),
+      seeders: record.seeders,
+      size: record.size,
+      resolution: record.resolution || detectResolution(record.title),
+      detailUrl: record.detailUrl,
+    });
+  }
+
+  function mergeExactTorrents(values) {
+    const byHash = new Map();
+    for (const value of values.filter(Boolean)) {
+      const key = `${value.infoHash}:${value.fileIdx ?? ''}`;
+      const previous = byHash.get(key);
+      if (!previous) {
+        byHash.set(key, value);
+        continue;
+      }
+      const preferred = Number(value.seeders || 0) > Number(previous.seeders || 0)
+        ? value
+        : previous;
+      byHash.set(key, Object.freeze({
+        ...preferred,
+        seeders: Math.max(Number(previous.seeders || 0), Number(value.seeders || 0)),
+        size: torrentSizeBytes(previous.size) >= torrentSizeBytes(value.size)
+          ? previous.size
+          : value.size,
+        trackers: Object.freeze([...new Set([
+          ...(previous.trackers || []),
+          ...(value.trackers || []),
+        ])]),
+        provenance: Object.freeze([...new Set([
+          ...(previous.provenance || [previous.source]),
+          ...(value.provenance || [value.source]),
+        ].filter(Boolean))]),
+      }));
+    }
+    return [...byHash.values()];
+  }
+
+  async function resolveScene({ sourceId, catalogId, catalog, item }) {
+    const remembered = privateIndex.get(sourceId);
+    const deadlineAt = Date.now() + Math.min(
+      Math.max(Number(config.requestTimeoutMs || 15_000) + 5_000, 5_000),
+      25_000
+    );
+    if (remembered) {
+      const direct = await resolveRecord(remembered, deadlineAt);
+      return direct ? [direct] : [];
+    }
+    if (!item?.title) return [];
+
+    const queries = sceneQueries(item, catalog);
+    const records = [];
+    const searchDiagnostics = [];
+    const seenRecords = new Set();
+    for (const query of queries) {
+      if (Date.now() >= deadlineAt) break;
+      const result = await searchIndexers(query, catalogId, deadlineAt);
+      searchDiagnostics.push({ query, indexers: result.diagnostics });
+      for (const record of result.records) {
+        if (!recordMatchesScene(record, item, catalog)) continue;
+        const key = record.infoHash || record.detailUrl || record.sourceId;
+        if (!key || seenRecords.has(key)) continue;
+        seenRecords.add(key);
+        records.push(record);
+      }
+    }
+
+    const selected = records
+      .sort((left, right) => Number(right.seeders || 0) - Number(left.seeders || 0))
+      .slice(0, 18);
+    const candidates = await mapLimited(
+      selected,
+      Math.min(Math.max(Number(config.torrentIndex?.detailConcurrency || 3), 1), 5),
+      record => resolveRecord(record, deadlineAt)
+    );
+    const merged = mergeExactTorrents(candidates)
+      .sort((left, right) => Number(right.seeders || 0) - Number(left.seeders || 0));
+    lastDiagnostic = Object.freeze({
+      ...lastDiagnostic,
+      resolution: Object.freeze({
+        sourceId,
+        catalogId,
+        queries: Object.freeze(queries),
+        searches: Object.freeze(searchDiagnostics),
+        matchedRecords: records.length,
+        detailRecords: selected.length,
+        returned: merged.length,
+      }),
+    });
+    return merged;
+  }
+
   return Object.freeze({
     id: 'torrent-index',
     configured: true,
     mirrors,
+    x1337Mirrors,
     category: config.torrentIndex?.category || TPB_UHD_CATEGORY,
     sort: config.torrentIndex?.sort || TPB_TOP_SORT,
     async catalog({ catalog, skip, limit }) {
@@ -379,8 +804,8 @@ function createTorrentIndexAdapter(options = {}) {
       ]);
       return enrichment.items[0] || null;
     },
-    async resolve() {
-      return [];
+    async resolve(args = {}) {
+      return resolveScene(args);
     },
     diagnostics() {
       return lastDiagnostic;
@@ -395,15 +820,21 @@ function createTorrentIndexAdapter(options = {}) {
 }
 
 module.exports = {
+  DEFAULT_1337X_MIRRORS,
   DEFAULT_TPB_MIRRORS,
+  TPB_ADULT_CATEGORY,
   TPB_PAGE_SIZE,
   TPB_TOP_SORT,
   TPB_UHD_CATEGORY,
+  build1337SearchPath,
   buildStudioSearchPath,
   createTorrentIndexAdapter,
   detectResolution,
+  extractMagnetFromHtml,
   extractInfoHash,
   normalizeMirrorOrigins,
+  parse1337SearchPage,
   parseTpbSearchPage,
+  parseTorrentDetailPage,
   stableTorrentId,
 };

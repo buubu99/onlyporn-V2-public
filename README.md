@@ -4,7 +4,7 @@ A self-hosted Stremio addon fork with Eporner, Porntrex, SpankBang, XVideos, XNX
 
 ## Stable provider baseline: 2.6.4
 
-## Current TPB4K candidate: 2.7.0-alpha.12
+## Current TPB4K candidate: 2.7.0-alpha.15
 
 OnlyPorn v2.6.4 adds Hardening Phase 1 on top of the production-verified v2.6.3 relay-session repair and v2.6.2 JAVHDPorn `vdcdn.xyz` hotfix.
 
@@ -41,11 +41,12 @@ The release validator checks JavaScript and Python syntax, packaging, secret-bea
 
 ## TPB4K integration development
 
-Version `2.7.0-alpha.14` retains the 28 selected unified-resolution TPB4K
+Version `2.7.0-alpha.15` retains the 28 selected unified-resolution TPB4K
 catalogs and the 37-catalog enabled manifest. The 19 professional studio rows
-are now metadata-first TPDB/StashDB catalogs with real scene posters; torrent
-search remains stored only as Phase 3 lookup provenance. Generic purple cards
-are no longer returned in those rows.
+remain metadata-first TPDB/StashDB catalogs with real scene posters. Phase 3
+now resolves those metadata identities through approved TPB/HiddenBay and
+1337x torrent sources, while Sukebei RSS identities become honest P2P streams.
+Generic purple cards are no longer returned in those rows.
 
 Alpha.13 also installs one global explicit-label content filter at the addon
 boundary. It filters catalog/search results, metadata, posters and streams using
@@ -54,8 +55,10 @@ image or infers a person's attributes. The default configuration blocks
 explicit male-male/gay or bisexual-male labels and explicit
 interracial/black-male/African-American-male/BBC labels.
 
-The feature remains controlled by `TPB4K_ENABLED`. TPB4K playback resolution is
-still intentionally empty until Phase 3 produces verified torrent identities.
+The feature remains controlled by `TPB4K_ENABLED`. Phase 3 returns only valid
+BitTorrent info hashes and never labels an unverified torrent as cached.
+PornRips, YesPorn and direct Hentai playback remain intentionally empty until
+Phase 5; Stripchat remains gated to Phase 7.
 
 See `TPB4K_METADATA_FIRST_FILTERS.md` and
 `DEPLOY_TPB4K_METADATA_FIRST_FILTERS.md`.
@@ -91,3 +94,16 @@ fail-closed policy that accepts the resulting loss of uncategorized content.
   repeatedly delaying otherwise healthy TPDB catalogs.
 - Phase 2 is ready for its final live deployment gate before Phase 3 torrent
   detail-page and playable stream resolution begins.
+
+## Phase 3 torrent resolution (alpha.15)
+
+- Resolves TPB/HiddenBay search rows and approved mirror detail pages to valid
+  magnets and 40-character hexadecimal info hashes.
+- Aggregates 1337x results without ever exposing a detail page as playable.
+- Preserves all valid resolutions and merges exact duplicate hashes with
+  trackers, seeders, size and provenance.
+- Converts Sukebei RSS info hashes into standards-compliant P2P streams.
+- Adds AIOStreams-compatible filename, video-size, seeder and source metadata.
+- Enforces exact-host redirects, private/lookalike rejection, per-source
+  timeouts, a request-wide deadline and indexer error isolation.
+- Leaves every existing direct HTML provider implementation unchanged.

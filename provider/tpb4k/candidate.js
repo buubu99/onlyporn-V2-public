@@ -191,6 +191,7 @@ function normalizeCandidate(input = {}) {
   const state = cacheState(input.cached ?? input.cacheStatus);
   const validated = input.validated === true;
   const title = cleanText(input.title || magnet?.displayName || input.name);
+  const filename = cleanText(input.filename || magnet?.displayName || title);
   const resolution = normalizeResolution(input.resolution, input.quality, title, direct.url, debridUrl);
   const trackers = [...new Set([
     ...(Array.isArray(input.trackers) ? input.trackers : []),
@@ -226,6 +227,7 @@ function normalizeCandidate(input = {}) {
     source: cleanText(input.source || 'unknown').toLowerCase(),
     sourceId: cleanText(input.sourceId || input.id),
     title,
+    filename,
     studio: cleanText(input.studio),
     performers: Array.isArray(input.performers)
       ? input.performers.map(cleanText).filter(Boolean)
@@ -244,6 +246,9 @@ function normalizeCandidate(input = {}) {
     cached: state,
     validated,
     reason,
+    provenance: Array.isArray(input.provenance)
+      ? [...new Set(input.provenance.map(cleanText).filter(Boolean))]
+      : [],
   };
 
   candidate.fingerprint = candidateFingerprint(candidate);
@@ -292,7 +297,25 @@ function dedupeCandidates(candidates) {
   const best = new Map();
   for (const candidate of sortCandidates(candidates)) {
     if (candidate.kind === 'invalid') continue;
-    if (!best.has(candidate.fingerprint)) best.set(candidate.fingerprint, candidate);
+    const previous = best.get(candidate.fingerprint);
+    if (!previous) {
+      best.set(candidate.fingerprint, candidate);
+      continue;
+    }
+    best.set(candidate.fingerprint, Object.freeze({
+      ...previous,
+      title: previous.title || candidate.title,
+      filename: previous.filename || candidate.filename,
+      seeders: Math.max(previous.seeders, candidate.seeders),
+      size: Math.max(previous.size, candidate.size),
+      trackers: Object.freeze([...new Set([...previous.trackers, ...candidate.trackers])]),
+      provenance: Object.freeze([...new Set([
+        ...previous.provenance,
+        ...candidate.provenance,
+        previous.source,
+        candidate.source,
+      ].filter(Boolean))]),
+    }));
   }
   return [...best.values()];
 }
@@ -317,6 +340,7 @@ function formatSize(bytes) {
 function toStremioStream(candidate) {
   if (!candidate || candidate.kind === 'invalid') return null;
 
+  const filename = candidate.filename || candidate.title || candidate.sourceId || 'TPB 4K result';
   const labels = [candidate.resolution];
   if (candidate.cached === 'cached') labels.push('Cached');
   if (candidate.cached === 'uncached') labels.push('Uncached');
@@ -325,9 +349,17 @@ function toStremioStream(candidate) {
 
   const stream = {
     name: `TPB 4K · ${labels.filter(Boolean).join(' · ')}`,
-    title: candidate.title || candidate.sourceId || 'TPB 4K result',
+    title: filename,
+    description: [
+      filename,
+      candidate.seeders ? `👤 ${candidate.seeders}` : '',
+      candidate.size ? `💾 ${formatSize(candidate.size)}` : '',
+      candidate.source ? `🔎 ${candidate.source}` : '',
+    ].filter(Boolean).join('\n'),
     behaviorHints: {
       bingeGroup: `onlyporn-tpb4k-${candidate.infoHash || candidate.source}`,
+      filename,
+      ...(candidate.size ? { videoSize: candidate.size } : {}),
     },
   };
 

@@ -8,6 +8,7 @@ const DEFAULT_TPB_MIRRORS = Object.freeze([
   'https://thepiratebay0.org',
   'https://piratebay.live',
 ]);
+const DEFAULT_1337X_MIRRORS = Object.freeze(['https://1337xx.to']);
 
 function endpointOrigins(value, fallback = DEFAULT_TPB_MIRRORS) {
   const raw = String(value || '').trim();
@@ -208,9 +209,15 @@ function readTpb4kConfig(env = process.env) {
     }),
     torrentIndex: Object.freeze({
       mirrors: endpointOrigins(env.TPB4K_TPB_MIRRORS),
+      x1337Mirrors: endpointOrigins(env.TPB4K_1337X_MIRRORS, DEFAULT_1337X_MIRRORS),
       category: '507',
+      resolutionCategory: '500',
       sort: '7',
       pageSize: 30,
+      detailConcurrency: positiveInteger(env.TPB4K_TORRENT_DETAIL_CONCURRENCY, 3, {
+        min: 1,
+        max: 5,
+      }),
     }),
     tpdb: Object.freeze({
       configured: Boolean(tpdbApiKey),
@@ -255,6 +262,7 @@ function redactSecrets(value, env = process.env) {
 }
 
 module.exports = {
+  DEFAULT_1337X_MIRRORS,
   DEFAULT_TPB_MIRRORS,
   SECRET_NAMES,
   endpointOrigins,

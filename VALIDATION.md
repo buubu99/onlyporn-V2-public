@@ -336,3 +336,16 @@ Acceptance requires all 19 studio definitions to use `studio-metadata`, every re
 - non-empty OnlyFans platform-hybrid catalog;
 - metadata-provider circuit-breaker regression;
 - live Sukebei/OnlyFans smoke before commit and after Render deployment.
+
+## Alpha.15 Phase 3 torrent-resolution gates
+
+```bash
+npm run test:tpb4k-torrent-index
+EXPECTED_VERSION=2.7.0-alpha.15 npm run validate:release
+npm run smoke:jav262
+```
+
+Acceptance requires valid info hashes for every returned torrent, rejection of
+HTML/detail placeholders, exact-host redirect enforcement, error and timeout
+isolation across indexers, standards-compliant P2P output without false cache
+labels, and complete retention of the working direct-provider regression suite.

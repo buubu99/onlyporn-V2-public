@@ -300,3 +300,13 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Added default male-male/gay, bisexual-male and explicit interracial/black-male/BBC label exclusions.
 - Added optional custom tag and unknown-classification policies without image or attribute inference.
 - Added bounded metadata pagination/concurrency, safe diagnostics and production metadata-first smoke gates.
+
+## 2.7.0-alpha.15 — verified torrent identities and AIOStreams handoff
+
+- Added clean-room TPB/HiddenBay and 1337x stream resolution for metadata-first studio cards.
+- Added Sukebei RSS info-hash playback without inventing cache readiness.
+- Rejected blank hashes, malformed magnets, HTML detail pages, unsafe redirects, lookalike hosts and private targets.
+- Aggregated independent indexers, preserved lower resolutions and merged exact hashes with source provenance.
+- Added AIOStreams-compatible torrent filenames, sizes, seeders, trackers and standard `infoHash` output.
+- Added bounded detail concurrency, per-source timeouts and a request-wide deadline.
+- Preserved every existing direct HTML provider and protected relay implementation unchanged.

@@ -38,6 +38,7 @@ class SourceHttpClient {
     this.minRequestIntervalMs = Math.max(Number(options.minRequestIntervalMs ?? 0), 0);
     this.serializeRequests = options.serializeRequests !== false;
     this.maxRetries = Math.min(Math.max(Number(options.maxRetries ?? 0), 0), 2);
+    this.maxRedirects = Math.min(Math.max(Number(options.maxRedirects ?? 3), 0), 5);
     this.retryBaseDelayMs = Math.max(Number(options.retryBaseDelayMs ?? 500), 10);
     this.now = typeof options.now === 'function' ? options.now : Date.now;
     this.sleep = typeof options.sleep === 'function'
@@ -104,21 +105,62 @@ class SourceHttpClient {
     });
   }
 
+  async requestFollowingRedirects(initialUrl, signal) {
+    let currentUrl = initialUrl;
+    for (let redirects = 0; redirects <= this.maxRedirects; redirects += 1) {
+      const response = await this.requestOnce(currentUrl, signal);
+      const status = Number(response?.status || 0);
+      if (status < 300 || status >= 400) return response;
+
+      const location = response?.headers?.get?.('location');
+      try {
+        if (typeof response?.body?.cancel === 'function') await response.body.cancel();
+      } catch {
+        // Redirect headers are sufficient; body cancellation is best effort.
+      }
+      if (!location) return response;
+      if (redirects >= this.maxRedirects) {
+        throw new Error('TPB4K source exceeded the safe redirect limit');
+      }
+
+      const target = new URL(String(location), currentUrl).toString();
+      const safeTarget = await assertSafeHttpsUrl(target, {
+        allowedHosts: this.allowedHosts,
+        checkDns: this.checkDns,
+      });
+      if (new URL(safeTarget).origin !== this.origin) {
+        throw new Error('TPB4K source redirect changed origin unexpectedly');
+      }
+      currentUrl = safeTarget;
+    }
+    throw new Error('TPB4K source exceeded the safe redirect limit');
+  }
+
   async fetchWithRetry(safeUrl, key, options = {}) {
     const requestedTimeoutMs = Number.parseInt(String(options.timeoutMs || ''), 10);
     const timeoutMs = Number.isFinite(requestedTimeoutMs)
       ? Math.min(Math.max(requestedTimeoutMs, 250), this.timeoutMs)
       : this.timeoutMs;
+    const deadlineAt = Date.now() + timeoutMs;
     for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0) {
+        this.cache.setNegative(key, this.negativeTtlMs);
+        throw new Error('TPB4K source request deadline exceeded');
+      }
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      const timer = setTimeout(() => controller.abort(), Math.max(remainingMs, 1));
       let response;
       try {
-        response = await this.requestOnce(safeUrl, controller.signal);
+        response = await this.requestFollowingRedirects(safeUrl, controller.signal);
       } catch (error) {
         clearTimeout(timer);
-        if (attempt < this.maxRetries) {
-          await this.sleep(this.retryBaseDelayMs * (2 ** attempt));
+        const retryDelayMs = Math.min(
+          this.retryBaseDelayMs * (2 ** attempt),
+          Math.max(deadlineAt - Date.now(), 0)
+        );
+        if (attempt < this.maxRetries && retryDelayMs > 0) {
+          await this.sleep(retryDelayMs);
           continue;
         }
         this.cache.setNegative(key, this.negativeTtlMs);
@@ -128,8 +170,14 @@ class SourceHttpClient {
       const status = Number(response?.status || 0);
       if (status >= 500 && status <= 599 && attempt < this.maxRetries) {
         clearTimeout(timer);
-        await this.sleep(this.retryBaseDelayMs * (2 ** attempt));
-        continue;
+        const retryDelayMs = Math.min(
+          this.retryBaseDelayMs * (2 ** attempt),
+          Math.max(deadlineAt - Date.now(), 0)
+        );
+        if (retryDelayMs > 0) {
+          await this.sleep(retryDelayMs);
+          continue;
+        }
       }
       if (!response || status < 200 || status >= 300) {
         clearTimeout(timer);
@@ -162,8 +210,12 @@ class SourceHttpClient {
         this.cache.set(key, text, this.cacheTtlMs);
         return text;
       } catch (error) {
-        if (attempt < this.maxRetries) {
-          await this.sleep(this.retryBaseDelayMs * (2 ** attempt));
+        const retryDelayMs = Math.min(
+          this.retryBaseDelayMs * (2 ** attempt),
+          Math.max(deadlineAt - Date.now(), 0)
+        );
+        if (attempt < this.maxRetries && retryDelayMs > 0) {
+          await this.sleep(retryDelayMs);
           continue;
         }
         this.cache.setNegative(key, this.negativeTtlMs);
