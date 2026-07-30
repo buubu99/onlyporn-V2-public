@@ -98,8 +98,14 @@ class TpdbRestClient {
     if (cached) return cached.negative ? null : cached.value;
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    const requestedTimeoutMs = Number.parseInt(String(options.timeoutMs || ''), 10);
+    const timeoutMs = Number.isFinite(requestedTimeoutMs)
+      ? Math.min(Math.max(requestedTimeoutMs, 250), this.timeoutMs)
+      : this.timeoutMs;
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response;
+    let contentType = '';
+    let text = '';
     try {
       response = await this.fetchImpl(url.toString(), {
         method: 'GET',
@@ -111,20 +117,18 @@ class TpdbRestClient {
         redirect: 'error',
         signal: controller.signal,
       });
+      contentType = String(response?.headers?.get?.('content-type') || '').toLowerCase();
+      const declaredLength =
+        Number.parseInt(String(response?.headers?.get?.('content-length') || '0'), 10) || 0;
+      if (declaredLength > MAX_RESPONSE_BYTES) {
+        throw new Error('tpdb REST response exceeded the size limit');
+      }
+      text = await response.text();
+      if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) {
+        throw new Error('tpdb REST response exceeded the size limit');
+      }
     } finally {
       clearTimeout(timer);
-    }
-
-    const contentType = String(response?.headers?.get?.('content-type') || '').toLowerCase();
-    const declaredLength =
-      Number.parseInt(String(response?.headers?.get?.('content-length') || '0'), 10) || 0;
-    if (declaredLength > MAX_RESPONSE_BYTES) {
-      throw new Error('tpdb REST response exceeded the size limit');
-    }
-
-    const text = await response.text();
-    if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) {
-      throw new Error('tpdb REST response exceeded the size limit');
     }
 
     let payload = null;
@@ -164,7 +168,7 @@ class TpdbRestClient {
       site: String(options.studio || options.site || '').replace(/\s+/g, ' ').trim(),
       year: Number.parseInt(String(options.year || ''), 10) || undefined,
       order_by: String(options.orderBy || '').replace(/\s+/g, ' ').trim(),
-    });
+    }, { timeoutMs: options.timeoutMs });
     return responseRecords(payload);
   }
 

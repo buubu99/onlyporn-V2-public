@@ -89,14 +89,21 @@ function detailPageImage(html, detailUrl) {
   const scopes = descriptionBlocks.length ? descriptionBlocks : [document];
   for (const scope of scopes) {
     for (const match of scope.matchAll(/<img\b[^>]*\b(?:data-src|src)=["']([^"']+)["']/gi)) {
-      candidates.push(match[1]);
+      candidates.push({ value: match[1], requireImageExtension: false });
+    }
+    // Live Sukebei descriptions are markdown rendered as text in the page.
+    // Uploaders commonly paste cover URLs directly instead of using <img>.
+    for (const match of scope.matchAll(/https:\/\/[^\s<>"'&]+/gi)) {
+      candidates.push({ value: match[0], requireImageExtension: true });
     }
   }
   for (const candidate of candidates) {
     try {
-      const url = new URL(String(candidate || '').trim(), detailUrl);
+      const url = new URL(String(candidate.value || '').trim(), detailUrl);
       if (url.protocol !== 'https:' || url.username || url.password) continue;
       const path = url.pathname.toLowerCase();
+      if (candidate.requireImageExtension &&
+          !/\.(?:avif|jpe?g|png|webp)$/i.test(path)) continue;
       if (/\.(?:svg|gif)(?:$|\?)/i.test(url.toString())) continue;
       if (/(?:logo|favicon|avatar|icon|smiley|emoji|flag)/i.test(path)) continue;
       if (url.hostname.toLowerCase() === 'sukebei.nyaa.si' && /\/(?:static|img)\//.test(path)) continue;
@@ -292,6 +299,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     cacheMaxEntries: config.discoveryCacheMaxEntries,
     fetchImpl: options.fetchImpl,
     checkDns: options.checkDns,
+    serializeRequests: false,
     allowHtml: true,
     allowedContentTypes: ['text/html'],
   }) : null;
@@ -300,11 +308,26 @@ function createSukebeiMetadataAdapter(options = {}) {
   });
   const index = new Map();
   const runLimited = createLimiter(Math.min(Number(config.sukebeiLookupConcurrency || 8), 10));
+  // Sukebei rate-limits bursts of detail-page GETs much more aggressively than
+  // metadata APIs. Two concurrent native requests avoid both the old serial
+  // queue and the 429/timeout storm caused by reusing metadata concurrency.
+  const detailConcurrency = Math.min(
+    Math.max(Number(config.sukebeiLookupConcurrency || 8), 1),
+    2
+  );
+  const runDetailLimited = createLimiter(detailConcurrency);
   const positiveTtlMs = Math.max(Number(config.metadataCacheTtlMs || 600_000), 5_000);
   const negativeTtlMs = Math.max(Number(config.metadataNegativeTtlMs || 120_000), 5_000);
   let lastDiagnostics = freezeDiagnostics({
+    budgetMs: 0,
     rssRecords: 0,
+    rssRecordsRead: 0,
+    rssDuplicateRecords: 0,
+    rssDuplicatePages: 0,
     rssPages: 0,
+    rssPagesRequested: 0,
+    rssPagesEffective: 0,
+    rssElapsedMs: 0,
     rssCategory: '',
     codeCandidates: 0,
     codeStageJobs: 0,
@@ -316,6 +339,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     titleStageCompleted: 0,
     detailStageJobs: 0,
     detailStageCompleted: 0,
+    detailStageTarget: 0,
     inspected: 0,
     lookupEligible: 0,
     lookupSkipped: 0,
@@ -336,6 +360,9 @@ function createSukebeiMetadataAdapter(options = {}) {
     providerMatches: {},
     providerErrors: {},
     filterReasons: {},
+    detailReserveMs: 0,
+    totalElapsedMs: 0,
+    deadlineExceededMs: 0,
   });
 
   function remember(items) {
@@ -343,7 +370,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     return items;
   }
 
-  async function queryProvider(provider, source, query, codeMode, stats) {
+  async function queryProvider(provider, source, query, codeMode, stats, options = {}) {
     const metadataClient = clients[provider];
     if (!metadataClient?.configured || !query) return { candidates: [], ok: false };
     try {
@@ -360,7 +387,9 @@ function createSukebeiMetadataAdapter(options = {}) {
         for (const term of terms) {
           stats.providerRequests[provider] = (stats.providerRequests[provider] || 0) + 1;
           if (codeMode) stats.exactCodeQueries += 1;
-          const rows = await metadataClient.searchScenes(term, codeMode ? 20 : 10);
+          const rows = await metadataClient.searchScenes(term, codeMode ? 20 : 10, {
+            timeoutMs: options.timeoutMs,
+          });
           for (const row of Array.isArray(rows) ? rows : []) {
             const key = String(row?.id || `${row?.code || ''}|${row?.title || ''}`);
             if (key) byId.set(key, row);
@@ -386,7 +415,10 @@ function createSukebeiMetadataAdapter(options = {}) {
               perPage: codeMode ? 20 : 30,
               page: 1,
             };
-        scenes = await metadataClient.queryScenes(request);
+        scenes = await metadataClient.queryScenes({
+          ...request,
+          timeoutMs: options.timeoutMs,
+        });
       }
       const output = [];
       for (const raw of Array.isArray(scenes) ? scenes : []) {
@@ -419,7 +451,13 @@ function createSukebeiMetadataAdapter(options = {}) {
     for (const code of codes) {
       for (const provider of providers) {
         if (Date.now() >= Number(options.deadlineAt || Infinity)) break;
-        const result = await queryProvider(provider, source, code, true, stats);
+        const remaining = Math.max(Number(options.deadlineAt || Infinity) - Date.now(), 250);
+        const result = await queryProvider(provider, source, code, true, stats, {
+          timeoutMs: Math.min(
+            Math.max(Number(config.metadataLookupTimeoutMs || 2_500), 750),
+            remaining
+          ),
+        });
         successfulLookup ||= result.ok;
         lookupError ||= !result.ok;
         for (const candidate of result.candidates) {
@@ -436,7 +474,13 @@ function createSukebeiMetadataAdapter(options = {}) {
       if (query.length >= 6) {
         for (const provider of providers) {
           if (Date.now() >= Number(options.deadlineAt || Infinity)) break;
-          const result = await queryProvider(provider, source, query, false, stats);
+          const remaining = Math.max(Number(options.deadlineAt || Infinity) - Date.now(), 250);
+          const result = await queryProvider(provider, source, query, false, stats, {
+            timeoutMs: Math.min(
+              Math.max(Number(config.metadataLookupTimeoutMs || 2_500), 750),
+              remaining
+            ),
+          });
           successfulLookup ||= result.ok;
           lookupError ||= !result.ok;
           for (const candidate of result.candidates) {
@@ -494,21 +538,16 @@ function createSukebeiMetadataAdapter(options = {}) {
     return enriched;
   }
 
-  let activeDetailLookups = 0;
   async function nativeDetailMatch(source, stats, options = {}) {
     if (!detailClient?.configured || !safeHttpsUrl(source.detailUrl)) return null;
-    const maxDetailLookups = Math.min(
-      Math.max(Number(config.sukebeiDetailImageLimit || 20), 0),
-      40
-    );
-    if (activeDetailLookups >= maxDetailLookups || Date.now() >= Number(options.deadlineAt || Infinity)) {
-      return null;
-    }
-    activeDetailLookups += 1;
+    const deadlineAt = Number(options.deadlineAt || Infinity);
+    if (Date.now() >= deadlineAt) return null;
     stats.detailImageRequests += 1;
     try {
+      const remaining = Math.max(deadlineAt - Date.now(), 250);
       const html = await detailClient.fetchText(source.detailUrl, {
         cacheKey: `sukebei:detail:${source.sourceId}`,
+        timeoutMs: Math.min(detailClient.timeoutMs, remaining),
       });
       const poster = detailPageImage(html, source.detailUrl);
       if (!poster) return null;
@@ -544,26 +583,76 @@ function createSukebeiMetadataAdapter(options = {}) {
 
   async function catalog({ skip = 0, limit = 40 }) {
     if (!client.configured) return [];
+    const requestStartedAt = Date.now();
+    const budgetMs = Math.min(
+      Math.max(Number(config.sukebeiEnrichmentDeadlineMs || 24_000), 4_000),
+      28_000
+    );
+    const deadlineAt = requestStartedAt + budgetMs;
+    const rssDeadlineAt = Math.min(
+      deadlineAt,
+      requestStartedAt + Math.min(Math.max(Math.floor(budgetMs * 0.35), 4_000), 10_000)
+    );
     const safeSkip = Math.max(Number.parseInt(String(skip || 0), 10) || 0, 0);
     const safeLimit = Math.min(Math.max(Number.parseInt(String(limit || 40), 10) || 40, 1), 100);
     const feed = [];
-    const rssPages = Math.min(Math.max(Number(config.sukebeiRssPages || 4), 1), 8);
+    const requestedRssPages = Math.min(Math.max(Number(config.sukebeiRssPages || 4), 1), 8);
+    const rssPages = (() => {
+      try {
+        return new URL(client.endpoint).hostname.toLowerCase() === 'sukebei.nyaa.si'
+          ? 1
+          : requestedRssPages;
+      } catch {
+        return requestedRssPages;
+      }
+    })();
+    const seenFeedRecords = new Set();
     let fetchedPages = 0;
+    let rssRecordsRead = 0;
+    let rssDuplicateRecords = 0;
+    let rssDuplicatePages = 0;
     for (let page = 1; page <= rssPages; page += 1) {
+      if (Date.now() >= rssDeadlineAt) break;
       const pageUrl = new URL(client.endpoint);
       pageUrl.searchParams.set('p', String(page));
+      const remaining = Math.max(rssDeadlineAt - Date.now(), 250);
       const payload = await client.fetchText(pageUrl.toString(), {
         cacheKey: `sukebei:rss:${page}`,
+        timeoutMs: Math.min(client.timeoutMs, remaining),
       });
       const pageItems = parseRssFeed(payload);
       if (!pageItems.length) break;
       fetchedPages += 1;
-      feed.push(...pageItems);
+      rssRecordsRead += pageItems.length;
+      let newRecords = 0;
+      for (const item of pageItems) {
+        const key = compactText(item.id || item.guid || item.link || item.detailUrl);
+        if (!key || seenFeedRecords.has(key)) {
+          rssDuplicateRecords += 1;
+          continue;
+        }
+        seenFeedRecords.add(key);
+        feed.push(item);
+        newRecords += 1;
+      }
+      // The official RSS endpoint currently ignores `p` and returns the same
+      // rolling window. Stop once a later response is at least 90% duplicate.
+      if (page > 1 && newRecords <= Math.max(Math.floor(pageItems.length * 0.1), 1)) {
+        rssDuplicatePages += 1;
+        break;
+      }
     }
 
     const stats = {
+      budgetMs,
       rssRecords: feed.length,
+      rssRecordsRead,
+      rssDuplicateRecords,
+      rssDuplicatePages,
       rssPages: fetchedPages,
+      rssPagesRequested: requestedRssPages,
+      rssPagesEffective: rssPages,
+      rssElapsedMs: Date.now() - requestStartedAt,
       rssCategory: (() => {
         try { return new URL(client.endpoint).searchParams.get('c') || ''; } catch { return ''; }
       })(),
@@ -577,6 +666,7 @@ function createSukebeiMetadataAdapter(options = {}) {
       titleStageCompleted: 0,
       detailStageJobs: 0,
       detailStageCompleted: 0,
+      detailStageTarget: 0,
       inspected: 0,
       lookupEligible: 0,
       lookupSkipped: 0,
@@ -597,6 +687,9 @@ function createSukebeiMetadataAdapter(options = {}) {
       providerMatches: {},
       providerErrors: {},
       filterReasons: {},
+      detailReserveMs: 0,
+      totalElapsedMs: 0,
+      deadlineExceededMs: 0,
     };
 
     const normalized = dedupeAndRank(
@@ -607,14 +700,25 @@ function createSukebeiMetadataAdapter(options = {}) {
     stats.inspected = normalized.length;
     stats.codeCandidates = normalized.filter(item => extractSceneCodes(item.title).length > 0).length;
 
-    const deadlineAt = Date.now() + Math.min(
-      Math.max(Number(config.sukebeiEnrichmentDeadlineMs || 24_000), 4_000),
-      28_000
-    );
     const codeLimit = Math.min(Math.max(Number(config.sukebeiCodeLookupLimit || 40), 1), 60);
     const titleLimit = Math.min(Math.max(Number(config.sukebeiTitleLookupLimit || 4), 0), 20);
+    const detailLimit = Math.min(Math.max(Number(config.sukebeiDetailImageLimit || 20), 0), 40);
+    const detailTargetLimit = Math.min(detailLimit, 8);
+    const detailLookupTimeoutMs = Math.min(
+      Math.max(Number(config.metadataLookupTimeoutMs || 2_500), 750),
+      6_000
+    );
+    const detailWaves = detailTargetLimit ? Math.ceil(detailTargetLimit / detailConcurrency) : 0;
+    const detailReserveMs = detailTargetLimit
+      ? Math.min(
+          Math.max((detailWaves * detailLookupTimeoutMs) + 500, 4_000),
+          Math.floor(budgetMs / 2)
+        )
+      : 0;
+    const metadataDeadlineAt = Math.max(Date.now(), deadlineAt - detailReserveMs);
+    stats.detailReserveMs = detailReserveMs;
+    stats.detailStageTarget = detailTargetLimit;
     const resolvedById = new Map();
-    activeDetailLookups = 0;
 
     // Keep native RSS artwork immediately. A later metadata stage must never
     // overwrite or discard a source record that already has honest artwork.
@@ -669,12 +773,12 @@ function createSukebeiMetadataAdapter(options = {}) {
     if (codeProvider) {
       const metadataClient = clients[codeProvider];
       await Promise.all(codeJobs.map(job => runLimited(async () => {
-        if (Date.now() >= deadlineAt) {
+        if (Date.now() >= metadataDeadlineAt) {
           stats.codeStageDeadlineSkipped += 1;
           stats.deadlineSkipped += 1;
           return;
         }
-        const remaining = Math.max(deadlineAt - Date.now(), 250);
+        const remaining = Math.max(metadataDeadlineAt - Date.now(), 250);
         const lookupTimeoutMs = Math.min(
           Math.max(Number(config.metadataLookupTimeoutMs || 2_500), 750),
           remaining,
@@ -728,14 +832,14 @@ function createSukebeiMetadataAdapter(options = {}) {
       .slice(0, titleLimit);
     stats.titleStageJobs = titleJobs.length;
     await Promise.all(titleJobs.map(item => runLimited(async () => {
-      if (Date.now() >= deadlineAt) {
+      if (Date.now() >= metadataDeadlineAt) {
         stats.deadlineSkipped += 1;
         return;
       }
       const result = await metadataMatch(item, stats, {
         allowTitle: true,
         skipCodes: true,
-        deadlineAt,
+        deadlineAt: metadataDeadlineAt,
       });
       stats.titleStageCompleted += 1;
       if (result?.poster && !resolvedById.has(String(item.sourceId))) {
@@ -743,19 +847,23 @@ function createSukebeiMetadataAdapter(options = {}) {
       }
     })));
 
-    // Stage 3: native detail-page images are the final fallback and never
-    // consume the exact-code scan's budget.
-    const detailLimit = Math.min(Math.max(Number(config.sukebeiDetailImageLimit || 20), 0), 40);
-    const detailJobs = normalized
-      .filter(item => !resolvedById.has(String(item.sourceId)) && safeHttpsUrl(item.detailUrl))
-      .slice(0, detailLimit);
+    // Stage 3: native detail-page images use a reserved final window inside
+    // the one end-to-end deadline, so fallback work cannot extend the request.
+    const unresolvedDetails = normalized
+      .filter(item => !resolvedById.has(String(item.sourceId)) && safeHttpsUrl(item.detailUrl));
+    const detailJobs = [
+      ...unresolvedDetails.filter(item => extractSceneCodes(item.title).length > 0),
+      ...unresolvedDetails.filter(item => extractSceneCodes(item.title).length === 0),
+    ].slice(0, detailLimit);
+    const detailDeadlineAt = Math.min(deadlineAt, Date.now() + detailReserveMs);
     stats.detailStageJobs = detailJobs.length;
-    await Promise.all(detailJobs.map(item => runLimited(async () => {
-      if (Date.now() >= deadlineAt) {
+    await Promise.all(detailJobs.map(item => runDetailLimited(async () => {
+      if (resolvedById.size >= detailTargetLimit) return;
+      if (Date.now() >= detailDeadlineAt) {
         stats.deadlineSkipped += 1;
         return;
       }
-      const result = await nativeDetailMatch(item, stats, { deadlineAt });
+      const result = await nativeDetailMatch(item, stats, { deadlineAt: detailDeadlineAt });
       stats.detailStageCompleted += 1;
       if (result?.poster && !resolvedById.has(String(item.sourceId))) {
         resolvedById.set(String(item.sourceId), result);
@@ -785,6 +893,8 @@ function createSukebeiMetadataAdapter(options = {}) {
 
     const window = allowed.slice(safeSkip, safeSkip + safeLimit);
     stats.returned = window.length;
+    stats.totalElapsedMs = Date.now() - requestStartedAt;
+    stats.deadlineExceededMs = Math.max(Date.now() - deadlineAt, 0);
     lastDiagnostics = freezeDiagnostics(stats);
     return remember(window);
   }

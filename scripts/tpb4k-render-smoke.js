@@ -33,14 +33,20 @@ const REQUIRED_NONEMPTY = new Set([
   'tpb4k.studio.xvideosred.top',
 ]);
 const FALLBACK_PATH = '/assets/tpb4k/studios/';
+const REQUEST_TIMEOUT_MS = 30_000;
 
 async function getResponse(url, label) {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 30_000);
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
     const response = await fetch(url, { signal: controller.signal, redirect: 'follow' });
     if (!response.ok) throw new Error(`${label} returned HTTP ${response.status}`);
     return response;
+  } catch (error) {
+    if (controller.signal.aborted) {
+      throw new Error(`${label} timed out after ${REQUEST_TIMEOUT_MS} ms`);
+    }
+    throw new Error(`${label} request failed: ${error.message}`);
   } finally {
     clearTimeout(timer);
   }

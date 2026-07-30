@@ -108,6 +108,31 @@ test('StashDB staged code requests honor the shorter per-lookup timeout', async 
   assert.ok(Date.now() - started < 1500);
 });
 
+test('StashDB lookup timeout remains active while the response body is read', async () => {
+  const client = new StashBoxMetadataClient({
+    id: 'stashdb',
+    endpoint: 'https://stashdb.example/graphql',
+    apiKey: 'test-key',
+    timeoutMs: 5_000,
+    fetchImpl: async (_url, options) => ({
+      ok: true,
+      status: 200,
+      headers: { get: name => name.toLowerCase() === 'content-type' ? 'application/json' : '' },
+      text: async () => new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          const error = new Error('body read aborted');
+          error.name = 'AbortError';
+          reject(error);
+        }, { once: true });
+      }),
+    }),
+  });
+  await assert.rejects(
+    client.searchScenes('ADN-721', 20, { timeoutMs: 250 }),
+    /body read aborted/
+  );
+});
+
 test('Sukebei scene-code extraction ignores codecs and canonicalizes known release codes', () => {
   assert.deepEqual(extractSceneCodes('[H265 1080p] ADN-721 and FC2PPV 1234567'), [
     'FC2-PPV-1234567',
@@ -124,6 +149,13 @@ test('Sukebei detail pages provide honest native artwork without accepting site 
       'https://sukebei.example/view/721'
     ),
     'https://covers.example/adn.jpg'
+  );
+  assert.equal(
+    detailPageImage(
+      '<div id="torrent-description">**COVER / SS**&#10;https://covers.example/plain-adn.jpg&#10;https://covers.example/plain-adn_s.jpg</div>',
+      'https://sukebei.example/view/721'
+    ),
+    'https://covers.example/plain-adn.jpg'
   );
   const rss = `<?xml version="1.0"?><rss xmlns:nyaa="https://nyaa.si/xmlns/nyaa"><channel>
     <item><guid>https://sukebei.example/view/native-detail</guid><title>Unmatched Native Detail</title><link>https://sukebei.example/download/native.torrent</link><nyaa:seeders>10</nyaa:seeders></item>
@@ -160,6 +192,80 @@ test('Sukebei detail pages provide honest native artwork without accepting site 
   assert.equal(items[0].poster, 'https://covers.example/native-detail.jpg');
   assert.equal(items[0].detailUrl, 'https://sukebei.example/view/native-detail');
   assert.equal(adapter.diagnostics().sukebeiMetadata.detailImages, 1);
+});
+
+test('Sukebei cuts duplicate RSS pages and fetches plaintext detail artwork concurrently', async () => {
+  const rows = Array.from({ length: 20 }, (_, index) => {
+    const number = String(index + 1).padStart(3, '0');
+    return `<item><guid>https://sukebei.example/view/${number}</guid><title>TST-${number}</title><link>https://sukebei.example/download/${number}.torrent</link><nyaa:seeders>${100 - index}</nyaa:seeders></item>`;
+  }).join('');
+  const rss = `<?xml version="1.0"?><rss xmlns:nyaa="https://nyaa.si/xmlns/nyaa"><channel>${rows}</channel></rss>`;
+  let rssCalls = 0;
+  let detailActive = 0;
+  let maxDetailActive = 0;
+  const adapter = createSukebeiMetadataAdapter({
+    endpoint: 'https://sukebei.example/?page=rss&c=0_0&f=0',
+    checkDns: false,
+    fetchImpl: async url => {
+      const parsed = new URL(String(url));
+      if (parsed.pathname.startsWith('/view/')) {
+        detailActive += 1;
+        maxDetailActive = Math.max(maxDetailActive, detailActive);
+        await new Promise(resolve => setTimeout(resolve, 100));
+        detailActive -= 1;
+        const code = parsed.pathname.split('/').filter(Boolean).pop();
+        return response(
+          `<html><div id="torrent-description">**COVER / SS**&#10;https://covers.example/${code}.jpg&#10;</div></html>`,
+          'text/html'
+        );
+      }
+      rssCalls += 1;
+      return response(rss);
+    },
+    env: { ONLYPORN_CONTENT_FILTER_ENABLED: 'false' },
+    config: {
+      requestTimeoutMs: 15_000,
+      metadataLookupTimeoutMs: 1_000,
+      discoveryMaxResponseBytes: 2_000_000,
+      discoveryCacheTtlMs: 300_000,
+      discoveryNegativeTtlMs: 60_000,
+      discoveryCacheMaxEntries: 100,
+      metadataCacheMaxEntries: 100,
+      metadataCacheTtlMs: 600_000,
+      metadataNegativeTtlMs: 120_000,
+      sukebeiLookupConcurrency: 8,
+      sukebeiRssPages: 4,
+      sukebeiCodeLookupLimit: 20,
+      sukebeiTitleLookupLimit: 0,
+      sukebeiDetailImageLimit: 20,
+      sukebeiEnrichmentDeadlineMs: 4_000,
+    },
+    metadataClients: {
+      stashdb: {
+        configured: true,
+        async searchScenes() {
+          return [];
+        },
+      },
+      tpdb: { configured: false },
+    },
+  });
+
+  const items = await adapter.catalog({ skip: 0, limit: 40 });
+  const diagnostics = adapter.diagnostics().sukebeiMetadata;
+  assert.ok(items.length >= 8 && items.length <= 9);
+  assert.equal(items.every(item => /^https:\/\/covers\.example\/\d+\.jpg$/.test(item.poster)), true);
+  assert.equal(rssCalls, 2);
+  assert.equal(diagnostics.rssPages, 2);
+  assert.equal(diagnostics.rssRecords, 20);
+  assert.equal(diagnostics.rssRecordsRead, 40);
+  assert.equal(diagnostics.rssDuplicateRecords, 20);
+  assert.equal(diagnostics.rssDuplicatePages, 1);
+  assert.equal(diagnostics.detailStageTarget, 8);
+  assert.equal(diagnostics.detailImages, items.length);
+  assert.equal(diagnostics.deadlineExceededMs, 0);
+  assert.ok(diagnostics.totalElapsedMs < 1_500, JSON.stringify(diagnostics));
+  assert.equal(maxDetailActive, 2);
 });
 
 test('Sukebei keeps native artwork, enriches exact codes, filters tagged content, and omits unresolved purple cards', async () => {

@@ -56,6 +56,8 @@ class StashBoxGraphqlClient {
       : this.timeoutMs;
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     let response;
+    let contentType = '';
+    let text = '';
     try {
       response = await this.fetchImpl(this.endpoint, {
         method: 'POST',
@@ -68,19 +70,17 @@ class StashBoxGraphqlClient {
         redirect: 'error',
         signal: controller.signal,
       });
+      contentType = String(response?.headers?.get?.('content-type') || '').toLowerCase();
+      const declaredLength = Number.parseInt(String(response?.headers?.get?.('content-length') || '0'), 10) || 0;
+      if (declaredLength > MAX_RESPONSE_BYTES) {
+        throw new Error(`${this.name} metadata response exceeded the size limit`);
+      }
+      text = await response.text();
+      if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) {
+        throw new Error(`${this.name} metadata response exceeded the size limit`);
+      }
     } finally {
       clearTimeout(timer);
-    }
-
-    const contentType = String(response?.headers?.get?.('content-type') || '').toLowerCase();
-    const declaredLength = Number.parseInt(String(response?.headers?.get?.('content-length') || '0'), 10) || 0;
-    if (declaredLength > MAX_RESPONSE_BYTES) {
-      throw new Error(`${this.name} metadata response exceeded the size limit`);
-    }
-
-    const text = await response.text();
-    if (Buffer.byteLength(text, 'utf8') > MAX_RESPONSE_BYTES) {
-      throw new Error(`${this.name} metadata response exceeded the size limit`);
     }
 
     let payload = null;

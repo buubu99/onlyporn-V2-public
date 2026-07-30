@@ -36,6 +36,7 @@ class SourceHttpClient {
     this.userAgent = String(options.userAgent || 'OnlyPorn-TPB4K/2.7');
     this.checkDns = options.checkDns !== false;
     this.minRequestIntervalMs = Math.max(Number(options.minRequestIntervalMs ?? 0), 0);
+    this.serializeRequests = options.serializeRequests !== false;
     this.maxRetries = Math.min(Math.max(Number(options.maxRetries ?? 0), 0), 2);
     this.retryBaseDelayMs = Math.max(Number(options.retryBaseDelayMs ?? 500), 10);
     this.now = typeof options.now === 'function' ? options.now : Date.now;
@@ -90,31 +91,32 @@ class SourceHttpClient {
     }
   }
 
-  async requestOnce(safeUrl) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
-    try {
-      return await this.fetchImpl(safeUrl, {
-        method: 'GET',
-        redirect: 'manual',
-        signal: controller.signal,
-        headers: {
-          Accept: this.accept,
-          'Accept-Language': 'en-US,en;q=0.8',
-          'User-Agent': this.userAgent,
-        },
-      });
-    } finally {
-      clearTimeout(timer);
-    }
+  async requestOnce(safeUrl, signal) {
+    return this.fetchImpl(safeUrl, {
+      method: 'GET',
+      redirect: 'manual',
+      signal,
+      headers: {
+        Accept: this.accept,
+        'Accept-Language': 'en-US,en;q=0.8',
+        'User-Agent': this.userAgent,
+      },
+    });
   }
 
-  async fetchWithRetry(safeUrl, key) {
+  async fetchWithRetry(safeUrl, key, options = {}) {
+    const requestedTimeoutMs = Number.parseInt(String(options.timeoutMs || ''), 10);
+    const timeoutMs = Number.isFinite(requestedTimeoutMs)
+      ? Math.min(Math.max(requestedTimeoutMs, 250), this.timeoutMs)
+      : this.timeoutMs;
     for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       let response;
       try {
-        response = await this.requestOnce(safeUrl);
+        response = await this.requestOnce(safeUrl, controller.signal);
       } catch (error) {
+        clearTimeout(timer);
         if (attempt < this.maxRetries) {
           await this.sleep(this.retryBaseDelayMs * (2 ** attempt));
           continue;
@@ -125,37 +127,50 @@ class SourceHttpClient {
 
       const status = Number(response?.status || 0);
       if (status >= 500 && status <= 599 && attempt < this.maxRetries) {
+        clearTimeout(timer);
         await this.sleep(this.retryBaseDelayMs * (2 ** attempt));
         continue;
       }
       if (!response || status < 200 || status >= 300) {
+        clearTimeout(timer);
         this.cache.setNegative(key, this.negativeTtlMs);
         return '';
       }
 
-      const contentLength = Number.parseInt(String(response.headers?.get?.('content-length') || 0), 10) || 0;
-      if (contentLength > this.maxResponseBytes) {
-        throw new Error('TPB4K source response exceeded the configured byte limit');
-      }
-      const contentType = normalizeContentType(response.headers?.get?.('content-type'));
-      if (contentType && !this.allowedContentTypes.has(contentType)) {
+      try {
+        const contentLength = Number.parseInt(String(response.headers?.get?.('content-length') || 0), 10) || 0;
+        if (contentLength > this.maxResponseBytes) {
+          throw new Error('TPB4K source response exceeded the configured byte limit');
+        }
+        const contentType = normalizeContentType(response.headers?.get?.('content-type'));
+        if (contentType && !this.allowedContentTypes.has(contentType)) {
+          this.cache.setNegative(key, this.negativeTtlMs);
+          return '';
+        }
+        const text = await response.text();
+        if (Buffer.byteLength(text, 'utf8') > this.maxResponseBytes) {
+          throw new Error('TPB4K source response exceeded the configured byte limit');
+        }
+        if (!this.allowHtml && /^(?:\s*<!doctype\s+html|\s*<html\b)/i.test(text)) {
+          this.cache.setNegative(key, this.negativeTtlMs);
+          return '';
+        }
+        if (!text) {
+          this.cache.setNegative(key, this.negativeTtlMs);
+          return '';
+        }
+        this.cache.set(key, text, this.cacheTtlMs);
+        return text;
+      } catch (error) {
+        if (attempt < this.maxRetries) {
+          await this.sleep(this.retryBaseDelayMs * (2 ** attempt));
+          continue;
+        }
         this.cache.setNegative(key, this.negativeTtlMs);
-        return '';
+        throw error;
+      } finally {
+        clearTimeout(timer);
       }
-      const text = await response.text();
-      if (Buffer.byteLength(text, 'utf8') > this.maxResponseBytes) {
-        throw new Error('TPB4K source response exceeded the configured byte limit');
-      }
-      if (!this.allowHtml && /^(?:\s*<!doctype\s+html|\s*<html\b)/i.test(text)) {
-        this.cache.setNegative(key, this.negativeTtlMs);
-        return '';
-      }
-      if (!text) {
-        this.cache.setNegative(key, this.negativeTtlMs);
-        return '';
-      }
-      this.cache.set(key, text, this.cacheTtlMs);
-      return text;
     }
     return '';
   }
@@ -175,7 +190,8 @@ class SourceHttpClient {
     const active = this.inflight.get(key);
     if (active) return active;
 
-    const request = this.schedule(() => this.fetchWithRetry(safeUrl, key))
+    const execute = () => this.fetchWithRetry(safeUrl, key, options);
+    const request = (this.serializeRequests ? this.schedule(execute) : execute())
       .finally(() => this.inflight.delete(key));
     this.inflight.set(key, request);
     return request;
