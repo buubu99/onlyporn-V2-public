@@ -343,6 +343,11 @@ class Tpb4kProvider {
       .filter(candidate => {
         if (candidate.kind === 'invalid') return false;
         if (['p2p', 'uncached-torrent'].includes(candidate.kind)) {
+          if (
+            candidate.source === 'pornrips'
+            && candidate.seeders === 0
+            && candidate.provenance.includes('pornrips-authoritative-torrent')
+          ) return true;
           return candidate.seeders >= config.minimumSeeders;
         }
         return true;

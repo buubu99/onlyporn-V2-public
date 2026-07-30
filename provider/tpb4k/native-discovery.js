@@ -1,7 +1,9 @@
 
 'use strict';
 
+const crypto = require('node:crypto');
 const { hasStrongChallengeMarker } = require('../challenge-detection');
+const { assertSafeHttpsUrl } = require('../url-security');
 const { SourceHttpClient } = require('./source-http');
 const {
   absoluteHttps,
@@ -29,6 +31,9 @@ const SOURCES = Object.freeze({
 const NATIVE_MIN_REQUEST_INTERVAL_MS = 350;
 const NATIVE_MAX_RETRIES = 1;
 const NATIVE_MAX_CATALOG_PAGES_PER_REQUEST = 12;
+const NATIVE_MAX_TORRENT_BYTES = 2_000_000;
+const NATIVE_MAX_AJAX_BYTES = 1_000_000;
+const HENTAI_MEDIA_HOST = /^(?:gdvid\.info|(?:[a-z0-9-]+\.)*javprovider\.com)$/i;
 
 function createNativeClient(id, config, options = {}) {
   const source = SOURCES[id];
@@ -79,6 +84,357 @@ function safeHtml(payload, source) {
   if (!html) return '';
   if (!hasStrongChallengeMarker(html)) return html;
   return hasNativeCatalogEvidence(source, html) ? html : '';
+}
+
+function responseHeader(response, name) {
+  return String(response?.headers?.get?.(name) || '');
+}
+
+async function safeNativeRequest(url, options = {}) {
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const allowedHosts = options.allowedHosts instanceof Set
+    ? options.allowedHosts
+    : new Set(options.allowedHosts || []);
+  const origin = String(options.origin || new URL(String(url)).origin);
+  const timeoutMs = Math.max(Number(options.timeoutMs || 15_000), 1_000);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let handedOff = false;
+  let cleared = false;
+  const clearTimeoutOnce = () => {
+    if (cleared) return;
+    cleared = true;
+    clearTimeout(timer);
+  };
+  let currentUrl;
+  try {
+    currentUrl = await assertSafeHttpsUrl(url, {
+      allowedHosts,
+      checkDns: options.checkDns !== false,
+    });
+    for (let redirects = 0; redirects <= 3; redirects += 1) {
+      const response = await fetchImpl(currentUrl, {
+        method: options.method || 'GET',
+        redirect: 'manual',
+        signal: controller.signal,
+        headers: options.headers,
+        body: options.body,
+      });
+      const status = Number(response?.status || 0);
+      if (status < 300 || status >= 400) {
+        handedOff = true;
+        return { response, clearTimeout: clearTimeoutOnce };
+      }
+      const location = responseHeader(response, 'location');
+      try {
+        if (typeof response?.body?.cancel === 'function') await response.body.cancel();
+      } catch {
+        // Redirect body cancellation is best effort.
+      }
+      if (!location || redirects >= 3) throw new Error('Native source exceeded the safe redirect limit');
+      const target = await assertSafeHttpsUrl(new URL(location, currentUrl).toString(), {
+        allowedHosts,
+        checkDns: options.checkDns !== false,
+      });
+      if (new URL(target).origin !== origin) throw new Error('Native source redirect changed origin unexpectedly');
+      currentUrl = target;
+    }
+  } finally {
+    if (!handedOff) clearTimeoutOnce();
+  }
+  throw new Error('Native source exceeded the safe redirect limit');
+}
+
+async function readBoundedBuffer(response, maxBytes) {
+  const length = Number.parseInt(responseHeader(response, 'content-length'), 10) || 0;
+  if (length > maxBytes) throw new Error('Native response exceeded the configured byte limit');
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length > maxBytes) throw new Error('Native response exceeded the configured byte limit');
+  return buffer;
+}
+
+async function readBoundedText(response, maxBytes) {
+  const length = Number.parseInt(responseHeader(response, 'content-length'), 10) || 0;
+  if (length > maxBytes) throw new Error('Native response exceeded the configured byte limit');
+  const text = await response.text();
+  if (Buffer.byteLength(text, 'utf8') > maxBytes) {
+    throw new Error('Native response exceeded the configured byte limit');
+  }
+  return text;
+}
+
+function torrentUrlFromDetail(html) {
+  const base = SOURCES.pornrips.origin;
+  for (const anchor of anchorRecords(html)) {
+    const path = sameOriginPath(base, anchor.href, ['/torrents/']);
+    if (!path) continue;
+    const parsed = new URL(path, base);
+    if (/\.torrent$/i.test(parsed.pathname)) return parsed.toString();
+  }
+  return '';
+}
+
+function decodeTorrent(buffer) {
+  if (!Buffer.isBuffer(buffer) || !buffer.length) throw new Error('Torrent payload is empty');
+  let offset = 0;
+  let nodes = 0;
+  let infoStart = -1;
+  let infoEnd = -1;
+
+  function parseValue(depth = 0) {
+    if (depth > 64 || nodes++ > 200_000 || offset >= buffer.length) {
+      throw new Error('Torrent payload exceeded parser limits');
+    }
+    const marker = buffer[offset];
+    if (marker === 0x69) {
+      const end = buffer.indexOf(0x65, offset + 1);
+      if (end < 0) throw new Error('Torrent integer is malformed');
+      const raw = buffer.subarray(offset + 1, end).toString('ascii');
+      if (!/^-?(?:0|[1-9]\d*)$/.test(raw)) throw new Error('Torrent integer is malformed');
+      offset = end + 1;
+      const value = Number(raw);
+      if (!Number.isSafeInteger(value)) throw new Error('Torrent integer exceeds safe limits');
+      return value;
+    }
+    if (marker >= 0x30 && marker <= 0x39) {
+      const colon = buffer.indexOf(0x3a, offset);
+      if (colon < 0) throw new Error('Torrent string is malformed');
+      const rawLength = buffer.subarray(offset, colon).toString('ascii');
+      if (!/^(?:0|[1-9]\d*)$/.test(rawLength)) throw new Error('Torrent string is malformed');
+      const length = Number(rawLength);
+      const start = colon + 1;
+      const end = start + length;
+      if (!Number.isSafeInteger(length) || end > buffer.length) throw new Error('Torrent string exceeds payload');
+      offset = end;
+      return buffer.subarray(start, end);
+    }
+    if (marker === 0x6c) {
+      offset += 1;
+      const value = [];
+      while (buffer[offset] !== 0x65) value.push(parseValue(depth + 1));
+      offset += 1;
+      return value;
+    }
+    if (marker === 0x64) {
+      offset += 1;
+      const value = Object.create(null);
+      while (buffer[offset] !== 0x65) {
+        const keyBuffer = parseValue(depth + 1);
+        if (!Buffer.isBuffer(keyBuffer)) throw new Error('Torrent dictionary key is malformed');
+        const key = keyBuffer.toString('utf8');
+        const valueStart = offset;
+        value[key] = parseValue(depth + 1);
+        if (depth === 0 && key === 'info') {
+          infoStart = valueStart;
+          infoEnd = offset;
+        }
+      }
+      offset += 1;
+      return value;
+    }
+    throw new Error('Torrent payload contains an unknown bencode marker');
+  }
+
+  const root = parseValue();
+  if (offset !== buffer.length || !root || infoStart < 0 || infoEnd <= infoStart) {
+    throw new Error('Torrent payload has no valid info dictionary');
+  }
+  const info = root.info;
+  if (!info || typeof info !== 'object' || Buffer.isBuffer(info)) {
+    throw new Error('Torrent info dictionary is malformed');
+  }
+  const nameBuffer = info['name.utf-8'] || info.name;
+  const filename = Buffer.isBuffer(nameBuffer) ? cleanText(nameBuffer.toString('utf8')) : '';
+  const size = Number.isSafeInteger(info.length)
+    ? info.length
+    : Array.isArray(info.files)
+      ? info.files.reduce((total, file) => total + (Number.isSafeInteger(file?.length) ? file.length : 0), 0)
+      : 0;
+  return {
+    infoHash: crypto.createHash('sha1').update(buffer.subarray(infoStart, infoEnd)).digest('hex'),
+    filename,
+    size,
+  };
+}
+
+async function resolvePornrips({ client, sourceId, item, options }) {
+  const path = decodeStablePathId('pornrips', sourceId);
+  if (!path) return [];
+  const detailUrl = absoluteHttps(SOURCES.pornrips.origin, path);
+  const html = safeHtml(
+    await client.fetchText(detailUrl, { cacheKey: `pornrips:detail:${path}` }),
+    'pornrips'
+  );
+  const torrentUrl = torrentUrlFromDetail(html);
+  if (!torrentUrl) return [];
+  const request = await safeNativeRequest(torrentUrl, {
+    fetchImpl: options.fetchImpl,
+    checkDns: options.checkDns,
+    timeoutMs: options.config.requestTimeoutMs,
+    origin: SOURCES.pornrips.origin,
+    allowedHosts: new Set(['pornrips.to']),
+    headers: {
+      Accept: 'application/x-bittorrent, application/octet-stream;q=0.9',
+      'User-Agent': 'OnlyPorn-TPB4K/2.7',
+    },
+  });
+  try {
+    const status = Number(request.response?.status || 0);
+    if (status < 200 || status >= 300) return [];
+    const contentType = responseHeader(request.response, 'content-type').split(';')[0].trim().toLowerCase();
+    if (contentType && !['application/x-bittorrent', 'application/octet-stream'].includes(contentType)) return [];
+    const torrent = decodeTorrent(await readBoundedBuffer(request.response, NATIVE_MAX_TORRENT_BYTES));
+    return [{
+      source: 'pornrips',
+      sourceId,
+      title: item?.title || torrent.filename,
+      filename: torrent.filename || item?.title,
+      infoHash: torrent.infoHash,
+      size: torrent.size || item?.size,
+      seeders: 0,
+      provenance: ['pornrips-authoritative-torrent'],
+    }];
+  } finally {
+    request.clearTimeout();
+  }
+}
+
+function firstHentaiEpisodePath(html) {
+  for (const anchor of anchorRecords(html)) {
+    const path = sameOriginPath(SOURCES.hentai.origin, anchor.href, ['/episodes/']);
+    if (path && /^\/episodes\/[^/?#]+\/?$/i.test(new URL(path, SOURCES.hentai.origin).pathname)) return path;
+  }
+  return '';
+}
+
+function hentaiPostId(html) {
+  return String(html || '').match(/\bname=["']idpost["'][^>]*\bvalue=["'](\d+)["']/i)?.[1]
+    || String(html || '').match(/\bidpost\b[^0-9]{0,40}(\d+)/i)?.[1]
+    || String(html || '').match(/\ba\s*:\s*["'](\d+)["']/i)?.[1]
+    || '';
+}
+
+function iframeUrlsFromAjax(payload) {
+  const source = String(payload || '').replaceAll('\\/', '/').replaceAll('\\"', '"');
+  return [...source.matchAll(/\bsrc\s*=\s*["']([^"']+)["']/gi)]
+    .map(match => absoluteHttps(SOURCES.hentai.origin, match[1]))
+    .filter(Boolean);
+}
+
+function mediaUrlsFromPlayer(html) {
+  return [...String(html || '').matchAll(/\bfile\s*:\s*["'](https:[^"']+\.mp4(?:\?[^"']*)?)["']/gi)]
+    .map(match => match[1].replaceAll('&amp;', '&'));
+}
+
+async function validateHentaiMedia(url, options) {
+  let parsed;
+  try {
+    parsed = new URL(String(url));
+  } catch {
+    return '';
+  }
+  if (!HENTAI_MEDIA_HOST.test(parsed.hostname) || !/\.mp4$/i.test(parsed.pathname)) return '';
+  const request = await safeNativeRequest(parsed.toString(), {
+    fetchImpl: options.fetchImpl,
+    checkDns: options.checkDns,
+    timeoutMs: options.config.requestTimeoutMs,
+    origin: parsed.origin,
+    allowedHosts: new Set([parsed.hostname.toLowerCase()]),
+    method: 'HEAD',
+    headers: {
+      Accept: 'video/mp4, application/octet-stream;q=0.9',
+      'User-Agent': 'OnlyPorn-TPB4K/2.7',
+    },
+  });
+  try {
+    const status = Number(request.response?.status || 0);
+    const type = responseHeader(request.response, 'content-type').split(';')[0].trim().toLowerCase();
+    try {
+      if (typeof request.response?.body?.cancel === 'function') await request.response.body.cancel();
+    } catch {
+      // HEAD responses normally have no body.
+    }
+    return status >= 200
+      && status < 300
+      && ['video/mp4', 'application/octet-stream'].includes(type)
+      ? parsed.toString()
+      : '';
+  } finally {
+    request.clearTimeout();
+  }
+}
+
+async function resolveHentai({ client, sourceId, item, options }) {
+  const path = decodeStablePathId('hentai', sourceId);
+  if (!path) return [];
+  const seriesHtml = safeHtml(
+    await client.fetchText(absoluteHttps(SOURCES.hentai.origin, path), {
+      cacheKey: `hentai:detail:${path}`,
+    }),
+    'hentai'
+  );
+  const episodePath = firstHentaiEpisodePath(seriesHtml);
+  if (!episodePath) return [];
+  const episodeHtml = safeHtml(
+    await client.fetchText(absoluteHttps(SOURCES.hentai.origin, episodePath), {
+      cacheKey: `hentai:episode:${episodePath}`,
+    }),
+    'hentai'
+  );
+  const postId = hentaiPostId(episodeHtml);
+  if (!postId) return [];
+
+  const ajaxUrl = `${SOURCES.hentai.origin}/wp-admin/admin-ajax.php`;
+  const request = await safeNativeRequest(ajaxUrl, {
+    fetchImpl: options.fetchImpl,
+    checkDns: options.checkDns,
+    timeoutMs: options.config.requestTimeoutMs,
+    origin: SOURCES.hentai.origin,
+    allowedHosts: new Set(['hentaimama.io']),
+    method: 'POST',
+    headers: {
+      Accept: 'application/json, text/plain;q=0.9',
+      'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+      'User-Agent': 'OnlyPorn-TPB4K/2.7',
+    },
+    body: new URLSearchParams({ action: 'get_player_contents', a: postId }).toString(),
+  });
+  let ajaxPayload = '';
+  try {
+    const status = Number(request.response?.status || 0);
+    if (status < 200 || status >= 300) return [];
+    ajaxPayload = await readBoundedText(request.response, NATIVE_MAX_AJAX_BYTES);
+  } finally {
+    request.clearTimeout();
+  }
+  const playerUrls = iframeUrlsFromAjax(ajaxPayload)
+    .filter(url => {
+      const parsed = new URL(url);
+      return parsed.origin === SOURCES.hentai.origin && /^\/new(?:2|jav)\.php$/i.test(parsed.pathname);
+    });
+
+  const mediaUrls = [];
+  for (const playerUrl of playerUrls) {
+    const playerHtml = await client.fetchText(playerUrl, {
+      cacheKey: `hentai:player:${playerUrl}`,
+    });
+    mediaUrls.push(...mediaUrlsFromPlayer(playerHtml));
+  }
+  mediaUrls.sort((left, right) => Number(!/\/\/gdvid\.info\//i.test(left)) - Number(!/\/\/gdvid\.info\//i.test(right)));
+  for (const mediaUrl of uniqueBy(mediaUrls, value => value)) {
+    const validatedUrl = await validateHentaiMedia(mediaUrl, options);
+    if (!validatedUrl) continue;
+    return [{
+      source: 'hentai',
+      sourceId,
+      title: item?.title || slugTitle(episodePath),
+      filename: `${slugTitle(episodePath)}.mp4`,
+      url: validatedUrl,
+      validated: true,
+      provenance: ['hentaimama-episode-player'],
+    }];
+  }
+  return [];
 }
 
 function descriptionFromBlock(block, labels = []) {
@@ -381,7 +737,13 @@ function createNativeAdapter(source, options = {}) {
       const detailed = payload ? parseDetail(source, payload, sourceId) : null;
       return detailed || remembered || null;
     },
-    async resolve() {
+    async resolve(args = {}) {
+      if (source === 'pornrips') {
+        return resolvePornrips({ client, ...args, options });
+      }
+      if (source === 'hentai') {
+        return resolveHentai({ client, ...args, options });
+      }
       return [];
     },
   });
@@ -394,8 +756,14 @@ module.exports = {
   SOURCES,
   buildCatalogUrl,
   createNativeAdapter,
+  decodeTorrent,
+  firstHentaiEpisodePath,
+  hentaiPostId,
+  iframeUrlsFromAjax,
+  mediaUrlsFromPlayer,
   parseDetail,
   parseHentaiCatalog,
   parsePornripsCatalog,
   parseYespornCatalog,
+  torrentUrlFromDetail,
 };

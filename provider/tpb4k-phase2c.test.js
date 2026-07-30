@@ -2,6 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 const { readTpb4kConfig, publicConfigStatus } = require('./tpb4k/config');
@@ -33,10 +34,21 @@ const hentaiList = `<!doctype html><html><body><script src="/cdn-cgi/challenge-p
 const detail = `<!doctype html><html><head><meta property="og:title" content="Detailed Scene"><meta property="og:image" content="https://pornrips.to/media/detail.jpg"><meta property="og:description" content="Full native metadata"></head><body><time datetime="2026-07-29"></time><a href="/studio/vixen/">Vixen</a><a href="/performer/jane-doe/">Jane Doe</a><p>Duration 01:30:00</p></body></html>`;
 
 function response(body, contentType = 'text/html', status = 200) {
+  const payload = Buffer.isBuffer(body) ? body : Buffer.from(String(body));
   return {
     status,
-    headers: { get: name => name.toLowerCase() === 'content-type' ? contentType : '' },
-    async text() { return body; },
+    headers: {
+      get: name => {
+        if (name.toLowerCase() === 'content-type') return contentType;
+        if (name.toLowerCase() === 'content-length') return String(payload.length);
+        return '';
+      },
+    },
+    body: { async cancel() {} },
+    async text() { return payload.toString('utf8'); },
+    async arrayBuffer() {
+      return payload.buffer.slice(payload.byteOffset, payload.byteOffset + payload.byteLength);
+    },
   };
 }
 
@@ -138,7 +150,7 @@ test('detail parser enriches an opaque source path without changing source ident
   assert.equal(enriched.duration, 5400);
 });
 
-test('native adapters are always configured, fetch exact origins, paginate, and resolve no streams', async () => {
+test('native adapters are configured, fetch exact origins, paginate, and fail closed without playable evidence', async () => {
   const bundle = createDiscoveryAdapters({ config: readTpb4kConfig(env()), fetchImpl: nativeFetch, checkDns: false, minRequestIntervalMs: 0 });
   assert.deepEqual(bundle.configuredSources, ['hentai', 'platform-hybrid', 'pornrips', 'sukebei', 'torrent-index', 'yesporn']);
   for (const [id, catalog] of [
@@ -155,7 +167,7 @@ test('native adapters are always configured, fetch exact origins, paginate, and 
   }
 });
 
-test('provider exposes native catalog and meta responses while keeping streams empty', async () => {
+test('provider exposes native catalog and meta responses while rejecting unresolved detail pages', async () => {
   clearAdapters();
   installBuiltInAdapters({ env: env(), fetchImpl: nativeFetch, checkDns: false, minRequestIntervalMs: 0 });
   const provider = new Tpb4kProvider({ env: env(), fetchImpl: nativeFetch, installBuiltIns: false });
@@ -166,6 +178,85 @@ test('provider exposes native catalog and meta responses while keeping streams e
     assert.equal(meta.meta.name, 'Detailed Scene', id);
     assert.deepEqual(await provider.handleStream({ type: 'movie', id: catalog.metas[0].id }), { streams: [] }, id);
   }
+});
+
+test('PornRips resolves its authoritative torrent into a real info hash for AIOStreams/debrid', async () => {
+  const torrent = Buffer.from('d4:infod6:lengthi12345e4:name13:scene-one.mp4ee');
+  const expectedHash = crypto.createHash('sha1')
+    .update(Buffer.from('d6:lengthi12345e4:name13:scene-one.mp4e'))
+    .digest('hex');
+  const fetchImpl = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    if (parsed.pathname === '/') return response(pornripsList);
+    if (/^\/page\/\d+\/$/.test(parsed.pathname)) return response('<html><body></body></html>');
+    if (parsed.pathname === '/vixen-scene-one/') {
+      return response(detail.replace(
+        '</body>',
+        '<a href="/torrents/scene-one.torrent">Download torrent</a></body>'
+      ));
+    }
+    if (parsed.pathname === '/torrents/scene-one.torrent') {
+      assert.equal(init.method, 'GET');
+      return response(torrent, 'application/x-bittorrent');
+    }
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+  clearAdapters();
+  installBuiltInAdapters({ env: env(), fetchImpl, checkDns: false, minRequestIntervalMs: 0 });
+  const provider = new Tpb4kProvider({ env: env(), fetchImpl, installBuiltIns: false });
+  const catalog = await provider.handleCatalog({
+    type: 'movie',
+    id: 'tpb4k.pornrips.recent',
+    extra: { skip: 0 },
+  });
+  const result = await provider.handleStream({ type: 'movie', id: catalog.metas[0].id });
+  assert.equal(result.streams.length, 1);
+  assert.equal(result.streams[0].infoHash, expectedHash);
+  assert.equal(result.streams[0].behaviorHints.filename, 'scene-one.mp4');
+});
+
+test('HentaiMama resolves a series to its latest episode and validates the direct MP4', async () => {
+  const series = `<!doctype html><html><head><meta property="og:title" content="Hentai A"></head><body>
+    <a href="/episodes/hentai-a-episode-2/">Episode 2</a>
+    <a href="/episodes/hentai-a-episode-1/">Episode 1</a>
+  </body></html>`;
+  const episode = `<!doctype html><html><head><meta property="og:title" content="Hentai A Episode 2"></head><body>
+    <script>var data = { action: 'get_player_contents', a: '12759' };</script>
+  </body></html>`;
+  const ajax = JSON.stringify([
+    { content: '<iframe src="https://hentaimama.io/new2.php?p=episode2"></iframe>' },
+  ]);
+  const player = '<script>player.setup({file: "https://gdvid.info/No/hentai-a-episode-2.mp4"});</script>';
+  const fetchImpl = async (url, init = {}) => {
+    const parsed = new URL(String(url));
+    if (parsed.hostname === 'gdvid.info') {
+      assert.equal(init.method, 'HEAD');
+      return response('', 'video/mp4');
+    }
+    if (parsed.pathname === '/hentai-series/') return response(hentaiList);
+    if (/^\/hentai-series\/page\/\d+\/$/.test(parsed.pathname)) return response('<html><body></body></html>');
+    if (parsed.pathname === '/tvshows/hentai-a/') return response(series);
+    if (parsed.pathname === '/episodes/hentai-a-episode-2/') return response(episode);
+    if (parsed.pathname === '/wp-admin/admin-ajax.php') {
+      assert.equal(init.method, 'POST');
+      assert.match(String(init.body), /a=12759/);
+      return response(ajax, 'application/json');
+    }
+    if (parsed.pathname === '/new2.php') return response(player);
+    throw new Error(`Unexpected URL: ${url}`);
+  };
+  clearAdapters();
+  installBuiltInAdapters({ env: env(), fetchImpl, checkDns: false, minRequestIntervalMs: 0 });
+  const provider = new Tpb4kProvider({ env: env(), fetchImpl, installBuiltIns: false });
+  const catalog = await provider.handleCatalog({
+    type: 'movie',
+    id: 'tpb4k.hentai.all',
+    extra: { skip: 0 },
+  });
+  const result = await provider.handleStream({ type: 'movie', id: catalog.metas[0].id });
+  assert.equal(result.streams.length, 1);
+  assert.equal(result.streams[0].url, 'https://gdvid.info/No/hentai-a-episode-2.mp4');
+  assert.equal(result.streams[0].behaviorHints.filename, 'Hentai A Episode 2.mp4');
 });
 
 
