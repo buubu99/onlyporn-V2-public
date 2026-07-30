@@ -12,6 +12,7 @@ const { decodeTpb4kId, encodeTpb4kId } = require('./tpb4k/id-codec');
 const { buildSceneIdentity } = require('./tpb4k/identity');
 const { getAdapter, installBuiltInAdapters } = require('./tpb4k/index');
 const { normalizeDiscoveryItem } = require('./tpb4k/source-contract');
+const { fallbackPosterUrl } = require('./tpb4k/poster-enrichment');
 
 const TYPE = 'movie';
 let loggerInstance;
@@ -47,37 +48,48 @@ function toLinks(identity) {
   }));
 }
 
-function toMetaPreview(item, catalogId) {
+function fallbackKey(item = {}) {
+  if (item.source === 'torrent-index' && item.studio) return item.studio;
+  return item.source || 'tpb4k';
+}
+
+function resolvedPoster(item, config = {}) {
+  return safePoster(item?.poster) || safePoster(
+    fallbackPosterUrl(fallbackKey(item), config.posterAssetBaseUrl)
+  );
+}
+
+function toMetaPreview(item, catalogId, config) {
   const identity = buildSceneIdentity(item);
   const id = encodeTpb4kId({
     source: item.source,
     sourceId: item.sourceId,
     catalogId,
   });
-  const poster = safePoster(item.poster);
+  const poster = resolvedPoster(item, config);
 
   return {
     id,
     type: TYPE,
     name: item.title,
     poster,
-    posterShape: item.source === 'torrent-index' ? 'landscape' : 'poster',
+    posterShape: 'poster',
     genres: [item.studio, item.resolution, item.quality].filter(Boolean),
     description: item.description,
     links: toLinks(identity),
   };
 }
 
-function toMetaResponse(item, id) {
+function toMetaResponse(item, id, config) {
   const identity = buildSceneIdentity(item);
-  const poster = safePoster(item.poster);
+  const poster = resolvedPoster(item, config);
   return {
     id,
     type: TYPE,
     name: item.title,
     poster,
     background: safePoster(item.background) || poster,
-    posterShape: item.source === 'torrent-index' ? 'landscape' : 'poster',
+    posterShape: 'poster',
     genres: [item.studio, item.resolution, item.quality].filter(Boolean),
     description: item.description,
     links: toLinks(identity),
@@ -165,7 +177,7 @@ class Tpb4kProvider {
       .map(item => normalizeDiscoveryItem(adapter, { ...item, catalogId: definition.id }))
       .filter(Boolean)
       .slice(0, config.catalogLimit)
-      .map(item => toMetaPreview(item, definition.id));
+      .map(item => toMetaPreview(item, definition.id, config));
 
     logger().info(
       {
@@ -187,12 +199,13 @@ class Tpb4kProvider {
     const adapter = getAdapter(decoded.source);
     if (!adapter) return { meta: {} };
 
+    const config = readTpb4kConfig(this.env);
     let rawItem = null;
     try {
       rawItem = await adapter.meta({
         sourceId: decoded.sourceId,
         catalogId: decoded.catalogId,
-        config: readTpb4kConfig(this.env),
+        config,
       });
     } catch {
       logger().warn(
@@ -202,7 +215,7 @@ class Tpb4kProvider {
     }
     const item = normalizeDiscoveryItem(adapter, rawItem);
     if (!item) return { meta: {} };
-    return { meta: toMetaResponse(item, args.id) };
+    return { meta: toMetaResponse(item, args.id, config) };
   }
 
   async handleStream(args) {

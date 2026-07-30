@@ -158,8 +158,12 @@ class TpdbRestClient {
 
   async queryScenes(options = {}) {
     const payload = await this.request('scenes', {
+      q: String(options.query || options.title || options.text || '').replace(/\s+/g, ' ').trim(),
       page: positiveInteger(options.page, 1, 100_000),
       per_page: positiveInteger(options.perPage, 40, 100),
+      site: String(options.studio || options.site || '').replace(/\s+/g, ' ').trim(),
+      year: Number.parseInt(String(options.year || ''), 10) || undefined,
+      order_by: String(options.orderBy || '').replace(/\s+/g, ' ').trim(),
     });
     return responseRecords(payload);
   }

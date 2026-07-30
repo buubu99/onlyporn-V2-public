@@ -1,3 +1,14 @@
+## 2.7.0-alpha.11 — TPB4K poster enrichment completion
+
+- Added strict StashDB/TPDB artwork matching for the 19 TPB studio catalogs.
+- Preserved the original opaque torrent identity and private torrent record during metadata merges.
+- Added bounded lookup concurrency, per-request timeout, lookup-count limit, positive cache, and negative cache.
+- Added committed portrait fallback PNGs for all studio and source catalogs.
+- Guaranteed a safe HTTPS poster for every returned TPB4K catalog/meta card.
+- Corrected all TPB4K card responses to the manifest-compatible `poster` shape.
+- Strengthened local and Render smoke gates to reject missing posters.
+- Retained empty TPB4K stream output and all v2.6.4 JAVHDPorn/HLS invariants.
+
 ## 2.7.0-alpha.10 — TPDB REST / StashDB GraphQL metadata split
 
 - Uses `https://api.theporndb.net/scenes` with `Authorization: Bearer` for TPDB Recent.

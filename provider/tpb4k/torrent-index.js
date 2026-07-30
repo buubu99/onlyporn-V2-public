@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const { SourceHttpClient } = require('./source-http');
+const { createPosterEnricher, extractTitleDate } = require('./poster-enrichment');
 
 const DEFAULT_TPB_MIRRORS = Object.freeze([
   'https://thehiddenbay.com',
@@ -220,6 +221,8 @@ function publicTorrentItem(record, catalog) {
     record.uploadedAt && `Uploaded: ${record.uploadedAt}`,
   ].filter(Boolean);
 
+  const releaseDate = extractTitleDate(record.title, studio).releaseDate;
+
   return Object.freeze({
     sourceId: record.sourceId,
     title: record.title,
@@ -229,7 +232,7 @@ function publicTorrentItem(record, catalog) {
     quality: 'Top by seeders',
     seeders: record.seeders,
     size: record.size,
-    releaseDate: record.uploadedAt,
+    releaseDate,
     detailUrl: record.detailUrl,
     metadataProvider: `hiddenbay:${new URL(record.mirror).hostname}`,
     upstreamId: '',
@@ -278,6 +281,11 @@ function createTorrentIndexAdapter(options = {}) {
     client: new SourceHttpClient({ ...common, id: `torrent-index-${index + 1}`, endpoint: `${origin}/` }),
   }));
   const privateIndex = createPrivateIndex();
+  const posterEnricher = createPosterEnricher({
+    clients: options.metadataClients,
+    config,
+    now: options.now,
+  });
   let lastDiagnostic = Object.freeze({});
 
   async function fetchSearchPage(path, cacheKey) {
@@ -339,15 +347,18 @@ function createTorrentIndexAdapter(options = {}) {
     }
 
     output.sort((left, right) => right.seeders - left.seeders || left.title.localeCompare(right.title));
+    const selected = output.slice(0, normalizedLimit);
+    const enrichment = await posterEnricher.enrichItems(selected);
     lastDiagnostic = Object.freeze({
       catalogId: catalog.id,
       studio: catalog.studio,
       skip: normalizedSkip,
       limit: normalizedLimit,
       pages: Object.freeze(diagnostics),
-      returned: output.length,
+      returned: enrichment.items.length,
+      enrichment: enrichment.stats,
     });
-    return output.slice(0, normalizedLimit);
+    return enrichment.items;
   }
 
   return Object.freeze({
@@ -363,7 +374,10 @@ function createTorrentIndexAdapter(options = {}) {
     async meta({ sourceId }) {
       const record = privateIndex.get(sourceId);
       if (!record) return null;
-      return publicTorrentItem(record, { studio: record.studio });
+      const enrichment = await posterEnricher.enrichItems([
+        publicTorrentItem(record, { studio: record.studio }),
+      ]);
+      return enrichment.items[0] || null;
     },
     async resolve() {
       return [];
@@ -373,6 +387,9 @@ function createTorrentIndexAdapter(options = {}) {
     },
     privateRecordCount() {
       return privateIndex.size();
+    },
+    posterCacheSize() {
+      return posterEnricher.cacheSize();
     },
   });
 }

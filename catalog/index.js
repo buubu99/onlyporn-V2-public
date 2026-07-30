@@ -11,7 +11,6 @@ const {
   isTpb4kEnabled,
   tpb4kCatalogs: sourceTpb4kCatalogs,
 } = require('./tpb4k');
-
 function randomize(catalogs) {
   const arr = catalogs.map((_e, i) => i);
   return shuffle(arr).map(i => catalogs[i]);
@@ -42,7 +41,6 @@ const COMPACT_EPORNER_GENRES = [
   'Teens',
   'Creampie',
 ];
-
 const COMPACT_SPANKBANG_GENRES = [
   'Trending',
   'New',
@@ -65,7 +63,6 @@ function compactLegacyCatalog(catalog) {
 
   // `extraSupported` duplicates the entries already declared in `extra`.
   delete compact.extraSupported;
-
   if (Array.isArray(compact.extra)) {
     compact.extra = compact.extra.map(item => {
       if (item.name !== 'genre') return { ...item };
@@ -84,7 +81,6 @@ function compactLegacyCatalog(catalog) {
 
   return compact;
 }
-
 function compactTpb4kCatalog(catalog) {
   return {
     id: catalog.id,
@@ -106,7 +102,6 @@ const legacyCatalogs = [
 ].map(compactLegacyCatalog);
 
 const tpb4kCatalogs = sourceTpb4kCatalogs.map(compactTpb4kCatalog);
-
 const catalogs = [
   ...legacyCatalogs,
   ...(isTpb4kEnabled() ? tpb4kCatalogs : []),
@@ -129,7 +124,6 @@ const getActiveProvider = id => {
 
   return null;
 };
-
 module.exports = {
   catalogs,
   catalogNames,

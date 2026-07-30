@@ -80,6 +80,27 @@ function readTpb4kConfig(env = process.env) {
       min: 10,
       max: 5_000,
     }),
+    metadataEnrichmentConcurrency: positiveInteger(
+      env.TPB4K_METADATA_ENRICHMENT_CONCURRENCY,
+      4,
+      { min: 1, max: 8 }
+    ),
+    metadataEnrichmentLimit: positiveInteger(env.TPB4K_METADATA_ENRICHMENT_LIMIT, 8, {
+      min: 1,
+      max: 24,
+    }),
+    metadataLookupTimeoutMs: positiveInteger(env.TPB4K_METADATA_LOOKUP_TIMEOUT_MS, 2_000, {
+      min: 1_000,
+      max: 10_000,
+    }),
+    metadataMatchThreshold: positiveInteger(env.TPB4K_METADATA_MATCH_THRESHOLD, 72, {
+      min: 50,
+      max: 98,
+    }),
+    posterAssetBaseUrl: endpoint(
+      env.TPB4K_POSTER_ASSET_BASE_URL,
+      'https://raw.githubusercontent.com/buubu99/onlyporn-V2-public/main/assets/tpb4k/studios'
+    ),
     discoveryCacheTtlMs: positiveInteger(env.TPB4K_DISCOVERY_CACHE_TTL_MS, 5 * 60 * 1000, {
       min: 5_000,
       max: 60 * 60 * 1000,

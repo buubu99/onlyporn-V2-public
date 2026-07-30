@@ -290,12 +290,41 @@ test('provider foundation normalizes catalog, meta, and stream results without l
   assert.equal(result.streams.some(stream => stream.infoHash === HASH_1080), false);
 });
 
+test('provider supplies a branded HTTPS fallback when an upstream catalog omits artwork', async () => {
+  registerAdapter({
+    id: 'tpdb',
+    async catalog() {
+      return [{ sourceId: 'tpdb:no-poster', title: 'Posterless TPDB fixture' }];
+    },
+    async meta({ sourceId }) {
+      return { sourceId, title: 'Posterless TPDB fixture' };
+    },
+    async resolve() { return []; },
+  });
+  const provider = new Tpb4kProvider({
+    installBuiltIns: false,
+    env: { TPB4K_ENABLED: 'true', TPB4K_CATALOG_LIMIT: '1' },
+  });
+  const catalog = await provider.handleCatalog({
+    type: 'movie',
+    id: 'tpb4k.tpdb.recent',
+    extra: {},
+  });
+  assert.equal(catalog.metas.length, 1);
+  assert.equal(catalog.metas[0].posterShape, 'poster');
+  assert.match(catalog.metas[0].poster, /assets\/tpb4k\/studios\/tpdb\.png$/);
+
+  const meta = await provider.handleMeta({ type: 'movie', id: catalog.metas[0].id });
+  assert.match(meta.meta.poster, /assets\/tpb4k\/studios\/tpdb\.png$/);
+  assert.equal(meta.meta.background, meta.meta.poster);
+});
+
 test('release wiring preserves v2.6.4 hardening and keeps TPB4K off production by default', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const relay = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
   const catalogIndex = fs.readFileSync(path.join(ROOT, 'catalog/index.js'), 'utf8');
 
-  assert.equal(pkg.version, '2.7.0-alpha.10');
+  assert.equal(pkg.version, '2.7.0-alpha.11');
   assert.equal(pkg.scripts['test:tpb4k-phase1'], 'node --test provider/tpb4k-phase1.test.js');
   assert.match(pkg.scripts['test:release'], /tpb4k-phase1\.test\.js/);
   assert.match(relay, /const SESSION_TTL_MS = 8 \* 60 \* 60 \* 1000/);

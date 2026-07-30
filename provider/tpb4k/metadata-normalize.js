@@ -136,7 +136,18 @@ function normalizeScene(provider, scene = {}) {
   const title = String(scene.title || scene.name || '').replace(/\s+/g, ' ').trim();
   if (!providerId || !upstreamId || !title) return null;
 
-  const studio = normalizeStudioName(scene.studio?.name || scene.site?.name || scene.studio || '');
+  const studioCandidates = [
+    scene.studio?.name,
+    scene.studio?.parent?.name,
+    scene.site?.name,
+    scene.site?.short_name,
+    scene.studio,
+    scene.site,
+  ]
+    .map(normalizeStudioName)
+    .filter(Boolean);
+  const studio =
+    studioCandidates.find(name => CANONICAL_STUDIOS.includes(name)) || studioCandidates[0] || '';
   const performers = normalizePerformers(scene.performers || scene.performer || []);
   const releaseDate = String(scene.release_date || scene.date || scene.releaseDate || '').trim();
   const sceneCode = String(scene.code || scene.sku || scene.sceneCode || '').trim();

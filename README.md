@@ -2,7 +2,9 @@
 
 A self-hosted Stremio addon fork with Eporner, Porntrex, SpankBang, XVideos, XNXX, xHamster, JAV HD Porn, and Pornhub providers.
 
-## Current release: 2.6.4
+## Stable provider baseline: 2.6.4
+
+## Current TPB4K candidate: 2.7.0-alpha.11
 
 OnlyPorn v2.6.4 adds Hardening Phase 1 on top of the production-verified v2.6.3 relay-session repair and v2.6.2 JAVHDPorn `vdcdn.xyz` hotfix.
 
@@ -39,13 +41,13 @@ The release validator checks JavaScript and Python syntax, packaging, secret-bea
 
 ## TPB4K integration development
 
-Version `2.7.0-alpha.2` contains the first TPB4K foundation phase. It defines the selected 28 catalogs, strict torrent/direct-media normalization, opaque IDs, scene identity, adapter contracts, and environment-only TPDB/StashDB configuration.
-
-The feature is disabled by default with `TPB4K_ENABLED=false`. No live TPB4K source adapter is included in this phase, so the production 2.6.4 provider/catalog set remains unchanged until individual sources pass fixtures and live validation.
+Version `2.7.0-alpha.11` retains the original TPB4K foundation and all 28 selected unified-resolution catalogs. The feature is controlled by `TPB4K_ENABLED`; with it enabled the addon exposes 37 total catalogs, including the 28 TPB4K catalogs. Alpha.11 completes the missing poster-enrichment layer while TPB4K stream resolution remains intentionally empty until Phase 3.
 
 ## TPB4K Phase 2A
 
-Version `2.7.0-alpha.10` uses the live-proven ThePornDB REST API with Bearer authentication for TPDB Recent and restores the original TPB4K studio architecture: each of the 19 selected studio catalogs searches TPB-compatible mirrors in UHD category 507, sorted by seeders with order code 7. The fixed mirror chain is TheHiddenBay, ThePirateBay0, and PirateBay Live. Catalog output exposes titles, studio labels, size, quality, seeders, and opaque IDs while magnets and info hashes stay private. PornRips, YesPorn, and HentaiMama native acquisition remains intact, and TPB4K stream resolution remains intentionally empty until the next phase.
+Version `2.7.0-alpha.11` retains the alpha.10 TPB-compatible studio architecture: each of the 19 selected studio catalogs searches UHD category 507, sorted by seeders with order code 7, using the fixed TheHiddenBay / ThePirateBay0 / PirateBay Live chain. It now enriches those torrent records with strictly matched StashDB/TPDB artwork while preserving the original torrent identity. Every returned TPB4K card is guaranteed a safe HTTPS poster through committed source/studio fallback PNGs when upstream artwork is missing. Magnets and info hashes remain private, and TPB4K stream resolution remains intentionally empty until Phase 3.
+
+See `TPB4K_POSTER_ENRICHMENT.md` and `DEPLOY_TPB4K_POSTER_ENRICHMENT.md`.
 
 ## TPB4K Phase 2B
 

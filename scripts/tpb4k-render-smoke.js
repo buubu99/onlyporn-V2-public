@@ -21,15 +21,32 @@ const IDS = [
   'tpb4k.studio.wowgirls.top', 'tpb4k.studio.sexart.top', 'tpb4k.studio.xvideosred.top',
 ];
 
-async function getJson(path) {
+const STUDIO_IDS = new Set(IDS.filter(id => id.startsWith('tpb4k.studio.')));
+const REQUIRED_NONEMPTY = new Set([...STUDIO_IDS, 'tpb4k.tpdb.recent']);
+
+async function getResponse(url, label) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 30_000);
   try {
-    const response = await fetch(`${BASE}${path}`, { signal: controller.signal, redirect: 'error' });
-    if (!response.ok) throw new Error(`${path} returned HTTP ${response.status}`);
-    return await response.json();
+    const response = await fetch(url, { signal: controller.signal, redirect: 'follow' });
+    if (!response.ok) throw new Error(`${label} returned HTTP ${response.status}`);
+    return response;
   } finally {
     clearTimeout(timer);
+  }
+}
+
+async function getJson(path) {
+  const response = await getResponse(`${BASE}${path}`, path);
+  return response.json();
+}
+
+function safePoster(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:' && !url.username && !url.password ? url.toString() : '';
+  } catch {
+    return '';
   }
 }
 
@@ -42,8 +59,33 @@ async function getJson(path) {
     const started = Date.now();
     const payload = await getJson(`/catalog/movie/${encodeURIComponent(id)}/skip=0.json`);
     if (!Array.isArray(payload.metas)) throw new Error(`${id} did not return a metas array`);
-    results.push({ id, metas: payload.metas.length, elapsedMs: Date.now() - started });
+    if (REQUIRED_NONEMPTY.has(id) && payload.metas.length === 0) {
+      throw new Error(`${id} returned zero live records`);
+    }
+    const posters = payload.metas.filter(meta => safePoster(meta.poster)).length;
+    if (posters !== payload.metas.length) {
+      throw new Error(`${id} returned ${payload.metas.length - posters} card(s) without a safe HTTPS poster`);
+    }
+    if (STUDIO_IDS.has(id) && payload.metas.some(meta => meta.posterShape !== 'poster')) {
+      throw new Error(`${id} returned a non-portrait poster shape`);
+    }
+    results.push({
+      id,
+      metas: payload.metas.length,
+      posters,
+      posterPercent: payload.metas.length ? 100 : 0,
+      elapsedMs: Date.now() - started,
+    });
   }
+  const firstPoster = results.length
+    ? (await getJson(`/catalog/movie/${encodeURIComponent('tpb4k.studio.vixen.top')}/skip=0.json`)).metas?.[0]?.poster
+    : '';
+  if (firstPoster) {
+    const response = await getResponse(safePoster(firstPoster), 'first Vixen poster');
+    const contentType = String(response.headers.get('content-type') || '').toLowerCase();
+    if (!contentType.startsWith('image/')) throw new Error('first Vixen poster did not return an image response');
+  }
+
   console.log(JSON.stringify({
     base: new URL(BASE).origin,
     version: manifest.version,
@@ -51,6 +93,8 @@ async function getJson(path) {
     tpb4kCatalogs: tpbCatalogs.length,
     testedCatalogs: results.length,
     catalogs: results,
+    allReturnedCardsHavePosters: true,
+    firstVixenPosterReachable: Boolean(firstPoster),
     streamsNotRequiredForPhase2: true,
   }, null, 2));
 })().catch(error => {

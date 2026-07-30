@@ -31,6 +31,7 @@ function installBuiltInAdapters(options = {}) {
     retryBaseDelayMs: options.retryBaseDelayMs,
     now: options.now,
     sleep: options.sleep,
+    metadataClients: metadata.clients,
   });
   for (const adapter of [...metadata.adapters, ...discovery.adapters]) registerAdapterIfAbsent(adapter);
   return Object.freeze({

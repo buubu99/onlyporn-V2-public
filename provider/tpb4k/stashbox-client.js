@@ -42,7 +42,11 @@ function sceneInput(options = {}) {
     sort: options.sort === 'POPULARITY' ? 'POPULARITY' : 'DATE',
   };
   const studio = String(options.studio || '').replace(/\s+/g, ' ').trim();
+  const title = String(options.title || '').replace(/\s+/g, ' ').trim();
+  const text = String(options.text || '').replace(/\s+/g, ' ').trim();
   if (studio) input.parentStudio = studio;
+  if (title) input.title = title;
+  else if (text) input.text = text;
   return input;
 }
 

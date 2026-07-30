@@ -6,7 +6,6 @@ const { spawnSync } = require('node:child_process');
 const test = require('node:test');
 
 const ROOT = path.resolve(__dirname, '..');
-
 test('TPB4K-enabled manifest constructs successfully and remains below 8 KiB', () => {
   const probe = spawnSync(
     process.execPath,
@@ -34,6 +33,5 @@ test('TPB4K-enabled manifest constructs successfully and remains below 8 KiB', (
       encoding: 'utf8',
     }
   );
-
   assert.equal(probe.status, 0, `${probe.stdout}\n${probe.stderr}`);
 });

@@ -119,6 +119,7 @@ function createDiscoveryAdapters(options = {}) {
     retryBaseDelayMs: options.retryBaseDelayMs,
     now: options.now,
     sleep: options.sleep,
+    metadataClients: options.metadataClients,
   };
   const adapters = [
     createNativeAdapter('pornrips', common),

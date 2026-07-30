@@ -53,6 +53,11 @@ async function fetchWindow(client, options = {}) {
       page,
       perPage,
       studio: options.studio,
+      title: options.title,
+      text: options.text,
+      query: options.query,
+      year: options.year,
+      orderBy: options.orderBy,
       sort: options.sort,
     });
     if (!scenes.length) break;

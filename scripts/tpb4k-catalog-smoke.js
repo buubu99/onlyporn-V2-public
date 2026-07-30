@@ -74,7 +74,7 @@ async function main() {
   if (recentSummary.titles !== recentMetas.length) failures.push(`${recent.name}: missing titles`);
   if (recentSummary.uniqueIds !== recentMetas.length) failures.push(`${recent.name}: duplicate IDs`);
   if (recentSummary.correctSourceIds !== recentMetas.length) failures.push(`${recent.name}: wrong opaque IDs`);
-  if (recentMetas.length && recentSummary.posterPercent < 50) failures.push(`${recent.name}: poster coverage below 50%`);
+  if (recentSummary.posters !== recentMetas.length) failures.push(`${recent.name}: poster coverage is not 100%`);
 
   for (const definition of studios) {
     const started = Date.now();
@@ -113,6 +113,10 @@ async function main() {
     }).length;
     const correctMetaIds = decoded.filter(item => item?.source === 'torrent-index' && String(item.sourceId).startsWith('hiddenbay:')).length;
     const correctGenres = metas.filter(item => Array.isArray(item.genres) && item.genres.includes(definition.studio)).length;
+    const posters = raw.filter(item => /^https:\/\//i.test(String(item.poster || ''))).length;
+    const realMetadataPosters = raw.filter(item => String(item.posterSource || '').startsWith('metadata:')).length;
+    const fallbackPosters = raw.filter(item => item.posterSource === 'fallback:studio').length;
+    const portraitCards = metas.filter(item => item.posterShape === 'poster').length;
     const summary = {
       id: definition.id,
       name: definition.name,
@@ -130,6 +134,12 @@ async function main() {
       validDetailUrls: validDetails,
       correctOpaqueIds: correctMetaIds,
       correctStudioGenres: correctGenres,
+      posters,
+      posterPercent: percent(posters, raw.length),
+      realMetadataPosters,
+      fallbackPosters,
+      portraitCards,
+      enrichment: diagnostics.enrichment || {},
       privateFieldsLeaked,
       elapsedMs: Date.now() - started,
       first: raw.slice(0, 3).map(item => ({
@@ -137,6 +147,8 @@ async function main() {
         seeders: item.seeders,
         size: item.size,
         resolution: item.resolution,
+        poster: item.poster || '',
+        posterSource: item.posterSource || '',
         mirror: (() => { try { return new URL(item.detailUrl).hostname; } catch { return ''; } })(),
       })),
       diagnosticPages: diagnostics.pages || [],
@@ -154,6 +166,9 @@ async function main() {
     if (validDetails !== raw.length) failures.push(`${definition.name}: invalid detail URLs`);
     if (correctMetaIds !== metas.length) failures.push(`${definition.name}: invalid opaque IDs`);
     if (correctGenres !== metas.length) failures.push(`${definition.name}: wrong studio labels`);
+    if (posters !== raw.length) failures.push(`${definition.name}: poster coverage is not 100%`);
+    if (portraitCards !== metas.length) failures.push(`${definition.name}: non-portrait poster shape`);
+    if (realMetadataPosters + fallbackPosters !== raw.length) failures.push(`${definition.name}: unknown poster provenance`);
     if (privateFieldsLeaked) failures.push(`${definition.name}: magnet/info-hash leaked from catalog adapter`);
   }
 

@@ -170,7 +170,9 @@ test('built-in provider exposes TPB studio catalog cards but keeps streams empty
     extra: { skip: 0 },
   });
   assert.equal(catalog.metas.length, 2);
-  assert.equal(catalog.metas[0].posterShape, 'landscape');
+  assert.equal(catalog.metas[0].posterShape, 'poster');
+  assert.match(catalog.metas[0].poster, /^https:\/\/raw\.githubusercontent\.com\//);
+  assert.match(catalog.metas[0].poster, /vixen\.png$/);
   assert.equal(catalog.metas[0].genres.includes('Vixen'), true);
   assert.match(catalog.metas[0].description, /Seeders: 35/);
   const decoded = decodeTpb4kId(catalog.metas[0].id);
@@ -178,5 +180,7 @@ test('built-in provider exposes TPB studio catalog cards but keeps streams empty
   assert.match(decoded.sourceId, /^hiddenbay:/);
   const meta = await provider.handleMeta({ type: 'movie', id: catalog.metas[0].id });
   assert.equal(meta.meta.name, 'Vixen Scene One 2160p');
+  assert.match(meta.meta.poster, /vixen\.png$/);
+  assert.equal(meta.meta.posterShape, 'poster');
   assert.deepEqual(await provider.handleStream({ type: 'movie', id: catalog.metas[0].id }), { streams: [] });
 });
