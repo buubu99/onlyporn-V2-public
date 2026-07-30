@@ -319,6 +319,40 @@ test('provider supplies a branded HTTPS fallback when an upstream catalog omits 
   assert.equal(meta.meta.background, meta.meta.poster);
 });
 
+test('Sukebei cards use the landscape presentation of the reference TPB4K addon', async () => {
+  registerAdapter({
+    id: 'sukebei',
+    async catalog() {
+      return [{
+        sourceId: 'sukebei:poster',
+        title: 'Recent Sukebei fixture',
+        poster: 'https://images.example/sukebei.jpg',
+      }];
+    },
+    async meta({ sourceId }) {
+      return {
+        sourceId,
+        title: 'Recent Sukebei fixture',
+        poster: 'https://images.example/sukebei.jpg',
+      };
+    },
+    async resolve() { return []; },
+  });
+  const provider = new Tpb4kProvider({
+    installBuiltIns: false,
+    env: { TPB4K_ENABLED: 'true', TPB4K_CATALOG_LIMIT: '1' },
+  });
+  const catalog = await provider.handleCatalog({
+    type: 'movie',
+    id: 'tpb4k.sukebei.top',
+    extra: {},
+  });
+  assert.equal(catalog.metas[0].posterShape, 'landscape');
+
+  const meta = await provider.handleMeta({ type: 'movie', id: catalog.metas[0].id });
+  assert.equal(meta.meta.posterShape, 'landscape');
+});
+
 test('release wiring preserves v2.6.4 hardening and keeps TPB4K off production by default', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const relay = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');

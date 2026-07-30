@@ -66,6 +66,10 @@ function resolvedPoster(item, config = {}) {
   return poster || safePoster(fallbackPosterUrl(fallbackKey(item), config.posterAssetBaseUrl));
 }
 
+function resolvedPosterShape(item = {}) {
+  return item.source === 'sukebei' ? 'landscape' : 'poster';
+}
+
 function toMetaPreview(item, catalogId, config) {
   const identity = buildSceneIdentity(item);
   const id = encodeTpb4kId({
@@ -80,7 +84,7 @@ function toMetaPreview(item, catalogId, config) {
     type: TYPE,
     name: item.title,
     poster,
-    posterShape: 'poster',
+    posterShape: resolvedPosterShape(item),
     genres: [
       item.studio,
       item.resolution,
@@ -102,7 +106,7 @@ function toMetaResponse(item, id, config) {
     name: item.title,
     poster,
     background: safePoster(item.background) || poster,
-    posterShape: 'poster',
+    posterShape: resolvedPosterShape(item),
     genres: [
       item.studio,
       item.resolution,

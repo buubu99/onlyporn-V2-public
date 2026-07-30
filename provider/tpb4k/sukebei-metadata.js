@@ -9,7 +9,8 @@ const {
   safeHttpsUrl,
 } = require('./metadata-normalize');
 const { normalizeSearchTitle, significantTokens } = require('./poster-enrichment');
-const { SourceHttpClient } = require('./source-http');
+const { SourceHttpClient, normalizeContentType } = require('./source-http');
+const { assertSafeHttpsUrl } = require('../url-security');
 const { evaluateContent, readContentFilterConfig } = require('../content-filter');
 
 const CODE_EXCLUSIONS = new Set([
@@ -115,6 +116,180 @@ function detailPageImage(html, detailUrl) {
   return '';
 }
 
+function decodeHtmlAttribute(value) {
+  return String(value || '')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&#x([0-9a-f]+);/gi, (_match, digits) =>
+      String.fromCodePoint(Number.parseInt(digits, 16)))
+    .replace(/&#(\d+);/g, (_match, digits) =>
+      String.fromCodePoint(Number.parseInt(digits, 10)));
+}
+
+function htmlAttribute(tag, name) {
+  const match = String(tag || '').match(new RegExp(
+    `\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`,
+    'i'
+  ));
+  return decodeHtmlAttribute(match?.[1] ?? match?.[2] ?? match?.[3] ?? '');
+}
+
+function landingPageImage(html, pageUrl) {
+  const document = String(html || '');
+  if (!document || !pageUrl) return '';
+  const candidates = [];
+  const add = (value, score) => candidates.push({ value, score });
+
+  for (const match of document.matchAll(/<meta\b[^>]*>/gi)) {
+    const tag = match[0];
+    const key = compactText(htmlAttribute(tag, 'property') || htmlAttribute(tag, 'name')).toLowerCase();
+    if (!/^(?:og:image(?::url)?|twitter:image(?::src)?)$/.test(key)) continue;
+    add(htmlAttribute(tag, 'content'), key.startsWith('og:') ? 400 : 380);
+  }
+  for (const match of document.matchAll(/<a\b[^>]*>/gi)) {
+    const tag = match[0];
+    const className = htmlAttribute(tag, 'class');
+    const score = /\bdata-fancybox\s*=/i.test(tag)
+      ? 340
+      : (/(?:download|full|image|photo|picture)/i.test(className) ? 260 : 0);
+    if (score) add(htmlAttribute(tag, 'href'), score);
+  }
+  for (const match of document.matchAll(/<img\b[^>]*>/gi)) {
+    const tag = match[0];
+    const className = htmlAttribute(tag, 'class');
+    const score = /(?:\bpic\b|full|main|original|responsive)/i.test(className) ? 320 : 180;
+    add(htmlAttribute(tag, 'data-src') || htmlAttribute(tag, 'src'), score);
+  }
+  for (const match of document.matchAll(/https:\/\/[^\s<>"']+/gi)) {
+    add(match[0], 80);
+  }
+
+  const page = new URL(pageUrl);
+  const normalized = new Map();
+  for (const candidate of candidates) {
+    try {
+      const url = new URL(String(candidate.value || '').trim(), page);
+      if (url.protocol !== 'https:' || url.username || url.password) continue;
+      if (url.toString() === page.toString()) continue;
+      const path = url.pathname.toLowerCase();
+      if (!/\.(?:avif|jpe?g|png|webp)(?:$|\/)/i.test(path)) continue;
+      if (/\.(?:svg|gif)(?:$|[/?])/i.test(path)) continue;
+      if (/(?:logo|favicon|avatar|icon|smiley|emoji|flag|banner|advert)/i.test(path)) continue;
+      const previous = normalized.get(url.toString());
+      if (!previous || candidate.score > previous.score) {
+        normalized.set(url.toString(), { url: url.toString(), score: candidate.score });
+      }
+    } catch {
+      // Ignore malformed or relative values that cannot be resolved safely.
+    }
+  }
+  return [...normalized.values()]
+    .sort((left, right) => right.score - left.score || right.url.length - left.url.length)[0]?.url || '';
+}
+
+async function cancelResponseBody(response) {
+  try {
+    if (typeof response?.body?.cancel === 'function') await response.body.cancel();
+  } catch {
+    // The response headers are sufficient for an image probe.
+  }
+}
+
+async function fetchPosterResource(value, options = {}) {
+  const fetchImpl = options.fetchImpl || globalThis.fetch;
+  const deadlineAt = Number(options.deadlineAt || Infinity);
+  const checkDns = options.checkDns !== false;
+  const maxResponseBytes = Math.max(Number(options.maxResponseBytes || 2_000_000), 1_024);
+  let current = String(value || '');
+  let probes = 0;
+
+  for (let redirects = 0; redirects <= 4; redirects += 1) {
+    if (Date.now() >= deadlineAt) throw new Error('Sukebei poster resolution deadline exceeded');
+    const safeUrl = await assertSafeHttpsUrl(current, { checkDns });
+    const remaining = Math.max(deadlineAt - Date.now(), 1);
+    const timeoutMs = Math.min(
+      Math.max(Number(options.timeoutMs || 3_000), 250),
+      remaining
+    );
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    let response;
+    try {
+      probes += 1;
+      response = await fetchImpl(safeUrl, {
+        method: 'GET',
+        redirect: 'manual',
+        signal: controller.signal,
+        headers: {
+          Accept: 'image/avif,image/webp,image/png,image/jpeg,text/html;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.8',
+          'User-Agent': 'OnlyPorn-TPB4K/2.7',
+        },
+      });
+      const status = Number(response?.status || 0);
+      if (status >= 300 && status < 400) {
+        const location = response.headers?.get?.('location');
+        await cancelResponseBody(response);
+        if (!location) return Object.freeze({ url: '', html: '', pageUrl: safeUrl, probes });
+        current = new URL(decodeHtmlAttribute(location), safeUrl).toString();
+        continue;
+      }
+      if (status < 200 || status >= 300) {
+        await cancelResponseBody(response);
+        return Object.freeze({ url: '', html: '', pageUrl: safeUrl, probes });
+      }
+
+      const contentType = normalizeContentType(response.headers?.get?.('content-type'));
+      if (/^image\/(?:avif|jpeg|jpg|pjpeg|png|webp)$/.test(contentType)) {
+        await cancelResponseBody(response);
+        return Object.freeze({ url: safeUrl, html: '', pageUrl: safeUrl, probes });
+      }
+      if (contentType !== 'text/html' && contentType !== 'application/xhtml+xml') {
+        await cancelResponseBody(response);
+        return Object.freeze({ url: '', html: '', pageUrl: safeUrl, probes });
+      }
+
+      const contentLength = Number.parseInt(
+        String(response.headers?.get?.('content-length') || 0),
+        10
+      ) || 0;
+      if (contentLength > maxResponseBytes) {
+        throw new Error('Sukebei poster landing page exceeded the configured byte limit');
+      }
+      const html = await response.text();
+      if (Buffer.byteLength(html, 'utf8') > maxResponseBytes) {
+        throw new Error('Sukebei poster landing page exceeded the configured byte limit');
+      }
+      return Object.freeze({ url: '', html, pageUrl: safeUrl, probes });
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return Object.freeze({ url: '', html: '', pageUrl: current, probes });
+}
+
+async function resolveVerifiedPosterUrl(value, options = {}) {
+  let current = String(value || '');
+  let probes = 0;
+  let landingPages = 0;
+  const seen = new Set();
+
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (!current || seen.has(current)) break;
+    seen.add(current);
+    const result = await fetchPosterResource(current, options);
+    probes += result.probes;
+    if (result.url) {
+      return Object.freeze({ url: result.url, probes, landingPages });
+    }
+    if (!result.html) break;
+    landingPages += 1;
+    current = landingPageImage(result.html, result.pageUrl);
+  }
+  return Object.freeze({ url: '', probes, landingPages });
+}
+
 function titleOverlap(left, right) {
   const a = new Set(significantTokens(left));
   const b = new Set(significantTokens(right));
@@ -200,6 +375,8 @@ function freezeDiagnostics(stats) {
     providerRequests: Object.freeze({ ...stats.providerRequests }),
     providerMatches: Object.freeze({ ...stats.providerMatches }),
     providerErrors: Object.freeze({ ...stats.providerErrors }),
+    providerErrorReasons: Object.freeze({ ...(stats.providerErrorReasons || {}) }),
+    providerCircuitOpen: Object.freeze({ ...(stats.providerCircuitOpen || {}) }),
     filterReasons: Object.freeze({ ...stats.filterReasons }),
   });
 }
@@ -207,6 +384,16 @@ function freezeDiagnostics(stats) {
 
 function incrementCounter(object, key, amount = 1) {
   object[key] = (object[key] || 0) + amount;
+}
+
+function classifyProviderError(error) {
+  const message = String(error?.message || error || '').toLowerCase();
+  if (error?.name === 'AbortError' || /abort|timed?\s*out/.test(message)) return 'timeout';
+  if (/http\s+429|rate\s*limit|too many requests/.test(message)) return 'rate-limit';
+  if (/http\s+40[0134]/.test(message)) return 'authorization-or-request';
+  if (/graphql|cannot query field|unknown field|not defined by type/.test(message)) return 'graphql';
+  if (/fetch failed|network|econn|enotfound|dns/.test(message)) return 'network';
+  return 'other';
 }
 
 async function queryExactCodeProvider(provider, metadataClient, source, code, options = {}) {
@@ -257,12 +444,16 @@ async function queryExactCodeProvider(provider, metadataClient, source, code, op
     });
   } catch (error) {
     incrementCounter(stats.providerErrors, provider);
+    if (!stats.providerErrorReasons) stats.providerErrorReasons = {};
+    const errorReason = classifyProviderError(error);
+    incrementCounter(stats.providerErrorReasons, `${provider}:${errorReason}`);
     return Object.freeze({
       ok: false,
       provider,
       code,
       returned: 0,
       candidate: null,
+      errorReason,
       error: String(error?.message || error || 'metadata lookup failed'),
     });
   }
@@ -271,6 +462,8 @@ async function queryExactCodeProvider(provider, metadataClient, source, code, op
 function createSukebeiMetadataAdapter(options = {}) {
   const config = options.config || {};
   const clients = options.metadataClients || {};
+  const posterFetchImpl = options.fetchImpl || globalThis.fetch;
+  const posterCheckDns = options.checkDns;
   const providers = ['stashdb', 'tpdb'].filter(name => clients[name]?.configured);
   const filterConfig = options.filterConfig || readContentFilterConfig(options.env || process.env);
   const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
@@ -307,7 +500,14 @@ function createSukebeiMetadataAdapter(options = {}) {
     maxEntries: Math.max(Number(config.metadataCacheMaxEntries || 500), 50),
   });
   const index = new Map();
-  const runLimited = createLimiter(Math.min(Number(config.sukebeiLookupConcurrency || 8), 10));
+  // StashDB tolerates the general catalog queries but Render's Sukebei burst
+  // produced 44 immediate failures at eight-way concurrency. Keep the exact
+  // code scan bounded so it does not look like an abusive search burst.
+  const metadataConcurrency = Math.min(
+    Math.max(Number(config.sukebeiLookupConcurrency || 8), 1),
+    3
+  );
+  const runLimited = createLimiter(metadataConcurrency);
   // Sukebei rate-limits bursts of detail-page GETs much more aggressively than
   // metadata APIs. Two concurrent native requests avoid both the old serial
   // queue and the 429/timeout storm caused by reusing metadata concurrency.
@@ -318,6 +518,9 @@ function createSukebeiMetadataAdapter(options = {}) {
   const runDetailLimited = createLimiter(detailConcurrency);
   const positiveTtlMs = Math.max(Number(config.metadataCacheTtlMs || 600_000), 5_000);
   const negativeTtlMs = Math.max(Number(config.metadataNegativeTtlMs || 120_000), 5_000);
+  const posterResolutionCache = options.posterResolutionCache || new BoundedTtlCache({
+    maxEntries: Math.max(Number(config.discoveryCacheMaxEntries || 250), 50),
+  });
   let lastDiagnostics = freezeDiagnostics({
     budgetMs: 0,
     rssRecords: 0,
@@ -350,6 +553,12 @@ function createSukebeiMetadataAdapter(options = {}) {
     exactCodeQueries: 0,
     exactCodeMisses: 0,
     detailImageRequests: 0,
+    detailImageCandidates: 0,
+    detailImageProbes: 0,
+    detailImageLandingPages: 0,
+    detailImageCacheHits: 0,
+    detailImagesVerified: 0,
+    detailImageRejected: 0,
     detailImages: 0,
     detailImageErrors: 0,
     nativeImages: 0,
@@ -359,7 +568,10 @@ function createSukebeiMetadataAdapter(options = {}) {
     providerRequests: {},
     providerMatches: {},
     providerErrors: {},
+    providerErrorReasons: {},
+    providerCircuitOpen: {},
     filterReasons: {},
+    metadataConcurrency,
     detailReserveMs: 0,
     totalElapsedMs: 0,
     deadlineExceededMs: 0,
@@ -430,8 +642,12 @@ function createSukebeiMetadataAdapter(options = {}) {
       }
       if (codeMode && !output.length) stats.exactCodeMisses += 1;
       return { candidates: output, ok: true };
-    } catch {
+    } catch (error) {
       stats.providerErrors[provider] = (stats.providerErrors[provider] || 0) + 1;
+      incrementCounter(
+        stats.providerErrorReasons,
+        `${provider}:${classifyProviderError(error)}`
+      );
       return { candidates: [], ok: false };
     }
   }
@@ -549,8 +765,44 @@ function createSukebeiMetadataAdapter(options = {}) {
         cacheKey: `sukebei:detail:${source.sourceId}`,
         timeoutMs: Math.min(detailClient.timeoutMs, remaining),
       });
-      const poster = detailPageImage(html, source.detailUrl);
-      if (!poster) return null;
+      const candidate = detailPageImage(html, source.detailUrl);
+      if (!candidate) return null;
+      stats.detailImageCandidates += 1;
+      const posterKey = `sukebei:poster:${candidate}`;
+      const cachedPoster = posterResolutionCache.getEntry(posterKey);
+      let verification;
+      if (cachedPoster) {
+        stats.detailImageCacheHits += 1;
+        verification = Object.freeze({
+          url: cachedPoster.negative ? '' : String(cachedPoster.value || ''),
+          probes: 0,
+          landingPages: 0,
+        });
+      } else {
+        verification = await resolveVerifiedPosterUrl(candidate, {
+          fetchImpl: posterFetchImpl,
+          checkDns: posterCheckDns,
+          deadlineAt,
+          timeoutMs: Math.min(
+            Math.max(Number(config.metadataLookupTimeoutMs || 2_500), 750),
+            3_000
+          ),
+          maxResponseBytes: config.discoveryMaxResponseBytes,
+        });
+        if (verification.url) {
+          posterResolutionCache.set(posterKey, verification.url, positiveTtlMs);
+        } else {
+          posterResolutionCache.setNegative(posterKey, Math.min(negativeTtlMs, 30_000));
+        }
+      }
+      stats.detailImageProbes += verification.probes;
+      stats.detailImageLandingPages += verification.landingPages;
+      if (!verification.url) {
+        stats.detailImageRejected += 1;
+        return null;
+      }
+      const poster = verification.url;
+      stats.detailImagesVerified += 1;
       stats.detailImages += 1;
       return Object.freeze({
         ...source,
@@ -677,6 +929,12 @@ function createSukebeiMetadataAdapter(options = {}) {
       exactCodeQueries: 0,
       exactCodeMisses: 0,
       detailImageRequests: 0,
+      detailImageCandidates: 0,
+      detailImageProbes: 0,
+      detailImageLandingPages: 0,
+      detailImageCacheHits: 0,
+      detailImagesVerified: 0,
+      detailImageRejected: 0,
       detailImages: 0,
       detailImageErrors: 0,
       nativeImages: 0,
@@ -686,7 +944,10 @@ function createSukebeiMetadataAdapter(options = {}) {
       providerRequests: {},
       providerMatches: {},
       providerErrors: {},
+      providerErrorReasons: {},
+      providerCircuitOpen: {},
       filterReasons: {},
+      metadataConcurrency,
       detailReserveMs: 0,
       totalElapsedMs: 0,
       deadlineExceededMs: 0,
@@ -742,11 +1003,10 @@ function createSukebeiMetadataAdapter(options = {}) {
       }
     }
 
-    // Stage 1: scan every selected unique JAV code with exactly one request to
-    // the primary metadata provider. R3 mixed code, full-title and TPDB calls
-    // per item, so the deadline expired before reaching codes that the live
-    // probe had already proved were matchable. This stage cannot be starved by
-    // title fallback or detail-page work.
+    // Stage 1: scan every selected unique JAV code through the primary provider.
+    // A confirmed miss stays a miss, but a provider error falls through to the
+    // secondary provider. This prevents a StashDB outage from suppressing every
+    // TPDB exact-code match while keeping the scan bounded.
     const codeJobsByKey = new Map();
     for (const item of normalized) {
       if (resolvedById.has(String(item.sourceId))) continue;
@@ -765,34 +1025,46 @@ function createSukebeiMetadataAdapter(options = {}) {
     }
     const codeJobs = [...codeJobsByKey.values()];
     stats.codeStageJobs = codeJobs.length;
-    const codeProvider = clients.stashdb?.configured
-      ? 'stashdb'
-      : (clients.tpdb?.configured ? 'tpdb' : '');
-    stats.codeStageProvider = codeProvider;
+    const codeProviders = ['stashdb', 'tpdb'].filter(provider => clients[provider]?.configured);
+    const providerFailures = Object.fromEntries(codeProviders.map(provider => [provider, 0]));
+    stats.codeStageProvider = codeProviders.join(',');
 
-    if (codeProvider) {
-      const metadataClient = clients[codeProvider];
+    if (codeProviders.length) {
       await Promise.all(codeJobs.map(job => runLimited(async () => {
         if (Date.now() >= metadataDeadlineAt) {
           stats.codeStageDeadlineSkipped += 1;
           stats.deadlineSkipped += 1;
           return;
         }
-        const remaining = Math.max(metadataDeadlineAt - Date.now(), 250);
-        const lookupTimeoutMs = Math.min(
-          Math.max(Number(config.metadataLookupTimeoutMs || 2_500), 750),
-          remaining,
-          3_500
-        );
-        const result = await queryExactCodeProvider(
-          codeProvider,
-          metadataClient,
-          job.sources[0],
-          job.code,
-          { stats, timeoutMs: lookupTimeoutMs }
-        );
+        let result = null;
+        for (const provider of codeProviders) {
+          if (stats.providerCircuitOpen[provider]) {
+            stats.providerCircuitOpen[provider] += 1;
+            continue;
+          }
+          const remaining = Math.max(metadataDeadlineAt - Date.now(), 250);
+          const lookupTimeoutMs = Math.min(
+            Math.max(Number(config.metadataLookupTimeoutMs || 2_500), 750),
+            remaining,
+            3_500
+          );
+          result = await queryExactCodeProvider(
+            provider,
+            clients[provider],
+            job.sources[0],
+            job.code,
+            { stats, timeoutMs: lookupTimeoutMs }
+          );
+          if (!result.ok) {
+            providerFailures[provider] = (providerFailures[provider] || 0) + 1;
+            if (providerFailures[provider] >= 3) stats.providerCircuitOpen[provider] = 1;
+            continue;
+          }
+          providerFailures[provider] = 0;
+          break;
+        }
         stats.codeStageCompleted += 1;
-        if (result.candidate) {
+        if (result?.candidate) {
           let newMatches = 0;
           for (const source of job.sources) {
             const sourceId = String(source.sourceId);
@@ -814,7 +1086,7 @@ function createSukebeiMetadataAdapter(options = {}) {
             completed: stats.codeStageCompleted,
             total: stats.codeStageJobs,
             matches: stats.codeStageMatches,
-            provider: codeProvider,
+            provider: codeProviders.join(','),
           }));
         }
       })));
@@ -919,14 +1191,17 @@ function createSukebeiMetadataAdapter(options = {}) {
 
 module.exports = {
   CODE_PREFIX_EXCLUSIONS,
+  classifyProviderError,
   codesMatch,
   createSukebeiMetadataAdapter,
   dedupeAndRank,
   detailPageImage,
   exactCodeEvidence,
   extractSceneCodes,
+  landingPageImage,
   normalizedSceneCode,
   queryExactCodeProvider,
+  resolveVerifiedPosterUrl,
   scoreCandidate,
   titleOverlap,
 };

@@ -7,6 +7,8 @@ const {
   createSukebeiMetadataAdapter,
   detailPageImage,
   extractSceneCodes,
+  landingPageImage,
+  resolveVerifiedPosterUrl,
 } = require('./tpb4k/sukebei-metadata');
 const { createStudioMetadataAdapter, platformEvidence } = require('./tpb4k/studio-metadata');
 const { getCatalogDefinition } = require('../catalog/tpb4k');
@@ -16,10 +18,23 @@ const {
   StashBoxMetadataClient,
 } = require('./tpb4k/stashbox-client');
 
-function response(body, contentType = 'application/rss+xml') {
+function response(body, contentType = 'application/rss+xml', options = {}) {
   return {
-    status: 200,
-    headers: { get: name => name.toLowerCase() === 'content-type' ? contentType : '' },
+    status: options.status || 200,
+    headers: {
+      get(name) {
+        const key = name.toLowerCase();
+        if (key === 'content-type') return contentType;
+        if (key === 'content-length') return options.contentLength || '';
+        if (key === 'location') return options.location || '';
+        return '';
+      },
+    },
+    body: {
+      async cancel() {
+        if (typeof options.onCancel === 'function') options.onCancel();
+      },
+    },
     async text() { return body; },
   };
 }
@@ -157,15 +172,57 @@ test('Sukebei detail pages provide honest native artwork without accepting site 
     ),
     'https://covers.example/plain-adn.jpg'
   );
+  assert.equal(
+    landingPageImage(
+      '<html><img src="/images/logo.png"><a data-fancybox="gallery" href="https://cdn.example/full/adn.jpg"><img class="pic img-responsive" src="https://cdn.example/full/adn.jpg"></a></html>',
+      'https://image-host.example/landing/adn.jpg'
+    ),
+    'https://cdn.example/full/adn.jpg'
+  );
+  assert.equal(
+    landingPageImage(
+      '<meta property="og:image" content="https://image-host.example/direct/adn.jpg"><img src="/images/banner.png">',
+      'https://image-host.example/landing/adn.jpg'
+    ),
+    'https://image-host.example/direct/adn.jpg'
+  );
+  const verified = await resolveVerifiedPosterUrl(
+    'https://image-host.example/landing/adn.jpg',
+    {
+      checkDns: false,
+      deadlineAt: Date.now() + 2_000,
+      fetchImpl: async url => {
+        if (String(url).includes('/landing/')) {
+          return response(
+            '<meta property="og:image" content="https://cdn.example/posters/adn.jpg">',
+            'text/html'
+          );
+        }
+        return response('', 'image/jpeg');
+      },
+    }
+  );
+  assert.equal(verified.url, 'https://cdn.example/posters/adn.jpg');
+  assert.equal(verified.landingPages, 1);
+  assert.equal(verified.probes, 2);
   const rss = `<?xml version="1.0"?><rss xmlns:nyaa="https://nyaa.si/xmlns/nyaa"><channel>
     <item><guid>https://sukebei.example/view/native-detail</guid><title>Unmatched Native Detail</title><link>https://sukebei.example/download/native.torrent</link><nyaa:seeders>10</nyaa:seeders></item>
   </channel></rss>`;
   const adapter = createSukebeiMetadataAdapter({
     endpoint: 'https://sukebei.example/?page=rss&c=0_0&f=0',
     checkDns: false,
-    fetchImpl: async url => String(url).includes('/view/native-detail')
-      ? response('<html><div id="torrent-description"><img src="https://covers.example/native-detail.jpg"></div></html>', 'text/html')
-      : response(rss),
+    fetchImpl: async url => {
+      if (String(url).includes('/view/native-detail')) {
+        return response(
+          '<html><div id="torrent-description"><img src="https://covers.example/native-detail.jpg"></div></html>',
+          'text/html'
+        );
+      }
+      if (String(url).includes('covers.example/native-detail.jpg')) {
+        return response('', 'image/jpeg');
+      }
+      return response(rss);
+    },
     env: { ONLYPORN_CONTENT_FILTER_ENABLED: 'false' },
     config: {
       requestTimeoutMs: 15000,
@@ -192,6 +249,7 @@ test('Sukebei detail pages provide honest native artwork without accepting site 
   assert.equal(items[0].poster, 'https://covers.example/native-detail.jpg');
   assert.equal(items[0].detailUrl, 'https://sukebei.example/view/native-detail');
   assert.equal(adapter.diagnostics().sukebeiMetadata.detailImages, 1);
+  assert.equal(adapter.diagnostics().sukebeiMetadata.detailImagesVerified, 1);
 });
 
 test('Sukebei cuts duplicate RSS pages and fetches plaintext detail artwork concurrently', async () => {
@@ -208,6 +266,9 @@ test('Sukebei cuts duplicate RSS pages and fetches plaintext detail artwork conc
     checkDns: false,
     fetchImpl: async url => {
       const parsed = new URL(String(url));
+      if (parsed.hostname === 'covers.example') {
+        return response('', 'image/jpeg');
+      }
       if (parsed.pathname.startsWith('/view/')) {
         detailActive += 1;
         maxDetailActive = Math.max(maxDetailActive, detailActive);
@@ -263,6 +324,8 @@ test('Sukebei cuts duplicate RSS pages and fetches plaintext detail artwork conc
   assert.equal(diagnostics.rssDuplicatePages, 1);
   assert.equal(diagnostics.detailStageTarget, 8);
   assert.equal(diagnostics.detailImages, items.length);
+  assert.equal(diagnostics.detailImagesVerified, items.length);
+  assert.equal(diagnostics.detailImageRejected, 0);
   assert.equal(diagnostics.deadlineExceededMs, 0);
   assert.ok(diagnostics.totalElapsedMs < 1_500, JSON.stringify(diagnostics));
   assert.equal(maxDetailActive, 2);
@@ -368,6 +431,57 @@ test('Sukebei provider failures are retried and never negative-cached as metadat
   assert.deepEqual(await adapter.catalog({ skip: 0, limit: 40 }), []);
   assert.equal(calls, 2);
   assert.equal(adapter.diagnostics().sukebeiMetadata.providerErrors.tpdb, 1);
+});
+
+test('Sukebei falls through to TPDB when StashDB exact-code lookup fails', async () => {
+  const rss = `<?xml version="1.0"?><rss xmlns:nyaa="https://nyaa.si/xmlns/nyaa"><channel>
+    <item><guid>fallback-1</guid><title>ADN-721</title><link>https://sukebei.example/view/fallback</link><nyaa:seeders>10</nyaa:seeders></item>
+  </channel></rss>`;
+  const adapter = createSukebeiMetadataAdapter({
+    endpoint: 'https://sukebei.example/?page=rss',
+    checkDns: false,
+    fetchImpl: async () => response(rss),
+    env: { ONLYPORN_CONTENT_FILTER_ENABLED: 'false' },
+    config: {
+      requestTimeoutMs: 15_000,
+      metadataLookupTimeoutMs: 1_000,
+      discoveryMaxResponseBytes: 2_000_000,
+      discoveryCacheTtlMs: 300_000,
+      discoveryNegativeTtlMs: 60_000,
+      discoveryCacheMaxEntries: 100,
+      metadataCacheMaxEntries: 100,
+      metadataCacheTtlMs: 600_000,
+      metadataNegativeTtlMs: 120_000,
+      sukebeiCodeLookupLimit: 10,
+      sukebeiTitleLookupLimit: 0,
+      sukebeiDetailImageLimit: 0,
+      sukebeiEnrichmentDeadlineMs: 4_000,
+    },
+    metadataClients: {
+      stashdb: {
+        configured: true,
+        async searchScenes() {
+          throw new Error('fetch failed');
+        },
+      },
+      tpdb: {
+        configured: true,
+        async queryScenes() {
+          return [scene('tpdb-adn', { code: 'ADN-721', title: 'ADN-721' })];
+        },
+      },
+    },
+  });
+
+  const items = await adapter.catalog({ skip: 0, limit: 40 });
+  const diagnostics = adapter.diagnostics().sukebeiMetadata;
+  assert.equal(items.length, 1);
+  assert.equal(items[0].poster, 'https://images.example/tpdb-adn.jpg');
+  assert.equal(diagnostics.codeStageProvider, 'stashdb,tpdb');
+  assert.equal(diagnostics.providerRequests.stashdb, 1);
+  assert.equal(diagnostics.providerRequests.tpdb, 1);
+  assert.equal(diagnostics.providerErrorReasons['stashdb:network'], 1);
+  assert.equal(diagnostics.providerMatches.tpdb, 1);
 });
 
 
