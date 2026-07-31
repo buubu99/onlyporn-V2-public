@@ -13,7 +13,9 @@ const { buildSceneIdentity } = require('./tpb4k/identity');
 const { getAdapter, installBuiltInAdapters } = require('./tpb4k/index');
 const { normalizeDiscoveryItem } = require('./tpb4k/source-contract');
 const { fallbackPosterUrl } = require('./tpb4k/poster-enrichment');
+const { bindStudioPlayback } = require('./tpb4k/studio-playback-binding');
 const { recoverStudioPlayback } = require('./tpb4k/studio-targeted-recovery');
+const { mergeTorrentFirstStudio, shouldUseTorrentFirst } = require('./tpb4k/torrent-first-studio');
 const {
   evaluateContent,
   filterItems,
@@ -165,6 +167,7 @@ class Tpb4kProvider {
     let rawItems = [];
     let studioPlaybackBinding;
     let studioTargetedRecovery;
+    let torrentFirstStudioFallback;
     try {
       const requestedLimit = this.contentFilter.enabled
         ? Math.min(config.catalogLimit * config.contentFilterOverscanFactor, 100)
@@ -177,22 +180,83 @@ class Tpb4kProvider {
         const loadTorrentPool = typeof resolverAdapter.catalogTorrents === 'function'
           ? resolverAdapter.catalogTorrents.bind(resolverAdapter)
           : resolverAdapter.catalog.bind(resolverAdapter);
-        const [metadataItems, torrentItems] = await Promise.all([
+        const torrentFirstEnabled = shouldUseTorrentFirst(definition, 0) && typeof resolverAdapter.catalog === 'function';
+        const [metadataItems, torrentItems, enrichedTorrentItems] = await Promise.all([
           adapter.catalog({ catalog: { ...definition, playbackBindingPool: true }, skip: 0, limit: 300, config }),
           loadTorrentPool({ catalog: { ...definition, source: 'torrent-index', playbackBindingPool: true }, skip: 0, limit: 300, config }),
+          torrentFirstEnabled ? resolverAdapter.catalog({
+            catalog: {
+              ...definition,
+              source: 'torrent-index',
+              playbackBindingPool: true,
+              torrentFirstFallback: true,
+            },
+            skip: 0,
+            limit: 300,
+            config,
+          }) : Promise.resolve([]),
         ]);
-        const binding = await recoverStudioPlayback({
+        let binding = bindStudioPlayback({
           catalog: definition,
           metadataItems,
           torrentItems,
-          resolverAdapter,
-          config,
           skip,
           limit: config.catalogLimit,
         });
-        rawItems = [...binding.items];
+        if (torrentFirstEnabled) {
+          let fallback = mergeTorrentFirstStudio({
+            catalog: definition,
+            existingItems: binding.items,
+            torrentItems: enrichedTorrentItems,
+            limit: config.catalogLimit,
+            config,
+            env: this.env,
+          });
+          if (shouldUseTorrentFirst(definition, fallback.items.length)) {
+            binding = await recoverStudioPlayback({
+              catalog: definition,
+              metadataItems,
+              torrentItems,
+              resolverAdapter,
+              config,
+              skip,
+              limit: config.catalogLimit,
+            });
+            fallback = mergeTorrentFirstStudio({
+              catalog: definition,
+              existingItems: binding.items,
+              torrentItems: enrichedTorrentItems,
+              limit: config.catalogLimit,
+              config,
+              env: this.env,
+            });
+            studioTargetedRecovery = binding.recovery;
+          } else {
+            studioTargetedRecovery = Object.freeze({
+              attempted: 0,
+              completed: 0,
+              recoveredCandidates: 0,
+              timedOut: 0,
+              reason: 'torrent-first-minimum-satisfied',
+              finalCards: fallback.items.length,
+            });
+          }
+          rawItems = [...fallback.items];
+          torrentFirstStudioFallback = fallback.stats;
+        } else {
+          binding = await recoverStudioPlayback({
+            catalog: definition,
+            metadataItems,
+            torrentItems,
+            resolverAdapter,
+            config,
+            skip,
+            limit: config.catalogLimit,
+          });
+          rawItems = [...binding.items];
+          studioTargetedRecovery = binding.recovery;
+        }
         studioPlaybackBinding = binding.stats;
-        studioTargetedRecovery = binding.recovery;
       } else {
         rawItems = await adapter.catalog({
           catalog: definition,
@@ -206,9 +270,12 @@ class Tpb4kProvider {
     }
 
     const normalizedItems = (Array.isArray(rawItems) ? rawItems : [])
-      .map(item => normalizeDiscoveryItem(adapter, { ...item, catalogId: definition.id }))
+      .map(item => {
+        const itemAdapter = getAdapter(item?.source) || adapter;
+        return normalizeDiscoveryItem(itemAdapter, { ...item, catalogId: definition.id });
+      })
       .filter(Boolean)
-      .filter(item => definition.source !== 'studio-metadata' || Boolean(safePoster(item.poster)));
+      .filter(item => !['studio-metadata', 'platform-hybrid'].includes(definition.source) || Boolean(safePoster(item.poster)));
     const contentFiltered = filterItems(normalizedItems, this.contentFilter);
     const metas = [...contentFiltered.items].slice(0, config.catalogLimit).map(item => toMetaPreview(item, definition.id, config));
 
@@ -234,6 +301,7 @@ class Tpb4kProvider {
       ...(diagnostics.hentaiMamaSeries ? { hentaiMamaSeries: diagnostics.hentaiMamaSeries } : {}),
       ...(studioPlaybackBinding ? { studioPlaybackBinding } : {}),
       ...(studioTargetedRecovery ? { studioTargetedRecovery } : {}),
+      ...(torrentFirstStudioFallback ? { torrentFirstStudioFallback } : {}),
       ...(diagnosticsStale ? { diagnosticsStale: true } : {}),
       contentFilter: {
         removed: metadataFiltered + contentFiltered.removed,

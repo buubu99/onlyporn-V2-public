@@ -33,9 +33,10 @@ const TOP_TAXONOMY_TITLES = new Set([
   '3d', 'all', 'anime', 'censored', 'english', 'hentai', 'hentai series', 'latest',
   'new', 'ova', 'raw', 'series', 'top', 'top rated', 'trending', 'uncensored',
 ]);
-const POST_ID_RE = /get_player_contents['"][^}\n]{0,500}\ba\s*:\s*['"]([0-9]+)['"]/i;
-const MEDIA_RE = /(?:"?file"?|source)\s*:\s*["'](https?:\/\/[^"']+\.(?:mp4|m3u8|mkv|webm)(?:\?[^"']*)?)["']/gi;
-const IFRAME_RE = /<iframe\b[^>]*\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)')[^>]*>/gi;
+const POST_ID_RE = /(?:get_player_contents|post[_-]?id|postid)[\s\S]{0,700}?(?:\ba\s*[:=]|post[_-]?id\s*[:=])\s*['\"]?([0-9]{1,12})/i;
+const MEDIA_RE = /(?:\bfile|\bsource|\bsrc|\burl)\s*[:=]\s*[\"](https?:\/\/[^\"]+)[\"]/gi;
+const PLAYER_KEY_RE = /(?:\bembed|\biframe|\bplayer|\bsrc|\burl)\s*[:=]\s*[\"](https?:\/\/[^\"]+)[\"]/gi;
+const IFRAME_TAG_RE = /<iframe\b[^>]*>/gi;
 
 function compact(value) {
   return cleanText(String(value || '')).slice(0, 2_000);
@@ -208,28 +209,32 @@ function parseSeriesDetail(html, slug, detailUrl = '') {
   });
 }
 
+function safePublicUrl(value, baseUrl = '') {
+  try {
+    const parsed = new URL(String(value || ''), baseUrl || undefined);
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return '';
+    if (parsed.port && parsed.port !== '443') return '';
+    if (!parsed.hostname || !parsed.hostname.includes('.')) return '';
+    return parsed.toString();
+  } catch { return ''; }
+}
+
 function iframeUrls(html, baseUrl) {
   const output = [];
-  for (const match of String(html || '').matchAll(IFRAME_RE)) {
-    try {
-      const parsed = new URL(match[1] || match[2] || '', baseUrl);
-      // HentaiMama's trusted episode/AJAX response can point at changing public
-      // player hosts. Do not couple playback to a fixed external host list;
-      // each URL is still checked for HTTPS, credentials, standard port, DNS,
-      // private/reserved addresses and every redirect before it is fetched.
-      if (parsed.protocol !== 'https:' || parsed.username || parsed.password) continue;
-      if (parsed.port && parsed.port !== '443') continue;
-      if (!parsed.hostname || !parsed.hostname.includes('.')) continue;
-      output.push(parsed.toString());
-    } catch {
-      // Invalid player URL is ignored.
-    }
+  const source = normalizeEmbeddedMarkup(html);
+  for (const match of source.matchAll(IFRAME_TAG_RE)) {
+    const tag = match[0];
+    const value = tag.match(/\b(?:data-src|data-lazy-src|data-url|src)\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s>]+))/i);
+    const url = safePublicUrl(value?.[1] || value?.[2] || value?.[3] || '', baseUrl);
+    if (url) output.push(url);
   }
   return [...new Set(output)];
 }
 
 function normalizeEmbeddedMarkup(value) {
   return String(value || '')
+    .replace(/\\u002[fF]/g, '/')
+    .replace(/\\x2[fF]/g, '/')
     .replace(/\\\//g, '/')
     .replace(/&quot;/gi, '"')
     .replace(/&#0*39;|&apos;/gi, "'")
@@ -237,26 +242,43 @@ function normalizeEmbeddedMarkup(value) {
 }
 
 function safePublicMediaUrl(value) {
+  const url = safePublicUrl(value);
+  if (!url) return '';
   try {
-    const parsed = new URL(String(value || ''));
-    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return '';
-    if (parsed.port && parsed.port !== '443') return '';
-    if (!/\.(?:mp4|m3u8|mkv|webm)(?:$|[?#])/i.test(parsed.pathname + parsed.search)) return '';
+    const parsed = new URL(url);
+    if (/\.(?:jpe?g|png|gif|webp|avif|svg|css|js)(?:$|[?#])/i.test(parsed.pathname + parsed.search)) return '';
     return parsed.toString();
   } catch { return ''; }
 }
 
 function mediaUrls(html) {
   const output = [];
-  const source = normalizeEmbeddedMarkup(html);
+  // Iframe src values are player-page URLs, not direct media. Remove complete
+  // iframe tags before scanning generic src/url fields so nested players are
+  // handled only by nestedPlayerUrls(). This preserves extensionless direct
+  // media in file/source/url fields without misclassifying player pages.
+  const source = normalizeEmbeddedMarkup(html).replace(IFRAME_TAG_RE, ' ');
   for (const match of source.matchAll(MEDIA_RE)) {
     const value = safePublicMediaUrl(match[1]);
     if (value) output.push(value);
   }
-  // Some AJAX payloads contain a bare URL rather than a file/source key.
   for (const match of source.matchAll(/https?:\/\/[^\s"'<>\\]+\.(?:mp4|m3u8|mkv|webm)(?:\?[^\s"'<>\\]*)?/gi)) {
     const value = safePublicMediaUrl(match[0]);
     if (value) output.push(value);
+  }
+  return [...new Set(output)];
+}
+
+function nestedPlayerUrls(html, baseUrl) {
+  const output = [...iframeUrls(html, baseUrl)];
+  const source = normalizeEmbeddedMarkup(html);
+  for (const match of source.matchAll(PLAYER_KEY_RE)) {
+    const value = safePublicUrl(match[1], baseUrl);
+    if (!value) continue;
+    const path = new URL(value).pathname + new URL(value).search;
+    if (/\.(?:mp4|m3u8|mkv|webm|jpe?g|png|gif|webp|avif|svg|css|js)(?:$|[?#])/i.test(path)) continue;
+    if (!/(?:embed|player|video|watch|stream|iframe|load|source)/i.test(value)) continue;
+    output.push(value);
   }
   return [...new Set(output)];
 }
@@ -411,7 +433,7 @@ function createHentaiMamaSeriesAdapter(options = {}) {
   }
 
   async function resolveEpisode(request) {
-    const stages = { series: 0, episodePage: 0, inlineMedia: 0, ajaxPostId: 0, ajaxFields: 0, ajaxIframes: 0, ajaxMedia: 0, playerPages: 0, playerMedia: 0, validated: 0, errors: [] };
+    const stages = { series: 0, episodePage: 0, inlineMedia: 0, ajaxPostId: 0, ajaxFields: 0, ajaxIframes: 0, ajaxMedia: 0, playerPages: 0, playerFetched: 0, playerDepth: 0, nestedPlayers: 0, playerMedia: 0, validated: 0, errors: [] };
     const diagnosticKey = episodeId(request.slug, request.episode || 1) || seriesId(request.slug);
     const series = await loadSeries(request.slug, '', { requireEpisodes: true });
     if (!series?.episodes?.length) { episodeDiagnostics.set(diagnosticKey, Object.freeze(stages)); return []; }
@@ -424,7 +446,7 @@ function createHentaiMamaSeriesAdapter(options = {}) {
     const html = htmlUsable(await client.fetchText(epUrl, { cacheKey: `hentai:episode:${episode.slug}` }), { allowEpisodeEvidence: true });
     if (!html) { episodeDiagnostics.set(diagnosticKey, Object.freeze(stages)); return []; }
     stages.episodePage = 1;
-    const playerPages = new Set(iframeUrls(html, epUrl));
+    const playerPages = new Map(nestedPlayerUrls(html, epUrl).map(url => [url, Object.freeze({ depth: 1, referer: epUrl })]));
     const candidates = new Map();
     const rememberMedia = (url, referer = epUrl) => {
       const value = safePublicMediaUrl(url);
@@ -460,7 +482,8 @@ function createHentaiMamaSeriesAdapter(options = {}) {
             const ajaxMedia = mediaUrls(field);
             stages.ajaxIframes += ajaxIframes.length;
             stages.ajaxMedia += ajaxMedia.length;
-            for (const url of ajaxIframes) playerPages.add(url);
+            for (const url of ajaxIframes) if (!playerPages.has(url)) playerPages.set(url, Object.freeze({ depth: 1, referer: epUrl }));
+            for (const url of nestedPlayerUrls(field, epUrl)) if (!playerPages.has(url)) playerPages.set(url, Object.freeze({ depth: 1, referer: epUrl }));
             for (const url of ajaxMedia) rememberMedia(url, epUrl);
           }
         }
@@ -470,27 +493,48 @@ function createHentaiMamaSeriesAdapter(options = {}) {
       }
     }
 
-    stages.playerPages = playerPages.size;
-    await Promise.all([...playerPages].map(async playerUrl => {
-      try {
-        const player = await safeFetch(playerUrl, {
-          fetchImpl: options.fetchImpl,
-          checkDns: options.checkDns,
-          timeoutMs: options.config.requestTimeoutMs,
-          allowedHosts: new Set([new URL(playerUrl).hostname]),
-          hostValidator: () => true,
-          headers: { Accept: 'text/html, application/xhtml+xml;q=0.9', Referer: epUrl },
-        });
-        if (!player.ok) return;
-        const body = await player.text();
-        const found = mediaUrls(body);
-        stages.playerMedia += found.length;
-        for (const url of found) rememberMedia(url, playerUrl);
-      } catch (error) {
-        stages.errors.push(`player:${compact(error?.message || error)}`);
-        // One failed player must not suppress another valid source.
-      }
-    }));
+    const MAX_PLAYER_PAGES = 18;
+    const MAX_PLAYER_DEPTH = 3;
+    const queue = [...playerPages.entries()].map(([url, context]) => ({ url, ...context }));
+    const visitedPlayers = new Set();
+    while (queue.length && visitedPlayers.size < MAX_PLAYER_PAGES) {
+      const batch = queue.splice(0, Math.min(4, MAX_PLAYER_PAGES - visitedPlayers.size));
+      await Promise.all(batch.map(async entry => {
+        const playerUrl = entry.url;
+        if (visitedPlayers.has(playerUrl)) return;
+        visitedPlayers.add(playerUrl);
+        stages.playerDepth = Math.max(stages.playerDepth, entry.depth || 1);
+        try {
+          const player = await safeFetch(playerUrl, {
+            fetchImpl: options.fetchImpl,
+            checkDns: options.checkDns,
+            timeoutMs: options.config.requestTimeoutMs,
+            allowedHosts: new Set([new URL(playerUrl).hostname]),
+            hostValidator: () => true,
+            headers: { Accept: 'text/html, application/xhtml+xml;q=0.9, application/json;q=0.8, */*;q=0.5', Referer: entry.referer || epUrl },
+          });
+          if (!player.ok) {
+            stages.errors.push(`player-status:${player.status}:${new URL(playerUrl).hostname}`);
+            return;
+          }
+          const body = await player.text();
+          stages.playerFetched += 1;
+          const found = mediaUrls(body);
+          stages.playerMedia += found.length;
+          for (const url of found) rememberMedia(url, playerUrl);
+          if ((entry.depth || 1) < MAX_PLAYER_DEPTH) {
+            for (const nestedUrl of nestedPlayerUrls(body, playerUrl)) {
+              if (visitedPlayers.has(nestedUrl) || queue.some(value => value.url === nestedUrl)) continue;
+              queue.push({ url: nestedUrl, depth: (entry.depth || 1) + 1, referer: playerUrl });
+              stages.nestedPlayers += 1;
+            }
+          }
+        } catch (error) {
+          stages.errors.push(`player:${compact(error?.message || error)}`);
+        }
+      }));
+    }
+    stages.playerPages = visitedPlayers.size;
 
     const validated = (await Promise.all([...candidates.entries()].map(([url, referer]) => validateMedia(url, {
       fetchImpl: options.fetchImpl,
@@ -614,6 +658,7 @@ module.exports = {
   htmlUsable,
   iframeUrls,
   mediaUrls,
+  nestedPlayerUrls,
   parseAjaxFields,
   parseRequestId,
   parseSeriesDetail,

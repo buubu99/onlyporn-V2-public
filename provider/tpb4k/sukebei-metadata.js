@@ -2,6 +2,7 @@
 
 const { BoundedTtlCache } = require('./cache');
 const { createSukebeiArtworkStore } = require('./sukebei-artwork-store');
+const { validateImageResponse } = require('./sukebei-image-validator');
 const { normalizeInfoHash, parseMagnet } = require('./candidate');
 const { normalizeFeedItem, parseRssFeed } = require('./discovery-normalize');
 const {
@@ -246,8 +247,9 @@ async function fetchPosterResource(value, options = {}) {
 
       const contentType = normalizeContentType(response.headers?.get?.('content-type'));
       if (/^image\/(?:avif|jpeg|jpg|pjpeg|png|webp)$/.test(contentType)) {
-        await cancelResponseBody(response);
-        return Object.freeze({ url: safeUrl, html: '', pageUrl: safeUrl, probes });
+        const image = await validateImageResponse(response, { url: safeUrl, maxResponseBytes });
+        if (!image.valid) return Object.freeze({ url: '', html: '', pageUrl: safeUrl, probes, rejectedImage: image.reason });
+        return Object.freeze({ url: safeUrl, html: '', pageUrl: safeUrl, probes, image });
       }
       if (contentType !== 'text/html' && contentType !== 'application/xhtml+xml') {
         await cancelResponseBody(response);

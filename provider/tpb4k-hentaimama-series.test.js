@@ -73,6 +73,9 @@ function fixtureFetch(url, options = {}) {
     ]), 200, 'application/json'));
   }
   if (parsed.hostname === 'player.javprovider.com' && parsed.pathname === '/p1') {
+    return Promise.resolve(response('<iframe data-src="https://player.javprovider.com/p1/deeper"></iframe>'));
+  }
+  if (parsed.hostname === 'player.javprovider.com' && parsed.pathname === '/p1/deeper') {
     return Promise.resolve(response('<script>file: "https://gdvid.info/eroriman-e2-1080p.mp4"</script>'));
   }
   if (parsed.hostname === 'player.javprovider.com' && parsed.pathname === '/p2') {
@@ -158,6 +161,10 @@ test('HentaiMama adapter keeps catalog, meta, and exact episode resolution separ
   assert.equal(streams.some(stream => stream.url.includes('e1')), false);
   assert.equal(streams.every(stream => stream.validated && stream.size > 0), true);
   assert.equal(streams.every(stream => !stream.infoHash), true);
+  const diagnostics = adapter.diagnostics().hentaiMamaSeries.episodeDiagnostics.at(-1);
+  assert.ok(diagnostics.playerDepth >= 2, JSON.stringify(diagnostics));
+  assert.ok(diagnostics.nestedPlayers >= 1, JSON.stringify(diagnostics));
+  assert.ok(diagnostics.playerFetched >= 3, JSON.stringify(diagnostics));
 });
 
 test('legacy Hentai series IDs remain compatible but resolve only the selected exact episode for new IDs', async () => {

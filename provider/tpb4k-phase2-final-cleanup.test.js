@@ -36,6 +36,16 @@ function response(body, contentType = 'application/rss+xml', options = {}) {
       },
     },
     async text() { return body; },
+    async arrayBuffer() {
+      if (/^image\//i.test(contentType)) {
+        const png = Buffer.alloc(9000);
+        Buffer.from('89504e470d0a1a0a', 'hex').copy(png, 0);
+        png.writeUInt32BE(600, 16);
+        png.writeUInt32BE(900, 20);
+        return png;
+      }
+      return Buffer.from(String(body || ''), 'utf8');
+    },
   };
 }
 
