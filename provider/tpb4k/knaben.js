@@ -88,10 +88,11 @@ function createKnabenAdultClient(options = {}) {
   });
   const inflight = new Map();
 
-  async function fetchStudio(studio) {
+  async function fetchStudio(studio, searchOptions = {}) {
     const query = compactText(studio).slice(0, 180);
+    const orderBy = searchOptions.orderBy === 'date' ? 'date' : 'seeders';
     if (query.length < 2) return [];
-    const cacheKey = `knaben:studio:${compactComparable(query)}`;
+    const cacheKey = `knaben:studio:${compactComparable(query)}:${orderBy}`;
     const cached = cache.getEntry(cacheKey);
     if (cached) return cached.negative ? [] : cached.value;
     if (inflight.has(cacheKey)) return inflight.get(cacheKey);
@@ -116,7 +117,7 @@ function createKnabenAdultClient(options = {}) {
           body: JSON.stringify({
             query,
             search_type: '100%',
-            order_by: 'seeders',
+            order_by: orderBy,
             order_direction: 'desc',
             size: KNABEN_MAX_RESULTS,
             hide_unsafe: true,
@@ -174,9 +175,9 @@ function createKnabenAdultClient(options = {}) {
   return Object.freeze({
     configured: options.enabled !== false,
     endpointOrigin: new URL(endpoint).origin,
-    async searchStudio(studio) {
+    async searchStudio(studio, searchOptions = {}) {
       if (options.enabled === false) return [];
-      return fetchStudio(studio);
+      return fetchStudio(studio, searchOptions);
     },
     cacheSize() {
       return cache.size;

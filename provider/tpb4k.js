@@ -13,13 +13,16 @@ const { buildSceneIdentity } = require('./tpb4k/identity');
 const { getAdapter, installBuiltInAdapters } = require('./tpb4k/index');
 const { normalizeDiscoveryItem } = require('./tpb4k/source-contract');
 const { fallbackPosterUrl } = require('./tpb4k/poster-enrichment');
+const { bindStudioPlayback } = require('./tpb4k/studio-playback-binding');
 const {
   evaluateContent,
   filterItems,
   readContentFilterConfig,
 } = require('./content-filter');
 
-const TYPE = 'movie';
+const MOVIE_TYPE = 'movie';
+const SERIES_TYPE = 'series';
+const HENTAI_PREFIX = 'hmm-';
 let loggerInstance;
 
 function logger() {
@@ -45,6 +48,18 @@ function safePoster(value) {
   }
 }
 
+function catalogType(catalogId) {
+  return String(catalogId || '').startsWith('tpb4k.hentai.') ? SERIES_TYPE : MOVIE_TYPE;
+}
+function isHentaiResourceId(id) {
+  return String(id || '').startsWith(HENTAI_PREFIX);
+}
+function requestIdentity(args = {}) {
+  if (args.type === SERIES_TYPE && isHentaiResourceId(args.id)) {
+    return Object.freeze({ source: 'hentai', sourceId: String(args.id), catalogId: 'tpb4k.hentai.all' });
+  }
+  return decodeTpb4kId(args.id);
+}
 function toLinks(identity) {
   return identity.performers.map(name => ({
     name,
@@ -71,8 +86,11 @@ function resolvedPosterShape(item = {}) {
 }
 
 function toMetaPreview(item, catalogId, config) {
+  const type = catalogType(catalogId);
   const identity = buildSceneIdentity(item);
-  const id = encodeTpb4kId({
+  const id = type === SERIES_TYPE && isHentaiResourceId(item.sourceId)
+    ? item.sourceId
+    : encodeTpb4kId({
     source: item.source,
     sourceId: item.sourceId,
     catalogId,
@@ -93,7 +111,7 @@ function toMetaPreview(item, catalogId, config) {
 
   return {
     id,
-    type: TYPE,
+    type,
     name: item.title,
     poster,
     posterShape: resolvedPosterShape(item),
@@ -109,12 +127,12 @@ function toMetaPreview(item, catalogId, config) {
   };
 }
 
-function toMetaResponse(item, id, config) {
+function toMetaResponse(item, id, config, type = MOVIE_TYPE) {
   const identity = buildSceneIdentity(item);
   const poster = resolvedPoster(item, config);
   return {
     id,
-    type: TYPE,
+    type,
     name: item.title,
     poster,
     background: safePoster(item.background) || poster,
@@ -128,6 +146,7 @@ function toMetaResponse(item, id, config) {
     tags: Array.isArray(item.tags) ? item.tags : [],
     description: item.description,
     links: toLinks(identity),
+    ...(type === SERIES_TYPE && Array.isArray(item.videos) ? { videos: item.videos } : {}),
     extra: {
       tpb4k: {
         source: item.source,
@@ -164,7 +183,7 @@ class Tpb4kProvider {
 
   activate(id) {
     const value = String(id || '');
-    return value.startsWith('tpb4k.') || value.startsWith('onlyporn:tpb4k:');
+    return value.startsWith('tpb4k.') || value.startsWith('onlyporn:tpb4k:') || value.startsWith(HENTAI_PREFIX);
   }
 
   enabled() {
@@ -172,9 +191,9 @@ class Tpb4kProvider {
   }
 
   async handleCatalog(args) {
-    if (args.type !== TYPE || !this.enabled()) return { metas: [] };
+    if (!this.enabled()) return { metas: [] };
     const definition = getCatalogDefinition(args.id);
-    if (!definition) return { metas: [] };
+    if (!definition || args.type !== (definition.type || MOVIE_TYPE)) return { metas: [] };
 
     const adapter = getAdapter(definition.source);
     if (!adapter) {
@@ -193,18 +212,56 @@ class Tpb4kProvider {
     const config = readTpb4kConfig(this.env);
     const skip = Math.max(Number.parseInt(String(args.extra?.skip || 0), 10) || 0, 0);
     let rawItems = [];
+    let studioPlaybackBinding;
     try {
       const requestedLimit = this.contentFilter.enabled
         ? Math.min(config.catalogLimit * config.contentFilterOverscanFactor, 100)
         : config.catalogLimit;
-      rawItems = await adapter.catalog({
-        catalog: definition,
-        skip,
-        limit: ['studio-metadata', 'platform-hybrid', 'torrent-index'].includes(definition.source)
-          ? config.catalogLimit
-          : requestedLimit,
-        config,
-      });
+      const requiresPlayableBinding = (
+        ['studio-metadata', 'platform-hybrid'].includes(definition.source) &&
+        definition.lookupSource === 'torrent-index'
+      );
+      if (requiresPlayableBinding) {
+        const resolverAdapter = getAdapter(definition.lookupSource);
+        if (!resolverAdapter) throw new Error('TPB4K studio torrent resolver is unavailable');
+        const metadataPoolLimit = 300;
+        const torrentPoolLimit = 100;
+        const loadTorrentPool = typeof resolverAdapter.catalogTorrents === 'function'
+          ? resolverAdapter.catalogTorrents.bind(resolverAdapter)
+          : resolverAdapter.catalog.bind(resolverAdapter);
+        const [metadataItems, torrentItems] = await Promise.all([
+          adapter.catalog({
+            catalog: { ...definition, playbackBindingPool: true },
+            skip: 0,
+            limit: metadataPoolLimit,
+            config,
+          }),
+          loadTorrentPool({
+            catalog: { ...definition, source: 'torrent-index', playbackBindingPool: true },
+            skip: 0,
+            limit: torrentPoolLimit,
+            config,
+          }),
+        ]);
+        const binding = bindStudioPlayback({
+          catalog: definition,
+          metadataItems,
+          torrentItems,
+          skip,
+          limit: config.catalogLimit,
+        });
+        rawItems = [...binding.items];
+        studioPlaybackBinding = binding.stats;
+      } else {
+        rawItems = await adapter.catalog({
+          catalog: definition,
+          skip,
+          limit: ['studio-metadata', 'platform-hybrid', 'torrent-index'].includes(definition.source)
+            ? config.catalogLimit
+            : requestedLimit,
+          config,
+        });
+      }
     } catch (error) {
       logger().warn(
         {
@@ -254,6 +311,7 @@ class Tpb4kProvider {
         ...(metadataCatalog ? { metadataCatalog } : {}),
         ...(sukebeiMetadata ? { sukebeiMetadata } : {}),
         ...(platformHybrid ? { platformHybrid } : {}),
+        ...(studioPlaybackBinding ? { studioPlaybackBinding } : {}),
         contentFilter: {
           removed: contentFiltered.removed,
           reasons: contentFiltered.reasons,
@@ -265,9 +323,9 @@ class Tpb4kProvider {
   }
 
   async handleMeta(args) {
-    if (args.type !== TYPE || !this.enabled()) return { meta: {} };
-    const decoded = decodeTpb4kId(args.id);
-    if (!decoded) return { meta: {} };
+    if (!this.enabled()) return { meta: {} };
+    const decoded = requestIdentity(args);
+    if (!decoded || args.type !== catalogType(decoded.catalogId)) return { meta: {} };
     const adapter = getAdapter(decoded.source);
     if (!adapter) return { meta: {} };
 
@@ -285,7 +343,10 @@ class Tpb4kProvider {
         'TPB4K metadata adapter failed safely'
       );
     }
-    const item = normalizeDiscoveryItem(adapter, rawItem);
+    const normalized = normalizeDiscoveryItem(adapter, rawItem);
+    const item = normalized && Array.isArray(rawItem?.videos)
+      ? Object.freeze({ ...normalized, videos: rawItem.videos })
+      : normalized;
     if (!item) return { meta: {} };
     const evaluation = evaluateContent(item, this.contentFilter);
     if (evaluation.excluded) {
@@ -295,13 +356,13 @@ class Tpb4kProvider {
       );
       return { meta: {} };
     }
-    return { meta: toMetaResponse(item, args.id, config) };
+    return { meta: toMetaResponse(item, args.id, config, catalogType(decoded.catalogId)) };
   }
 
   async handleStream(args) {
-    if (args.type !== TYPE || !this.enabled()) return { streams: [] };
-    const decoded = decodeTpb4kId(args.id);
-    if (!decoded) return { streams: [] };
+    if (!this.enabled()) return { streams: [] };
+    const decoded = requestIdentity(args);
+    if (!decoded || args.type !== catalogType(decoded.catalogId)) return { streams: [] };
     const sourceAdapter = getAdapter(decoded.source);
     if (!sourceAdapter) return { streams: [] };
     const definition = getCatalogDefinition(decoded.catalogId);
@@ -376,8 +437,25 @@ class Tpb4kProvider {
         return true;
       });
 
+    const hentaiEpisodeNumber = decoded.source === 'hentai'
+      ? Number(String(decoded.sourceId).match(/:1:(\d+)$/)?.[1] || 0)
+      : 0;
     const streams = sortCandidates(dedupeCandidates(normalized))
-      .map(toStremioStream)
+      .map(candidate => {
+        const stream = toStremioStream(candidate);
+        if (!stream || decoded.source !== 'hentai' || !stream.url) return stream;
+        const label = `HentaiMama E${hentaiEpisodeNumber || candidate.episode || 1}`;
+        return {
+          ...stream,
+          name: label,
+          title: label,
+          description: label,
+          behaviorHints: {
+            ...(stream.behaviorHints || {}),
+            bingeGroup: `hentaimama:${String(decoded.sourceId).split(':')[0]}`,
+          },
+        };
+      })
       .filter(Boolean);
 
     logger().info(

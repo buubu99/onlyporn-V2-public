@@ -26,7 +26,7 @@ const manifest = {
     'https://cdni.pornpics.com/1280/5/188/87261714/87261714_013_3f11.jpg',
 
   resources: ['catalog', 'stream', 'meta'],
-  types: ['movie'],
+  types: ['movie', 'series'],
   catalogs: [...manifestFilter.catalogs],
 
   behaviorHints: {

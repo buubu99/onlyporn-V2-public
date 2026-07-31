@@ -4,7 +4,7 @@ A self-hosted Stremio addon fork with Eporner, Porntrex, SpankBang, XVideos, XNX
 
 ## Stable provider baseline: 2.6.4
 
-## Current TPB4K candidate: 2.7.0-alpha.15
+## Current TPB4K candidate: 2.7.0-alpha.17
 
 OnlyPorn v2.6.4 adds Hardening Phase 1 on top of the production-verified v2.6.3 relay-session repair and v2.6.2 JAVHDPorn `vdcdn.xyz` hotfix.
 
@@ -41,7 +41,7 @@ The release validator checks JavaScript and Python syntax, packaging, secret-bea
 
 ## TPB4K integration development
 
-Version `2.7.0-alpha.15` retains the 28 selected unified-resolution TPB4K
+Version `2.7.0-alpha.17` retains the 28 selected unified-resolution TPB4K
 catalogs and the 37-catalog enabled manifest. The 19 professional studio rows
 remain metadata-first TPDB/StashDB catalogs with real scene posters. Phase 3
 now resolves those metadata identities through approved TPB/HiddenBay and
@@ -107,3 +107,11 @@ fail-closed policy that accepts the resulting loss of uncategorized content.
 - Enforces exact-host redirects, private/lookalike rejection, per-source
   timeouts, a request-wide deadline and indexer error isolation.
 - Leaves every existing direct HTML provider implementation unchanged.
+
+## TPB4K all-19 playable binding (alpha.16)
+
+Alpha.16 binds only verified torrent identities to metadata-first studio cards before those cards are exposed. Unmatched metadata records are omitted instead of becoming dead version-1 cards. The poster and metadata identity remain TPDB/StashDB-derived, while the encoded version-2 ID carries the validated infoHash used immediately by the stream handler.
+
+## TPB4K alpha.17
+
+Alpha.17 keeps the 19 studio catalogues on metadata-first, catalogue-bound torrent identities and treats HentaiMama independently as a Stremio series source. Hentai cards use `hmm-` IDs, metadata includes every discovered episode, and stream resolution targets the exact selected episode while retaining every validated direct player URL.

@@ -495,8 +495,8 @@ test('Sukebei RSS infoHash becomes an honest P2P candidate without a detail-page
   assert.equal(requests, 1);
 });
 
-test('metadata-first studio cards resolve through their configured torrent lookup adapter', async () => {
-  let resolverArgs = null;
+test('catalog-time version-2 binding avoids a second title search', async () => {
+  let resolverCalls = 0;
   registerAdapter({
     id: 'studio-metadata',
     configured: true,
@@ -505,6 +505,7 @@ test('metadata-first studio cards resolve through their configured torrent looku
         sourceId: 'tpdb:vixen-one',
         title: 'Scene One',
         studio: 'Vixen',
+        releaseDate: '2026-07-29',
         poster: 'https://images.example/vixen-one.jpg',
         lookupSource: 'torrent-index',
       }];
@@ -514,6 +515,7 @@ test('metadata-first studio cards resolve through their configured torrent looku
         sourceId,
         title: 'Scene One',
         studio: 'Vixen',
+        releaseDate: '2026-07-29',
         poster: 'https://images.example/vixen-one.jpg',
         lookupSource: 'torrent-index',
       };
@@ -522,25 +524,30 @@ test('metadata-first studio cards resolve through their configured torrent looku
       throw new Error('metadata adapter must not resolve studio torrents');
     },
   });
+  const torrent = {
+    sourceId: 'knaben:vixen-one',
+    title: 'Vixen 2026 07 29 Scene One 2160p',
+    studio: 'Vixen',
+    filename: 'Vixen.Scene.One.2160p.mkv',
+    infoHash: HASH_A,
+    resolution: '4K',
+    indexer: 'knaben',
+    seeders: 14,
+    size: '6.5 GiB',
+  };
   registerAdapter({
     id: 'torrent-index',
     configured: true,
-    async catalog() { return []; },
+    async catalog() { return [torrent]; },
+    async catalogTorrents() { return [torrent]; },
     async meta() { return null; },
-    async resolve(args) {
-      resolverArgs = args;
-      return [{
-        source: 'hiddenbay',
-        title: 'Vixen Scene One 2160p',
-        filename: 'Vixen.Scene.One.2160p.mkv',
-        infoHash: HASH_A,
-        seeders: 14,
-        size: '6.5 GiB',
-      }];
+    async resolve() {
+      resolverCalls += 1;
+      throw new Error('bound cards must not perform click-time searches');
     },
   });
   const provider = new Tpb4kProvider({
-    env: env({ TPB4K_CATALOG_LIMIT: '1', TPB4K_MIN_SEEDERS: '3' }),
+    env: env({ TPB4K_CATALOG_LIMIT: '1', TPB4K_MINIMUM_SEEDERS: '3' }),
     installBuiltIns: false,
   });
   const catalog = await provider.handleCatalog({
@@ -548,22 +555,20 @@ test('metadata-first studio cards resolve through their configured torrent looku
     id: 'tpb4k.studio.vixen.top',
     extra: {},
   });
-  const result = await provider.handleStream({
-    type: 'movie',
-    id: catalog.metas[0].id,
-  });
-  assert.equal(resolverArgs.catalog.id, 'tpb4k.studio.vixen.top');
-  assert.equal(resolverArgs.item.sourceId, 'tpdb:vixen-one');
+  assert.equal(catalog.metas.length, 1);
+  const decoded = decodeTpb4kId(catalog.metas[0].id);
+  assert.equal(decoded.version, 2);
+  assert.equal(decoded.torrent.infoHash, HASH_A);
+  const result = await provider.handleStream({ type: 'movie', id: catalog.metas[0].id });
+  assert.equal(resolverCalls, 0);
   assert.equal(result.streams.length, 1);
   assert.equal(result.streams[0].infoHash, HASH_A);
   assert.equal(result.streams[0].title, 'Vixen.Scene.One.2160p.mkv');
   assert.equal(result.streams[0].behaviorHints.filename, 'Vixen.Scene.One.2160p.mkv');
   assert.equal(result.streams[0].behaviorHints.videoSize, 6.5 * 1024 ** 3);
   assert.match(result.streams[0].description, /👤 14/);
-  assert.match(result.streams[0].description, /🔎 hiddenbay/);
-  assert.doesNotMatch(result.streams[0].name, /Cached|Uncached/);
+  assert.match(result.streams[0].description, /🔎 knaben/);
 });
-
 test('18 studio rows are metadata-first and OnlyFans uses a metadata-first/torrent hybrid with retained TPB provenance', () => {
   const studios = catalogDefinitions.filter(item => item.mode === 'studio-top');
   assert.equal(studios.length, 19);
@@ -573,21 +578,15 @@ test('18 studio rows are metadata-first and OnlyFans uses a metadata-first/torre
   assert.equal(new Set(studios.map(item => item.studio)).size, 19);
 });
 
-test('built-in provider exposes metadata-first studio cards and retains the TPB adapter for Phase 3', async () => {
+test('built-in provider exposes only playable metadata-first version-2 studio cards', async () => {
   const metadataScenes = [
     {
-      id: 'vixen-1',
-      title: 'Scene One',
-      date: '2026-07-29',
-      site: { name: 'Vixen' },
+      id: 'vixen-1', title: 'Scene One', date: '2026-07-29', site: { name: 'Vixen' },
       tags: [{ name: 'Romantic' }],
       images: [{ url: 'https://images.example/vixen-1.jpg', width: 600, height: 900 }],
     },
     {
-      id: 'vixen-2',
-      title: 'Scene Two',
-      date: '2026-07-28',
-      site: { name: 'Vixen' },
+      id: 'vixen-2', title: 'Scene Two', date: '2026-07-28', site: { name: 'Vixen' },
       tags: [{ name: 'Outdoor' }],
       images: [{ url: 'https://images.example/vixen-2.jpg', width: 600, height: 900 }],
     },
@@ -607,7 +606,15 @@ test('built-in provider exposes metadata-first studio cards and retains the TPB 
         async text() { return body; },
       };
     }
-    if (parsed.hostname.includes('sukebei')) return response('<?xml version="1.0"?><rss><channel></channel></rss>', 200, 'application/rss+xml');
+    if (parsed.hostname === 'thehiddenbay.com' && parsed.pathname.startsWith('/search/')) {
+      return response(page([
+        { title: 'Vixen 2026 07 29 Scene One 2160p', hash: HASH_A, seeders: 35 },
+        { title: 'Vixen 2026 07 28 Scene Two 2160p', hash: HASH_B, seeders: 20 },
+      ]));
+    }
+    if (parsed.hostname.includes('sukebei')) {
+      return response('<?xml version="1.0"?><rss><channel></channel></rss>', 200, 'application/rss+xml');
+    }
     return response('<html></html>');
   };
   const runtimeEnv = env({
@@ -621,24 +628,26 @@ test('built-in provider exposes metadata-first studio cards and retains the TPB 
   const torrentAdapter = getAdapter('torrent-index');
   assert.equal(torrentAdapter.category, '507');
   assert.equal(torrentAdapter.sort, '7');
-
   const provider = new Tpb4kProvider({ env: runtimeEnv, fetchImpl, installBuiltIns: false });
   const catalog = await provider.handleCatalog({
-    type: 'movie',
-    id: 'tpb4k.studio.vixen.top',
-    extra: { skip: 0 },
+    type: 'movie', id: 'tpb4k.studio.vixen.top', extra: { skip: 0 },
   });
   assert.equal(catalog.metas.length, 2);
-  assert.equal(catalog.metas[0].posterShape, 'poster');
-  assert.match(catalog.metas[0].poster, /^https:\/\/images\.example\//);
-  assert.doesNotMatch(catalog.metas[0].poster, /assets\/tpb4k\/studios/);
-  assert.equal(catalog.metas[0].genres.includes('Vixen'), true);
-  const decoded = decodeTpb4kId(catalog.metas[0].id);
-  assert.equal(decoded.source, 'studio-metadata');
-  assert.match(decoded.sourceId, /^tpdb:/);
+  for (const item of catalog.metas) {
+    assert.equal(item.posterShape, 'poster');
+    assert.match(item.poster, /^https:\/\/images\.example\//);
+    assert.doesNotMatch(item.poster, /assets\/tpb4k\/studios/);
+    const decoded = decodeTpb4kId(item.id);
+    assert.equal(decoded.version, 2);
+    assert.equal(decoded.source, 'studio-metadata');
+    assert.match(decoded.sourceId, /^tpdb:/);
+    assert.match(decoded.torrent.infoHash, /^[a-f0-9]{40}$/);
+    const stream = await provider.handleStream({ type: 'movie', id: item.id });
+    assert.equal(stream.streams.length, 1);
+    assert.equal(stream.streams[0].infoHash, decoded.torrent.infoHash);
+  }
   const meta = await provider.handleMeta({ type: 'movie', id: catalog.metas[0].id });
   assert.match(meta.meta.poster, /^https:\/\/images\.example\//);
   assert.equal(meta.meta.posterShape, 'poster');
   assert.equal(meta.meta.extra.tpb4k.lookupSource, 'torrent-index');
-  assert.deepEqual(await provider.handleStream({ type: 'movie', id: catalog.metas[0].id }), { streams: [] });
 });

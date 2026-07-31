@@ -3,6 +3,7 @@
 const { normalizeFeedItem, parseJsonFeed, parseRssFeed } = require('../discovery-normalize');
 const { SourceHttpClient } = require('../source-http');
 const { createNativeAdapter } = require('../native-discovery');
+const { createHentaiMamaSeriesAdapter } = require('../hentaimama-series');
 const { createTorrentIndexAdapter } = require('../torrent-index');
 const { createStudioMetadataAdapter } = require('../studio-metadata');
 const { createSukebeiMetadataAdapter } = require('../sukebei-metadata');
@@ -102,7 +103,7 @@ function createDiscoveryAdapters(options = {}) {
   const adapters = [
     createNativeAdapter('pornrips', common),
     createNativeAdapter('yesporn', common),
-    createNativeAdapter('hentai', common),
+    createHentaiMamaSeriesAdapter(common),
     torrentIndex,
     studioMetadata,
     platformHybrid,

@@ -301,7 +301,7 @@ Deployment remains Node.js with `yarn install` and `npm start`.
 - Added optional custom tag and unknown-classification policies without image or attribute inference.
 - Added bounded metadata pagination/concurrency, safe diagnostics and production metadata-first smoke gates.
 
-## 2.7.0-alpha.15 — verified torrent identities and AIOStreams handoff
+## 2.7.0-alpha.17 — verified torrent identities and AIOStreams handoff
 
 - Added clean-room TPB/HiddenBay and 1337x stream resolution for metadata-first studio cards.
 - Added Sukebei RSS info-hash playback without inventing cache readiness.

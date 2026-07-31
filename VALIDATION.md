@@ -341,7 +341,7 @@ Acceptance requires all 19 studio definitions to use `studio-metadata`, every re
 
 ```bash
 npm run test:tpb4k-torrent-index
-EXPECTED_VERSION=2.7.0-alpha.15 npm run validate:release
+EXPECTED_VERSION=2.7.0-alpha.17 npm run validate:release
 npm run smoke:jav262
 ```
 

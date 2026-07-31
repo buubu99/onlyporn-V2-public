@@ -11,18 +11,21 @@ const SELECTED_CATALOGS = [
   },
   {
     id: 'tpb4k.hentai.all',
+    type: 'series',
     name: 'OnlyPorn: Hentai · All',
     source: 'hentai',
     mode: 'all',
   },
   {
     id: 'tpb4k.hentai.new',
+    type: 'series',
     name: 'OnlyPorn: Hentai · New',
     source: 'hentai',
     mode: 'new',
   },
   {
     id: 'tpb4k.hentai.top',
+    type: 'series',
     name: 'OnlyPorn: Hentai · Top Rated',
     source: 'hentai',
     mode: 'top',
@@ -220,7 +223,7 @@ function isTpb4kEnabled(env = process.env) {
 function toManifestCatalog(definition) {
   return Object.freeze({
     id: definition.id,
-    type: 'movie',
+    type: definition.type || 'movie',
     name: definition.name,
     posterShape: 'poster',
     extra: [{ name: 'skip' }],

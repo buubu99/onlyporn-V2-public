@@ -537,7 +537,7 @@ function createTorrentIndexAdapter(options = {}) {
     return null;
   }
 
-  async function loadWindow(catalog, skip, limit) {
+  async function loadWindow(catalog, skip, limit, options = {}) {
     const normalizedSkip = Math.max(Number.parseInt(String(skip || 0), 10) || 0, 0);
     const normalizedLimit = Math.min(Math.max(Number.parseInt(String(limit || 40), 10) || 40, 1), 100);
     let page = Math.floor(normalizedSkip / TPB_PAGE_SIZE) + 1;
@@ -551,14 +551,29 @@ function createTorrentIndexAdapter(options = {}) {
       25_000
     );
 
-    try {
-      const records = await knabenClient.searchStudio(catalog.studio);
+    const knabenOrders = catalog?.playbackBindingPool ? ['seeders', 'date'] : ['seeders'];
+    const knabenResults = await Promise.allSettled(
+      knabenOrders.map(orderBy => knabenClient.searchStudio(catalog.studio, { orderBy }))
+    );
+    for (let orderIndex = 0; orderIndex < knabenResults.length; orderIndex += 1) {
+      const orderBy = knabenOrders[orderIndex];
+      const result = knabenResults[orderIndex];
+      if (result.status === 'rejected') {
+        diagnostics.push({
+          source: 'knaben',
+          orderBy,
+          outcome: 'error',
+          error: compactText(result.reason?.message || result.reason),
+        });
+        continue;
+      }
       diagnostics.push({
         source: 'knaben',
+        orderBy,
         outcome: 'accepted',
-        records: records.length,
+        records: result.value.length,
       });
-      for (const record of records.slice(normalizedSkip)) {
+      for (const record of result.value.slice(normalizedSkip)) {
         const infoHash = extractInfoHash(record.infoHash || record.magnetLink);
         if (!infoHash || Number(record.seeders || 0) < minimumSeeders || seen.has(infoHash)) continue;
         seen.add(infoHash);
@@ -566,12 +581,7 @@ function createTorrentIndexAdapter(options = {}) {
         output.push(publicTorrentItem(record, catalog));
         if (output.length >= normalizedLimit) break;
       }
-    } catch (error) {
-      diagnostics.push({
-        source: 'knaben',
-        outcome: 'error',
-        error: compactText(error?.message || error),
-      });
+      if (output.length >= normalizedLimit) break;
     }
 
     while (output.length < normalizedLimit && Date.now() < deadlineAt) {
@@ -617,7 +627,12 @@ function createTorrentIndexAdapter(options = {}) {
 
     output.sort((left, right) => right.seeders - left.seeders || left.title.localeCompare(right.title));
     const selected = output.slice(0, normalizedLimit);
-    const enrichment = await posterEnricher.enrichItems(selected);
+    const enrichment = options.enrichPosters !== false
+      ? await posterEnricher.enrichItems(selected)
+      : Object.freeze({
+        items: Object.freeze(selected),
+        stats: Object.freeze({ mode: 'identity-only', skipped: selected.length }),
+      });
     lastDiagnostic = Object.freeze({
       catalogId: catalog.id,
       studio: catalog.studio,
@@ -874,6 +889,10 @@ function createTorrentIndexAdapter(options = {}) {
     async catalog({ catalog, skip, limit }) {
       if (!compactText(catalog?.studio)) return [];
       return loadWindow(catalog, skip, limit);
+    },
+    async catalogTorrents({ catalog, skip, limit }) {
+      if (!compactText(catalog?.studio)) return [];
+      return loadWindow(catalog, skip, limit, { enrichPosters: false });
     },
     async meta({ sourceId }) {
       const record = privateIndex.get(sourceId);

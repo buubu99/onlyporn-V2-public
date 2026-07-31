@@ -365,7 +365,8 @@ function createStudioMetadataAdapter(options = {}) {
   async function catalog({ catalog, skip = 0, limit = 40 }) {
     const studio = normalizeStudioName(catalog?.studio);
     const safeSkip = Math.max(Number.parseInt(String(skip || 0), 10) || 0, 0);
-    const safeLimit = Math.min(Math.max(Number.parseInt(String(limit || 40), 10) || 40, 1), 100);
+    const maximumLimit = catalog?.playbackBindingPool ? 300 : 100;
+    const safeLimit = Math.min(Math.max(Number.parseInt(String(limit || 40), 10) || 40, 1), maximumLimit);
     if (!studio || !providers.length) return [];
 
     const metadataMode = compactText(catalog?.metadataMode || 'studio');

@@ -13,11 +13,24 @@ function createPlatformHybridAdapter(options = {}) {
   let lastDiagnostics = Object.freeze({});
 
   async function catalog({ catalog, skip = 0, limit = 40 }) {
-    const safeLimit = Math.min(Math.max(Number.parseInt(String(limit || 40), 10) || 40, 1), 100);
+    const maximumLimit = catalog?.playbackBindingPool ? 300 : 100;
+    const safeLimit = Math.min(Math.max(Number.parseInt(String(limit || 40), 10) || 40, 1), maximumLimit);
     const safeSkip = Math.max(Number.parseInt(String(skip || 0), 10) || 0, 0);
     const metadata = await metadataAdapter.catalog({ catalog, skip: safeSkip, limit: safeLimit });
     const output = [...metadata];
     let torrent = [];
+    if (catalog?.playbackBindingPool) {
+      lastDiagnostics = Object.freeze({
+        platformHybrid: Object.freeze({
+          metadataRecords: metadata.length,
+          torrentFallbackRecords: 0,
+          returned: metadata.length,
+          playbackBindingPool: true,
+        }),
+        ...(metadataAdapter.diagnostics?.() || {}),
+      });
+      return output;
+    }
     if (output.length < safeLimit) {
       torrent = await torrentAdapter.catalog({
         catalog: { ...catalog, source: 'torrent-index' },

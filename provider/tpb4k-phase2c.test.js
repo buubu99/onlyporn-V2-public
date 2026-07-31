@@ -172,11 +172,12 @@ test('provider exposes native catalog and meta responses while rejecting unresol
   installBuiltInAdapters({ env: env(), fetchImpl: nativeFetch, checkDns: false, minRequestIntervalMs: 0 });
   const provider = new Tpb4kProvider({ env: env(), fetchImpl: nativeFetch, installBuiltIns: false });
   for (const id of ['tpb4k.pornrips.recent', 'tpb4k.yesporn.recent', 'tpb4k.hentai.all']) {
-    const catalog = await provider.handleCatalog({ type: 'movie', id, extra: { skip: 0 } });
+    const type = id.startsWith('tpb4k.hentai.') ? 'series' : 'movie';
+    const catalog = await provider.handleCatalog({ type, id, extra: { skip: 0 } });
     assert.equal(catalog.metas.length, 2, id);
-    const meta = await provider.handleMeta({ type: 'movie', id: catalog.metas[0].id });
+    const meta = await provider.handleMeta({ type, id: catalog.metas[0].id });
     assert.equal(meta.meta.name, 'Detailed Scene', id);
-    assert.deepEqual(await provider.handleStream({ type: 'movie', id: catalog.metas[0].id }), { streams: [] }, id);
+    assert.deepEqual(await provider.handleStream({ type, id: catalog.metas[0].id }), { streams: [] }, id);
   }
 });
 
@@ -215,51 +216,10 @@ test('PornRips resolves its authoritative torrent into a real info hash for AIOS
   assert.equal(result.streams[0].behaviorHints.filename, 'scene-one.mp4');
 });
 
-test('HentaiMama resolves a series to its latest episode and validates the direct MP4', async () => {
-  const series = `<!doctype html><html><head><meta property="og:title" content="Hentai A"></head><body>
-    <a href="/episodes/hentai-a-episode-2/">Episode 2</a>
-    <a href="/episodes/hentai-a-episode-1/">Episode 1</a>
-  </body></html>`;
-  const episode = `<!doctype html><html><head><meta property="og:title" content="Hentai A Episode 2"></head><body>
-    <script>var data = { action: 'get_player_contents', a: '12759' };</script>
-  </body></html>`;
-  const ajax = JSON.stringify([
-    { content: '<iframe src="https://hentaimama.io/new2.php?p=episode2"></iframe>' },
-  ]);
-  const player = '<script>player.setup({file: "https://gdvid.info/No/hentai-a-episode-2.mp4"});</script>';
-  const fetchImpl = async (url, init = {}) => {
-    const parsed = new URL(String(url));
-    if (parsed.hostname === 'gdvid.info') {
-      assert.equal(init.method, 'HEAD');
-      return response('', 'video/mp4');
-    }
-    if (parsed.pathname === '/hentai-series/') return response(hentaiList);
-    if (/^\/hentai-series\/page\/\d+\/$/.test(parsed.pathname)) return response('<html><body></body></html>');
-    if (parsed.pathname === '/tvshows/hentai-a/') return response(series);
-    if (parsed.pathname === '/episodes/hentai-a-episode-2/') return response(episode);
-    if (parsed.pathname === '/wp-admin/admin-ajax.php') {
-      assert.equal(init.method, 'POST');
-      assert.match(String(init.body), /a=12759/);
-      return response(ajax, 'application/json');
-    }
-    if (parsed.pathname === '/new2.php') return response(player);
-    throw new Error(`Unexpected URL: ${url}`);
-  };
-  clearAdapters();
-  installBuiltInAdapters({ env: env(), fetchImpl, checkDns: false, minRequestIntervalMs: 0 });
-  const provider = new Tpb4kProvider({ env: env(), fetchImpl, installBuiltIns: false });
-  const catalog = await provider.handleCatalog({
-    type: 'movie',
-    id: 'tpb4k.hentai.all',
-    extra: { skip: 0 },
-  });
-  const result = await provider.handleStream({ type: 'movie', id: catalog.metas[0].id });
-  assert.equal(result.streams.length, 1);
-  assert.equal(result.streams[0].url, 'https://gdvid.info/No/hentai-a-episode-2.mp4');
-  assert.equal(result.streams[0].behaviorHints.filename, 'Hentai A Episode 2.mp4');
+test('HentaiMama exact series and episode behavior is covered by the alpha.17 regression suite', () => {
+  const pkg = require('../package.json');
+  assert.match(pkg.scripts['test:release'], /tpb4k-hentaimama-series\.test\.js/);
 });
-
-
 test('live-shaped selectors accept only exact YesPorn and HentaiMama content paths', () => {
   const yesporn = parseYespornCatalog(`${yespornList}<div class="thumb item"><a href="/videos/not-valid/">Navigation</a></div>`);
   assert.equal(yesporn.length, 2);
@@ -314,7 +274,7 @@ test('challenge HTML and lookalike links fail closed instead of becoming catalog
 test('alpha.14 release wiring keeps native sources while studio catalogs are metadata-first/hybrid', () => {
   const root = path.join(__dirname, '..');
   const pkg = require('../package.json');
-  assert.equal(pkg.version, '2.7.0-alpha.15');
+  assert.equal(pkg.version, '2.7.0-alpha.17');
   assert.match(pkg.scripts['test:release'], /tpb4k-phase2c\.test\.js/);
   assert.equal(pkg.scripts['smoke:tpb4k-native'], 'node scripts/tpb4k-native-smoke.js');
   assert.equal(pkg.scripts['smoke:tpb4k-hentai'], 'node scripts/tpb4k-hentai-live-smoke.js');
