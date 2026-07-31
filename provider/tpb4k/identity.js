@@ -36,10 +36,16 @@ function normalizeDate(value) {
   return '';
 }
 
+function normalizeExplicitSceneCode(value) {
+  const text = String(value || '').normalize('NFKC').trim().toUpperCase();
+  const match = text.match(/^([A-Z]{2,12})[-_ ]?(\d{2,8})$/);
+  return match ? `${match[1]}-${match[2]}` : '';
+}
+
 function extractSceneCode(...values) {
   for (const value of values) {
-    const text = String(value || '').toUpperCase();
-    const match = text.match(/\b([A-Z]{2,12})[-_ ]?(\d{2,8})\b/);
+    const text = String(value || '').normalize('NFKC').toUpperCase();
+    const match = text.match(/\b([A-Z]{2,12})[-_](\d{2,8})\b/);
     if (match) return `${match[1]}-${match[2]}`;
   }
   return '';
@@ -50,7 +56,13 @@ function buildSceneIdentity(input = {}) {
   const title = normalizeToken(input.title || input.name);
   const performers = normalizePeople(input.performers);
   const releaseDate = normalizeDate(input.releaseDate || input.date);
-  const sceneCode = extractSceneCode(input.sceneCode, input.title, input.sourceId);
+  // Provider scene-code/SKU fields are authoritative and may use a space.
+  // Free-form titles require an explicit hyphen/underscore, and opaque
+  // provider IDs are never interpreted as codes. This prevents phrases such
+  // as "with 40-year-old" or UUID fragments from becoming false scene codes.
+  const sceneCode =
+    normalizeExplicitSceneCode(input.sceneCode) ||
+    extractSceneCode(input.title);
 
   const parts = [studio, title, performers.join(','), releaseDate, sceneCode].filter(Boolean);
   const canonical = parts.join('|');

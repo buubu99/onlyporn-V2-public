@@ -3,6 +3,7 @@
 const crypto = require('node:crypto');
 const { buildSceneIdentity } = require('./identity');
 const { normalizeInfoHash, parseMagnet } = require('./candidate');
+const { createKnabenAdultClient } = require('./knaben');
 const { SourceHttpClient } = require('./source-http');
 const {
   createPosterEnricher,
@@ -16,7 +17,13 @@ const DEFAULT_TPB_MIRRORS = Object.freeze([
   'https://thepiratebay0.org',
   'https://piratebay.live',
 ]);
-const DEFAULT_1337X_MIRRORS = Object.freeze(['https://1337xx.to']);
+const DEFAULT_1337X_MIRRORS = Object.freeze([
+  'https://1337x.to',
+  'https://1337x.st',
+  'https://x1337x.ws',
+  'https://x1337x.eu',
+  'https://x1337x.cc',
+]);
 const TPB_UHD_CATEGORY = '507';
 const TPB_ADULT_CATEGORY = '500';
 const TPB_TOP_SORT = '7';
@@ -326,9 +333,10 @@ function parse1337SearchPage(html, baseOrigin) {
 
 function publicTorrentItem(record, catalog) {
   const studio = compactText(catalog?.studio);
-  const resolution = record.resolution || '4K';
+  const resolution = record.resolution || '';
+  const indexer = compactText(record.indexer || 'hiddenbay').toLowerCase();
   const details = [
-    'TPB 4K studio result',
+    'Torrent-first studio result',
     studio && `Studio search: ${studio}`,
     Number.isFinite(record.seeders) && `Seeders: ${record.seeders}`,
     record.size && `Size: ${record.size}`,
@@ -346,9 +354,15 @@ function publicTorrentItem(record, catalog) {
     quality: 'Top by seeders',
     seeders: record.seeders,
     size: record.size,
+    infoHash: extractInfoHash(record.infoHash || record.magnetLink),
+    filename: record.title,
+    indexer,
     releaseDate,
     detailUrl: record.detailUrl,
-    metadataProvider: `hiddenbay:${new URL(record.mirror).hostname}`,
+    metadataProvider: indexer === 'knaben'
+      ? 'torrent-index:knaben'
+      : `torrent-index:${new URL(record.mirror).hostname}`,
+    lookupSource: 'torrent-index',
     upstreamId: '',
   });
 }
@@ -406,6 +420,17 @@ function createTorrentIndexAdapter(options = {}) {
       endpoint: `${origin}/`,
     }),
   }));
+  const knabenClient = createKnabenAdultClient({
+    enabled: config.torrentIndex?.knabenEnabled !== false,
+    timeoutMs: config.requestTimeoutMs,
+    maxResponseBytes: config.discoveryMaxResponseBytes,
+    cacheTtlMs: config.discoveryCacheTtlMs,
+    negativeTtlMs: config.discoveryNegativeTtlMs,
+    cacheMaxEntries: config.discoveryCacheMaxEntries,
+    fetchImpl: options.fetchImpl,
+    checkDns: options.checkDns,
+    now: options.now,
+  });
   const privateIndex = createPrivateIndex();
   const posterEnricher = createPosterEnricher({
     clients: options.metadataClients,
@@ -520,23 +545,68 @@ function createTorrentIndexAdapter(options = {}) {
     const output = [];
     const seen = new Set();
     const diagnostics = [];
+    const minimumSeeders = Math.max(Number(config.minimumSeeders || 0), 0);
     const deadlineAt = Date.now() + Math.min(
       Math.max(Number(config.requestTimeoutMs || 15_000) + 5_000, 5_000),
       25_000
     );
+
+    try {
+      const records = await knabenClient.searchStudio(catalog.studio);
+      diagnostics.push({
+        source: 'knaben',
+        outcome: 'accepted',
+        records: records.length,
+      });
+      for (const record of records.slice(normalizedSkip)) {
+        const infoHash = extractInfoHash(record.infoHash || record.magnetLink);
+        if (!infoHash || Number(record.seeders || 0) < minimumSeeders || seen.has(infoHash)) continue;
+        seen.add(infoHash);
+        privateIndex.remember(record, catalog);
+        output.push(publicTorrentItem(record, catalog));
+        if (output.length >= normalizedLimit) break;
+      }
+    } catch (error) {
+      diagnostics.push({
+        source: 'knaben',
+        outcome: 'error',
+        error: compactText(error?.message || error),
+      });
+    }
 
     while (output.length < normalizedLimit && Date.now() < deadlineAt) {
       const path = buildStudioSearchPath(catalog.studio, page, {
         category: config.torrentIndex?.category || TPB_UHD_CATEGORY,
         sort: config.torrentIndex?.sort || TPB_TOP_SORT,
       });
-      const result = await fetchSearchPage(path, `${catalog.id}:page:${page}`, deadlineAt);
-      diagnostics.push({ page, path, mirror: result.mirror, records: result.records.length, attempts: result.attempts });
+      let result;
+      try {
+        result = await fetchSearchPage(path, `${catalog.id}:page:${page}`, deadlineAt);
+      } catch (error) {
+        diagnostics.push({
+          source: 'hiddenbay',
+          page,
+          path,
+          outcome: 'error',
+          error: compactText(error?.message || error),
+        });
+        break;
+      }
+      diagnostics.push({
+        source: 'hiddenbay',
+        page,
+        path,
+        mirror: result.mirror,
+        records: result.records.length,
+        attempts: result.attempts,
+      });
       const pageWindow = result.records.slice(offset);
       offset = 0;
       for (const record of pageWindow) {
-        if (seen.has(record.sourceId)) continue;
-        seen.add(record.sourceId);
+        const infoHash = extractInfoHash(record.infoHash || record.magnetLink);
+        const key = infoHash || record.sourceId;
+        if (!key || Number(record.seeders || 0) < minimumSeeders || seen.has(key)) continue;
+        seen.add(key);
         privateIndex.remember(record, catalog);
         output.push(publicTorrentItem(record, catalog));
         if (output.length >= normalizedLimit) break;
@@ -555,6 +625,14 @@ function createTorrentIndexAdapter(options = {}) {
       limit: normalizedLimit,
       pages: Object.freeze(diagnostics),
       returned: enrichment.items.length,
+      indexers: Object.freeze({
+        knaben: diagnostics
+          .filter(item => item.source === 'knaben')
+          .reduce((sum, item) => sum + Number(item.records || 0), 0),
+        hiddenbay: diagnostics
+          .filter(item => item.source === 'hiddenbay')
+          .reduce((sum, item) => sum + Number(item.records || 0), 0),
+      }),
       enrichment: enrichment.stats,
     });
     return enrichment.items;
@@ -790,6 +868,7 @@ function createTorrentIndexAdapter(options = {}) {
     configured: true,
     mirrors,
     x1337Mirrors,
+    knabenOrigin: knabenClient.endpointOrigin,
     category: config.torrentIndex?.category || TPB_UHD_CATEGORY,
     sort: config.torrentIndex?.sort || TPB_TOP_SORT,
     async catalog({ catalog, skip, limit }) {

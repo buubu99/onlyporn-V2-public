@@ -20,6 +20,7 @@ function normalizeDiscoveryItem(adapter, item = {}) {
   const title = String(item.title || item.name || '').replace(/\s+/g, ' ').trim();
   if (!sourceId || !title) return null;
 
+  const infoHash = String(item.infoHash || '').trim().toLowerCase();
   return Object.freeze({
     source: adapter.id,
     sourceId,
@@ -42,6 +43,10 @@ function normalizeDiscoveryItem(adapter, item = {}) {
     quality: String(item.quality || '').trim(),
     seeders: Number.parseInt(String(item.seeders ?? 0), 10) || 0,
     size: item.size ?? 0,
+    infoHash: /^[a-f0-9]{40}$/.test(infoHash) ? infoHash : '',
+    filename: String(item.filename || item.title || item.name || '').replace(/\s+/g, ' ').trim(),
+    indexer: String(item.indexer || '').replace(/\s+/g, ' ').trim().toLowerCase(),
+    fileIdx: Number.isInteger(item.fileIdx) && item.fileIdx >= 0 ? item.fileIdx : null,
     duration: Number.parseInt(String(item.duration ?? 0), 10) || 0,
     sceneIdentity: String(item.sceneIdentity || '').trim(),
     provenance: Object.freeze({

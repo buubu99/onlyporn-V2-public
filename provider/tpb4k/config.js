@@ -8,7 +8,13 @@ const DEFAULT_TPB_MIRRORS = Object.freeze([
   'https://thepiratebay0.org',
   'https://piratebay.live',
 ]);
-const DEFAULT_1337X_MIRRORS = Object.freeze(['https://1337xx.to']);
+const DEFAULT_1337X_MIRRORS = Object.freeze([
+  'https://1337x.to',
+  'https://1337x.st',
+  'https://x1337x.ws',
+  'https://x1337x.eu',
+  'https://x1337x.cc',
+]);
 
 function endpointOrigins(value, fallback = DEFAULT_TPB_MIRRORS) {
   const raw = String(value || '').trim();
@@ -210,6 +216,7 @@ function readTpb4kConfig(env = process.env) {
     torrentIndex: Object.freeze({
       mirrors: endpointOrigins(env.TPB4K_TPB_MIRRORS),
       x1337Mirrors: endpointOrigins(env.TPB4K_1337X_MIRRORS, DEFAULT_1337X_MIRRORS),
+      knabenEnabled: booleanValue(env.TPB4K_KNABEN_ENABLED, true),
       category: '507',
       resolutionCategory: '500',
       sort: '7',

@@ -76,6 +76,18 @@ function toMetaPreview(item, catalogId, config) {
     source: item.source,
     sourceId: item.sourceId,
     catalogId,
+    ...(item.infoHash ? {
+      torrent: {
+        infoHash: item.infoHash,
+        title: item.title,
+        filename: item.filename || item.title,
+        resolution: item.resolution,
+        indexer: item.indexer || 'torrent-index',
+        seeders: item.seeders,
+        size: item.size,
+        fileIdx: item.fileIdx,
+      },
+    } : {}),
   });
   const poster = resolvedPoster(item, config);
 
@@ -188,7 +200,9 @@ class Tpb4kProvider {
       rawItems = await adapter.catalog({
         catalog: definition,
         skip,
-        limit: ['studio-metadata', 'platform-hybrid'].includes(definition.source) ? config.catalogLimit : requestedLimit,
+        limit: ['studio-metadata', 'platform-hybrid', 'torrent-index'].includes(definition.source)
+          ? config.catalogLimit
+          : requestedLimit,
         config,
       });
     } catch (error) {
@@ -315,24 +329,33 @@ class Tpb4kProvider {
       // Stream resolution may continue when metadata is unavailable. The
       // central stream filter still removes explicitly labelled candidates.
     }
-    let rawCandidates = [];
-    try {
-      rawCandidates = await resolverAdapter.resolve({
+    let rawCandidates = decoded.torrent
+      ? [{
+        ...decoded.torrent,
+        source: decoded.torrent.indexer || 'torrent-index',
         sourceId: decoded.sourceId,
-        catalogId: decoded.catalogId,
-        catalog: definition,
-        item: rawItem,
-        config,
-      });
-    } catch {
-      logger().warn(
-        {
-          provider: this.name,
-          source: decoded.source,
-          resolver: resolverAdapter.id,
-        },
-        'TPB4K stream adapter failed safely'
-      );
+        provenance: ['catalog-bound-torrent'],
+      }]
+      : [];
+    if (!decoded.torrent) {
+      try {
+        rawCandidates = await resolverAdapter.resolve({
+          sourceId: decoded.sourceId,
+          catalogId: decoded.catalogId,
+          catalog: definition,
+          item: rawItem,
+          config,
+        });
+      } catch {
+        logger().warn(
+          {
+            provider: this.name,
+            source: decoded.source,
+            resolver: resolverAdapter.id,
+          },
+          'TPB4K stream adapter failed safely'
+        );
+      }
     }
 
     const normalized = (Array.isArray(rawCandidates) ? rawCandidates : [])

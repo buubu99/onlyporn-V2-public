@@ -14,6 +14,7 @@ const { decodeTpb4kId } = require('./tpb4k/id-codec');
 const { Tpb4kProvider } = require('./tpb4k');
 const {
   build1337SearchPath,
+  DEFAULT_1337X_MIRRORS,
   DEFAULT_TPB_MIRRORS,
   buildStudioSearchPath,
   createTorrentIndexAdapter,
@@ -25,6 +26,7 @@ const {
 const { SourceHttpClient } = require('./tpb4k/source-http');
 const { createSukebeiMetadataAdapter } = require('./tpb4k/sukebei-metadata');
 const { readTpb4kConfig } = require('./tpb4k/config');
+const { buildSceneIdentity } = require('./tpb4k/identity');
 
 const HASH_A = '0123456789abcdef0123456789abcdef01234567';
 const HASH_B = '89abcdef0123456789abcdef0123456789abcdef';
@@ -81,6 +83,7 @@ function env(extra = {}) {
     TPB4K_ENABLED: 'true',
     TPB4K_CATALOG_LIMIT: '2',
     TPB4K_REQUEST_TIMEOUT_MS: '15000',
+    TPB4K_KNABEN_ENABLED: 'false',
     ...extra,
   };
 }
@@ -95,6 +98,29 @@ test('studio catalogs use the original TPB 4K/top search contract', () => {
     'https://thepiratebay0.org',
     'https://piratebay.live',
   ]);
+  assert.deepEqual(DEFAULT_1337X_MIRRORS, [
+    'https://1337x.to',
+    'https://1337x.st',
+    'https://x1337x.ws',
+    'https://x1337x.eu',
+    'https://x1337x.cc',
+  ]);
+});
+
+test('scene identity rejects sentence numbers and opaque ID fragments as false scene codes', () => {
+  assert.equal(buildSceneIdentity({
+    title: 'Fun With 40-Year-Old Mom',
+    sourceId: 'tpdb:fd-54-12345678',
+  }).sceneCode, '');
+  assert.equal(buildSceneIdentity({
+    title: 'Her Name Has Changed, But 71-Year-Old Performer',
+    sourceId: 'tpdb:ae-92-87654321',
+  }).sceneCode, '');
+  assert.equal(buildSceneIdentity({ title: '[FHD] MIMK-285 Scene' }).sceneCode, 'MIMK-285');
+  assert.equal(buildSceneIdentity({
+    title: 'My Audition',
+    sceneCode: 'dac 39063',
+  }).sceneCode, 'DAC-39063');
 });
 
 test('TPB HTML parser extracts torrent identity, size, seeders, detail URL, and quality', () => {
@@ -117,11 +143,11 @@ test('1337x search records remain intermediate until a valid detail-page magnet 
   assert.equal(build1337SearchPath('Vixen Scene', 2), '/search/Vixen%20Scene/2/');
   const parsed = parse1337SearchPage(x1337Page([
     { title: 'Vixen Scene One 1080p', seeders: 21, size: '3.5 GB' },
-  ]), 'https://1337xx.to');
+  ]), 'https://1337x.to');
   assert.equal(parsed.tablePresent, true);
   assert.equal(parsed.records.length, 1);
   assert.equal(parsed.records[0].infoHash, '');
-  assert.equal(parsed.records[0].detailUrl, 'https://1337xx.to/torrent/1/scene/');
+  assert.equal(parsed.records[0].detailUrl, 'https://1337x.to/torrent/1/scene/');
   assert.equal(parsed.records[0].seeders, 21);
   assert.equal(parsed.records[0].resolution, '1080p');
 
@@ -148,18 +174,18 @@ test('torrent scene resolution aggregates indexers, retains lower resolutions, a
           { title: 'Vixen Scene One 1080p', hash: HASH_B, seeders: 20 },
         ]));
       }
-      if (parsed.hostname === '1337xx.to' && parsed.pathname.startsWith('/search/')) {
+      if (parsed.hostname === '1337x.to' && parsed.pathname.startsWith('/search/')) {
         return response(x1337Page([
           { title: 'Vixen Scene One 2160p', seeders: 50 },
           { title: 'Vixen Scene One 720p', seeders: 9 },
         ]));
       }
-      if (parsed.hostname === '1337xx.to' && parsed.pathname.includes('/torrent/1/')) {
+      if (parsed.hostname === '1337x.to' && parsed.pathname.includes('/torrent/1/')) {
         return response(detail(
           `magnet:?xt=urn:btih:${HASH_A}&dn=Vixen.Scene.One.2160p&tr=udp%3A%2F%2Ftracker.example%3A80%2Fannounce`
         ));
       }
-      if (parsed.hostname === '1337xx.to' && parsed.pathname.includes('/torrent/2/')) {
+      if (parsed.hostname === '1337x.to' && parsed.pathname.includes('/torrent/2/')) {
         return response(detail(`magnet:?xt=urn:btih:${HASH_C}&dn=Vixen.Scene.One.720p`));
       }
       throw new Error(`Unexpected URL: ${url}`);
@@ -189,7 +215,7 @@ test('one failed indexer does not suppress another indexer valid result', async 
     maxRetries: 0,
     fetchImpl: async url => {
       const parsed = new URL(String(url));
-      if (parsed.hostname !== '1337xx.to') throw new Error('fixture indexer unavailable');
+      if (parsed.hostname !== '1337x.to') throw new Error('fixture indexer unavailable');
       if (parsed.pathname.startsWith('/search/')) {
         return response(x1337Page([
           { title: 'Vixen Scene One 1080p', seeders: 17 },
@@ -266,7 +292,7 @@ test('TPB detail resolution falls back across approved mirrors until a valid mag
           { title: 'Vixen Scene One 2160p', magnet: false, seeders: 23 },
         ]));
       }
-      if (parsed.hostname === '1337xx.to' && parsed.pathname.startsWith('/search/')) {
+      if (parsed.hostname === '1337x.to' && parsed.pathname.startsWith('/search/')) {
         return response(x1337Page([]));
       }
       if (parsed.hostname === 'thehiddenbay.com' && parsed.pathname.startsWith('/torrent/')) {
@@ -298,7 +324,7 @@ test('a 1337x detail page without a valid magnet produces no playable candidate'
     maxRetries: 0,
     fetchImpl: async url => {
       const parsed = new URL(String(url));
-      if (parsed.hostname !== '1337xx.to') throw new Error('fixture indexer unavailable');
+      if (parsed.hostname !== '1337x.to') throw new Error('fixture indexer unavailable');
       if (parsed.pathname.startsWith('/search/')) {
         return response(x1337Page([
           { title: 'Vixen Scene One 1080p', seeders: 18 },
@@ -320,7 +346,7 @@ test('safe HTML client follows same-origin redirects and rejects lookalike and p
   const calls = [];
   const sameOrigin = new SourceHttpClient({
     id: 'redirect-fixture',
-    endpoint: 'https://1337xx.to/',
+    endpoint: 'https://1337x.to/',
     checkDns: false,
     minRequestIntervalMs: 0,
     allowHtml: true,
@@ -333,22 +359,22 @@ test('safe HTML client follows same-origin redirects and rejects lookalike and p
       return response('<html><body>safe</body></html>');
     },
   });
-  assert.match(await sameOrigin.fetchText('https://1337xx.to/start/'), /safe/);
-  assert.equal(calls.at(-1), 'https://1337xx.to/final/');
+  assert.match(await sameOrigin.fetchText('https://1337x.to/start/'), /safe/);
+  assert.equal(calls.at(-1), 'https://1337x.to/final/');
 
   const lookalike = new SourceHttpClient({
     id: 'lookalike-fixture',
-    endpoint: 'https://1337xx.to/',
+    endpoint: 'https://1337x.to/',
     checkDns: false,
     minRequestIntervalMs: 0,
     allowHtml: true,
     allowedContentTypes: ['text/html'],
     fetchImpl: async () => response('', 302, 'text/html', {
-      location: 'https://1337xx.to.evil.example/torrent/1/',
+      location: 'https://1337x.to.evil.example/torrent/1/',
     }),
   });
   await assert.rejects(
-    () => lookalike.fetchText('https://1337xx.to/start/'),
+    () => lookalike.fetchText('https://1337x.to/start/'),
     /not approved/
   );
 
@@ -363,7 +389,7 @@ test('safe HTML client follows same-origin redirects and rejects lookalike and p
   );
 });
 
-test('torrent adapter fails over on block HTML and never exposes magnets in catalog metadata', async () => {
+test('torrent adapter fails over on block HTML and binds hashes without exposing magnets', async () => {
   const calls = [];
   const config = readTpb4kConfig(env());
   const adapter = createTorrentIndexAdapter({
@@ -399,9 +425,12 @@ test('torrent adapter fails over on block HTML and never exposes magnets in cata
   for (const item of items) {
     assert.equal('magnet' in item, false);
     assert.equal('magnetLink' in item, false);
-    assert.equal('infoHash' in item, false);
+    assert.match(item.infoHash, /^[a-f0-9]{40}$/);
   }
-  assert.equal(adapter.diagnostics().pages[0].mirror, 'https://thepiratebay0.org');
+  assert.equal(
+    adapter.diagnostics().pages.find(item => item.source === 'hiddenbay')?.mirror,
+    'https://thepiratebay0.org'
+  );
   assert.equal(adapter.privateRecordCount(), 2);
   const candidates = await adapter.resolve({ sourceId: items[0].sourceId });
   assert.equal(candidates.length, 1);
@@ -466,48 +495,29 @@ test('Sukebei RSS infoHash becomes an honest P2P candidate without a detail-page
   assert.equal(requests, 1);
 });
 
-test('metadata-first studio cards resolve through their configured torrent lookup adapter', async () => {
-  let resolverArgs = null;
-  registerAdapter({
-    id: 'studio-metadata',
-    configured: true,
-    async catalog() {
-      return [{
-        sourceId: 'tpdb:vixen-one',
-        title: 'Scene One',
-        studio: 'Vixen',
-        poster: 'https://images.example/vixen-one.jpg',
-        lookupSource: 'torrent-index',
-      }];
-    },
-    async meta({ sourceId }) {
-      return {
-        sourceId,
-        title: 'Scene One',
-        studio: 'Vixen',
-        poster: 'https://images.example/vixen-one.jpg',
-        lookupSource: 'torrent-index',
-      };
-    },
-    async resolve() {
-      throw new Error('metadata adapter must not resolve studio torrents');
-    },
-  });
+test('torrent-first studio cards bind their hash and play without a second search', async () => {
+  let resolverCalled = false;
   registerAdapter({
     id: 'torrent-index',
     configured: true,
-    async catalog() { return []; },
-    async meta() { return null; },
-    async resolve(args) {
-      resolverArgs = args;
+    async catalog() {
       return [{
-        source: 'hiddenbay',
+        sourceId: 'knaben:scene-one',
         title: 'Vixen Scene One 2160p',
         filename: 'Vixen.Scene.One.2160p.mkv',
+        studio: 'Vixen',
+        poster: 'https://images.example/vixen-one.jpg',
         infoHash: HASH_A,
+        indexer: 'knaben',
         seeders: 14,
         size: '6.5 GiB',
+        lookupSource: 'torrent-index',
       }];
+    },
+    async meta() { return null; },
+    async resolve() {
+      resolverCalled = true;
+      throw new Error('bound torrent must not repeat the search');
     },
   });
   const provider = new Tpb4kProvider({
@@ -523,28 +533,29 @@ test('metadata-first studio cards resolve through their configured torrent looku
     type: 'movie',
     id: catalog.metas[0].id,
   });
-  assert.equal(resolverArgs.catalog.id, 'tpb4k.studio.vixen.top');
-  assert.equal(resolverArgs.item.sourceId, 'tpdb:vixen-one');
+  const decoded = decodeTpb4kId(catalog.metas[0].id);
+  assert.equal(decoded.version, 2);
+  assert.equal(decoded.torrent.infoHash, HASH_A);
+  assert.equal(resolverCalled, false);
   assert.equal(result.streams.length, 1);
   assert.equal(result.streams[0].infoHash, HASH_A);
   assert.equal(result.streams[0].title, 'Vixen.Scene.One.2160p.mkv');
   assert.equal(result.streams[0].behaviorHints.filename, 'Vixen.Scene.One.2160p.mkv');
   assert.equal(result.streams[0].behaviorHints.videoSize, 6.5 * 1024 ** 3);
   assert.match(result.streams[0].description, /👤 14/);
-  assert.match(result.streams[0].description, /🔎 hiddenbay/);
+  assert.match(result.streams[0].description, /🔎 knaben/);
   assert.doesNotMatch(result.streams[0].name, /Cached|Uncached/);
 });
 
-test('18 studio rows are metadata-first and OnlyFans uses a metadata-first/torrent hybrid with retained TPB provenance', () => {
+test('all nineteen studio rows are torrent-first and bind playable identities', () => {
   const studios = catalogDefinitions.filter(item => item.mode === 'studio-top');
   assert.equal(studios.length, 19);
-  assert.equal(studios.filter(item => item.studio !== 'OnlyFans').every(item => item.source === 'studio-metadata'), true);
-  assert.equal(studios.find(item => item.studio === 'OnlyFans')?.source, 'platform-hybrid');
+  assert.equal(studios.every(item => item.source === 'torrent-index'), true);
   assert.equal(studios.every(item => item.lookupSource === 'torrent-index'), true);
   assert.equal(new Set(studios.map(item => item.studio)).size, 19);
 });
 
-test('built-in provider exposes metadata-first studio cards and retains the TPB adapter for Phase 3', async () => {
+test('built-in provider exposes poster-enriched torrent cards with bound playback', async () => {
   const metadataScenes = [
     {
       id: 'vixen-1',
@@ -579,6 +590,12 @@ test('built-in provider exposes metadata-first studio cards and retains the TPB 
       };
     }
     if (parsed.hostname.includes('sukebei')) return response('<?xml version="1.0"?><rss><channel></channel></rss>', 200, 'application/rss+xml');
+    if (parsed.hostname === 'thehiddenbay.com') {
+      return response(page([
+        { title: 'Vixen Scene One 2160p', hash: HASH_A, seeders: 35 },
+        { title: 'Vixen Scene Two 4K', hash: HASH_B, seeders: 20 },
+      ]));
+    }
     return response('<html></html>');
   };
   const runtimeEnv = env({
@@ -605,11 +622,13 @@ test('built-in provider exposes metadata-first studio cards and retains the TPB 
   assert.doesNotMatch(catalog.metas[0].poster, /assets\/tpb4k\/studios/);
   assert.equal(catalog.metas[0].genres.includes('Vixen'), true);
   const decoded = decodeTpb4kId(catalog.metas[0].id);
-  assert.equal(decoded.source, 'studio-metadata');
-  assert.match(decoded.sourceId, /^tpdb:/);
+  assert.equal(decoded.source, 'torrent-index');
+  assert.equal(decoded.version, 2);
+  assert.equal(decoded.torrent.infoHash, HASH_A);
   const meta = await provider.handleMeta({ type: 'movie', id: catalog.metas[0].id });
   assert.match(meta.meta.poster, /^https:\/\/images\.example\//);
   assert.equal(meta.meta.posterShape, 'poster');
   assert.equal(meta.meta.extra.tpb4k.lookupSource, 'torrent-index');
-  assert.deepEqual(await provider.handleStream({ type: 'movie', id: catalog.metas[0].id }), { streams: [] });
+  const streams = await provider.handleStream({ type: 'movie', id: catalog.metas[0].id });
+  assert.equal(streams.streams[0].infoHash, HASH_A);
 });
