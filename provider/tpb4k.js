@@ -35,6 +35,19 @@ function logger() {
   return loggerInstance;
 }
 
+function alpha18DiagnosticStudioKey(value) {
+  return String(value || '').normalize('NFKC').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+function alpha18MergeReasons(...values) {
+  const output = {};
+  for (const value of values) {
+    for (const [key, amount] of Object.entries(value || {})) {
+      output[key] = (output[key] || 0) + Math.max(Number(amount || 0), 0);
+    }
+  }
+  return output;
+}
+
 function safePoster(value) {
   const text = String(value || '').trim();
   if (!text) return undefined;
@@ -225,7 +238,7 @@ class Tpb4kProvider {
         const resolverAdapter = getAdapter(definition.lookupSource);
         if (!resolverAdapter) throw new Error('TPB4K studio torrent resolver is unavailable');
         const metadataPoolLimit = 300;
-        const torrentPoolLimit = 100;
+        const torrentPoolLimit = 300;
         const loadTorrentPool = typeof resolverAdapter.catalogTorrents === 'function'
           ? resolverAdapter.catalogTorrents.bind(resolverAdapter)
           : resolverAdapter.catalog.bind(resolverAdapter);
@@ -287,12 +300,23 @@ class Tpb4kProvider {
     let metadataCatalog;
     let sukebeiMetadata;
     let platformHybrid;
+    let diagnosticsStale = false;
     try {
-      const diagnostics = adapter.diagnostics?.() || {};
+      const diagnostics = adapter.diagnostics?.({ catalog: definition, skip, limit: config.catalogLimit }) || {};
       enrichment = diagnostics.enrichment;
       metadataCatalog = diagnostics.metadataCatalog;
       sukebeiMetadata = diagnostics.sukebeiMetadata;
       platformHybrid = diagnostics.platformHybrid;
+      if (
+        metadataCatalog?.studio && definition.studio &&
+        alpha18DiagnosticStudioKey(metadataCatalog.studio) !== alpha18DiagnosticStudioKey(definition.studio)
+      ) {
+        // Adapters historically exposed one mutable lastDiagnostics value. A
+        // parallel AIOStreams home request can overwrite it between await and
+        // logging. Never label one studio with another studio's diagnostics.
+        metadataCatalog = undefined;
+        diagnosticsStale = true;
+      }
     } catch {
       enrichment = undefined;
       metadataCatalog = undefined;
@@ -312,10 +336,16 @@ class Tpb4kProvider {
         ...(sukebeiMetadata ? { sukebeiMetadata } : {}),
         ...(platformHybrid ? { platformHybrid } : {}),
         ...(studioPlaybackBinding ? { studioPlaybackBinding } : {}),
-        contentFilter: {
-          removed: contentFiltered.removed,
-          reasons: contentFiltered.reasons,
-        },
+        ...(diagnosticsStale ? { diagnosticsStale: true } : {}),
+        contentFilter: (() => {
+          const metadataFiltered = Math.max(Number(metadataCatalog?.filtered || 0), 0);
+          return {
+            removed: metadataFiltered + contentFiltered.removed,
+            metadataStageRemoved: metadataFiltered,
+            providerStageRemoved: contentFiltered.removed,
+            reasons: alpha18MergeReasons(metadataCatalog?.filterReasons, contentFiltered.reasons),
+          };
+        })(),
       },
       'TPB4K catalog normalized'
     );

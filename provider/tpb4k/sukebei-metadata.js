@@ -9,7 +9,7 @@ const {
   normalizeTags,
   safeHttpsUrl,
 } = require('./metadata-normalize');
-const { normalizeSearchTitle, significantTokens } = require('./poster-enrichment');
+const { fallbackPosterUrl, normalizeSearchTitle, significantTokens } = require('./poster-enrichment');
 const { SourceHttpClient, normalizeContentType } = require('./source-http');
 const { detectResolution, extractMagnetFromHtml } = require('./torrent-index');
 const { assertSafeHttpsUrl } = require('../url-security');
@@ -564,6 +564,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     detailImages: 0,
     detailImageErrors: 0,
     nativeImages: 0,
+      rssFallbackCards: 0,
     filtered: 0,
     unmatched: 0,
     cacheHits: 0,
@@ -940,6 +941,7 @@ function createSukebeiMetadataAdapter(options = {}) {
       detailImages: 0,
       detailImageErrors: 0,
       nativeImages: 0,
+      rssFallbackCards: 0,
       filtered: 0,
       unmatched: 0,
       cacheHits: 0,
@@ -1163,6 +1165,39 @@ function createSukebeiMetadataAdapter(options = {}) {
       }
       stats.filtered += 1;
       incrementCounter(stats.filterReasons, evaluation.reason);
+    }
+
+    // A transient metadata/poster outage must not erase valid RSS torrent
+    // identities. Fallback cards retain the real RSS hash and use the honest
+    // Sukebei branded asset; they never invent scene art or a debrid claim.
+    const needed = safeSkip + safeLimit;
+    if (allowed.length < needed) {
+      const poster = fallbackPosterUrl('sukebei', config.posterAssetBaseUrl);
+      const existing = new Set(allowed.map(item => String(item.sourceId)));
+      for (const source of normalized) {
+        if (allowed.length >= needed || existing.has(String(source.sourceId))) continue;
+        const parsedMagnet = parseMagnet(source.magnetLink || source.magnet);
+        const infoHash = normalizeInfoHash(source.infoHash || parsedMagnet?.infoHash);
+        if (!infoHash) continue;
+        const evaluation = evaluateContent(source, filterConfig);
+        if (evaluation.excluded) {
+          stats.filtered += 1;
+          incrementCounter(stats.filterReasons, evaluation.reason);
+          continue;
+        }
+        const fallback = Object.freeze({
+          ...source,
+          infoHash,
+          poster,
+          background: poster,
+          description: compactText(source.description || 'Sukebei RSS torrent · scene artwork pending'),
+          lookupSource: 'sukebei-rss-fallback',
+          contentClassificationKnown: Array.isArray(source.tags) && source.tags.length > 0,
+        });
+        allowed.push(fallback);
+        existing.add(String(source.sourceId));
+        stats.rssFallbackCards += 1;
+      }
     }
 
     const window = allowed.slice(safeSkip, safeSkip + safeLimit);

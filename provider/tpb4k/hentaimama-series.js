@@ -25,6 +25,14 @@ const SERIES_RE = /^hmm-([a-z0-9][a-z0-9-]{0,199})$/i;
 const EPISODE_RE = /^hmm-([a-z0-9][a-z0-9-]{0,199}):1:(\d{1,4})$/i;
 const SERIES_PATH_RE = /^\/(?:tvshows|hentai-series)\/([^/?#]+)\/?$/i;
 const EPISODE_PATH_RE = /^\/episodes\/([^/?#]+)\/?$/i;
+const TOP_TAXONOMY_SLUGS = new Set([
+  '3d', 'all', 'anime', 'censored', 'english', 'hentai', 'hentai-series', 'latest',
+  'new', 'ova', 'raw', 'series', 'top', 'top-rated', 'trending', 'uncensored',
+]);
+const TOP_TAXONOMY_TITLES = new Set([
+  '3d', 'all', 'anime', 'censored', 'english', 'hentai', 'hentai series', 'latest',
+  'new', 'ova', 'raw', 'series', 'top', 'top rated', 'trending', 'uncensored',
+]);
 const HENTAI_MEDIA_HOST = /^(?:gdvid\.info|(?:[a-z0-9-]+\.)*javprovider\.com)$/i;
 const PLAYER_HOST = /^(?:(?:[a-z0-9-]+\.)*hentaimama\.io|(?:[a-z0-9-]+\.)*javprovider\.com)$/i;
 const POST_ID_RE = /get_player_contents['"][^}\n]{0,500}\ba\s*:\s*['"]([0-9]+)['"]/i;
@@ -51,13 +59,20 @@ function episodeId(slug, number) {
   return value && episode ? `${SERIES_PREFIX}${value}:1:${episode}` : '';
 }
 
-function slugFromPath(path) {
+function seriesPath(path) {
   try {
     const parsed = new URL(String(path || ''), ORIGIN);
-    return safeSlug(parsed.pathname.match(SERIES_PATH_RE)?.[1]);
-  } catch {
-    return '';
-  }
+    if (parsed.origin !== ORIGIN || !SERIES_PATH_RE.test(parsed.pathname)) return '';
+    return parsed.pathname.endsWith('/') ? parsed.pathname : `${parsed.pathname}/`;
+  } catch { return ''; }
+}
+function slugFromPath(path) {
+  const normalized = seriesPath(path);
+  return normalized ? safeSlug(normalized.match(SERIES_PATH_RE)?.[1]) : '';
+}
+function safeSeriesPathUrl(path) {
+  const normalized = seriesPath(path);
+  return normalized ? `${ORIGIN}${normalized}` : '';
 }
 
 function parseRequestId(value) {
@@ -87,12 +102,28 @@ function hasHentaiCatalogEvidence(value) {
   const html = String(value || '');
   return html ? parseHentaiCatalog(html).length > 0 : false;
 }
-
+function hasHentaiSeriesEvidence(value) {
+  const html = String(value || '');
+  return Boolean(html && (metaContent(html, 'og:title') || firstContent(html, ['.single-page h1', '.sheader h1', 'h1'])) && anchorRecords(html).some(item => {
+    try { const url = new URL(item.href, ORIGIN); return url.origin === ORIGIN && EPISODE_PATH_RE.test(url.pathname); } catch { return false; }
+  }));
+}
+function hasHentaiEpisodeEvidence(value) {
+  const html = String(value || '');
+  return Boolean(html && (POST_ID_RE.test(html) || iframeUrls(html, ORIGIN).length || mediaUrls(html).length));
+}
 function htmlUsable(value, options = {}) {
   const html = String(value || '');
   if (!html) return '';
   if (!hasStrongChallengeMarker(html)) return html;
-  return options.allowCatalogEvidence && hasHentaiCatalogEvidence(html) ? html : '';
+  if (options.allowCatalogEvidence && hasHentaiCatalogEvidence(html)) return html;
+  if (options.allowSeriesEvidence && hasHentaiSeriesEvidence(html)) return html;
+  if (options.allowEpisodeEvidence && hasHentaiEpisodeEvidence(html)) return html;
+  return '';
+}
+function topTaxonomyRecord(record, slug) {
+  const title = compact(record?.title).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return TOP_TAXONOMY_SLUGS.has(slug) || TOP_TAXONOMY_TITLES.has(title);
 }
 
 function lazyImage(html) {
@@ -114,8 +145,8 @@ function episodeNumber(slug, label, fallback) {
   return Math.max(Number(fromSlug || fromLabel || fallback || 0), 0);
 }
 
-function parseSeriesDetail(html, slug) {
-  const body = htmlUsable(html);
+function parseSeriesDetail(html, slug, detailUrl = '') {
+  const body = htmlUsable(html, { allowSeriesEvidence: true });
   if (!body) return null;
   const title = compact(metaContent(body, 'og:title') || firstContent(body, ['.single-page h1', '.sheader h1', 'h1', 'h2']));
   if (!title) return null;
@@ -166,7 +197,7 @@ function parseSeriesDetail(html, slug) {
     studio,
     tags,
     releaseDate: extractYear(body),
-    detailUrl: safeSeriesUrl(slug),
+    detailUrl: safeSeriesPathUrl(detailUrl) || safeSeriesUrl(slug),
     upstreamId: slug,
     episodes: Object.freeze(episodes.map(item => Object.freeze({ ...item }))),
     videos: Object.freeze(episodes.map(item => Object.freeze({
@@ -240,25 +271,27 @@ function resolutionFromUrl(value) {
 
 async function safeFetch(url, options = {}) {
   const fetchImpl = options.fetchImpl || globalThis.fetch;
-  const parsed = new URL(String(url));
-  const allowedHosts = options.allowedHosts || new Set([parsed.hostname]);
-  const safeUrl = await assertSafeHttpsUrl(parsed.toString(), {
-    allowedHosts,
-    checkDns: options.checkDns !== false,
-  });
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), Math.max(Number(options.timeoutMs || 15_000), 1_000));
-  try {
-    return await fetchImpl(safeUrl, {
-      method: options.method || 'GET',
-      redirect: 'error',
-      signal: controller.signal,
-      headers: options.headers,
-      body: options.body,
-    });
-  } finally {
-    clearTimeout(timer);
+  const allowedHosts = options.allowedHosts || new Set();
+  const hostValidator = typeof options.hostValidator === 'function' ? options.hostValidator : hostname => allowedHosts.has(hostname);
+  let current = new URL(String(url));
+  const redirects = Math.min(Math.max(Number(options.maxRedirects ?? 3), 0), 5);
+  for (let hop = 0; hop <= redirects; hop += 1) {
+    if (current.protocol !== 'https:' || current.username || current.password || !hostValidator(current.hostname)) throw new Error('HentaiMama redirect target is not allowlisted');
+    const safeUrl = await assertSafeHttpsUrl(current.toString(), { allowedHosts: new Set([current.hostname]), checkDns: options.checkDns !== false });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), Math.max(Number(options.timeoutMs || 15_000), 1_000));
+    let response;
+    try {
+      response = await fetchImpl(safeUrl, { method: options.method || 'GET', redirect: 'manual', signal: controller.signal, headers: options.headers, body: options.body });
+    } finally { clearTimeout(timer); }
+    if (![301, 302, 303, 307, 308].includes(Number(response.status))) return response;
+    if (hop >= redirects) throw new Error('HentaiMama redirect limit exceeded');
+    const location = response.headers?.get?.('location');
+    if (!location) throw new Error('HentaiMama redirect lacks Location');
+    current = new URL(location, current);
+    if (Number(response.status) === 303) options = { ...options, method: 'GET', body: undefined };
   }
+  throw new Error('HentaiMama redirect loop');
 }
 
 async function validateMedia(url, options = {}) {
@@ -271,6 +304,7 @@ async function validateMedia(url, options = {}) {
       ...options,
       method: 'HEAD',
       allowedHosts,
+      hostValidator: host => HENTAI_MEDIA_HOST.test(host),
       headers: { Accept: 'video/*, application/vnd.apple.mpegurl, application/octet-stream' },
     });
   } catch {
@@ -282,6 +316,7 @@ async function validateMedia(url, options = {}) {
         ...options,
         method: 'GET',
         allowedHosts,
+        hostValidator: host => HENTAI_MEDIA_HOST.test(host),
         headers: { Range: 'bytes=0-0', Accept: 'video/*, application/vnd.apple.mpegurl, application/octet-stream' },
       });
     } catch {
@@ -328,30 +363,35 @@ function createHentaiMamaSeriesAdapter(options = {}) {
   const episodeIndex = new Map();
   const catalogWindows = new Map();
 
-  async function loadSeries(slug) {
+  async function loadSeries(slug, pathHint = '', loadOptions = {}) {
+    const requireEpisodes = Boolean(loadOptions.requireEpisodes);
     const remembered = seriesIndex.get(slug);
     if (remembered?.episodes?.length) return remembered;
-    const url = safeSeriesUrl(slug);
-    if (!url) return null;
-    const html = htmlUsable(await client.fetchText(url, { cacheKey: `hentai:series:${slug}` }));
-    const detailed = parseSeriesDetail(html, slug);
-    if (!detailed) return remembered || null;
-    seriesIndex.set(slug, detailed);
-    for (const episode of detailed.episodes) {
-      episodeIndex.set(episodeId(slug, episode.number), Object.freeze({ slug, ...episode }));
+    const candidates = [...new Set([safeSeriesPathUrl(pathHint), safeSeriesPathUrl(remembered?.detailUrl), safeSeriesUrl(slug), `${ORIGIN}/hentai-series/${slug}/`].filter(Boolean))];
+    for (const url of candidates) {
+      try {
+        const html = htmlUsable(await client.fetchText(url, { cacheKey: `hentai:series:${slug}:${new URL(url).pathname}` }), { allowSeriesEvidence: true });
+        const detailed = parseSeriesDetail(html, slug, new URL(url).pathname);
+        if (!detailed) continue;
+        if (requireEpisodes && !detailed.episodes?.length) continue;
+        seriesIndex.set(slug, detailed);
+        for (const episode of detailed.episodes) episodeIndex.set(episodeId(slug, episode.number), Object.freeze({ slug, ...episode }));
+        return detailed;
+      } catch { /* Try the next exact series path. */ }
     }
-    return detailed;
+    if (!remembered) return null;
+    return requireEpisodes && !remembered.episodes?.length ? null : remembered;
   }
 
   async function resolveEpisode(request) {
-    const series = await loadSeries(request.slug);
+    const series = await loadSeries(request.slug, '', { requireEpisodes: true });
     if (!series?.episodes?.length) return [];
     const episode = request.kind === 'episode'
       ? series.episodes.find(item => item.number === request.episode)
       : series.episodes[0];
     if (!episode) return [];
     const epUrl = safeEpisodeUrl(episode.slug);
-    const html = htmlUsable(await client.fetchText(epUrl, { cacheKey: `hentai:episode:${episode.slug}` }));
+    const html = htmlUsable(await client.fetchText(epUrl, { cacheKey: `hentai:episode:${episode.slug}` }), { allowEpisodeEvidence: true });
     if (!html) return [];
     const playerPages = new Set(iframeUrls(html, epUrl));
     const postId = html.match(POST_ID_RE)?.[1] || '';
@@ -390,6 +430,7 @@ function createHentaiMamaSeriesAdapter(options = {}) {
           checkDns: options.checkDns,
           timeoutMs: options.config.requestTimeoutMs,
           allowedHosts: new Set([new URL(playerUrl).hostname]),
+          hostValidator: host => PLAYER_HOST.test(host),
           headers: { Accept: 'text/html, application/xhtml+xml;q=0.9', Referer: epUrl },
         });
         if (!player.ok) return;
@@ -433,11 +474,17 @@ function createHentaiMamaSeriesAdapter(options = {}) {
       const key = String(catalog?.id || `hentai:${catalog?.mode || 'all'}`);
       let state = catalogWindows.get(key);
       if (!state) {
-        state = { nextPage: 1, records: [], seen: new Set() };
+        state = { nextPage: 1, records: [], seen: new Set(), rejectedTaxonomy: 0, rejectedNoEpisodes: 0 };
         catalogWindows.set(key, state);
       }
       let pages = 0;
+      // All and New keep the existing fast listing path. Only Top performs
+      // detail preflight, bounded to the normal addon request budget.
+      const topDeadlineAt = catalog?.mode === 'top'
+        ? Date.now() + Math.min(Math.max(Number(options.config.requestTimeoutMs || 15_000) + 7_000, 10_000), 24_000)
+        : Infinity;
       while (state.records.length < targetEnd && pages < NATIVE_MAX_CATALOG_PAGES_PER_REQUEST) {
+        if (catalog?.mode === 'top' && Date.now() >= topDeadlineAt) break;
         const page = state.nextPage;
         const url = buildCatalogUrl('hentai', catalog, page);
         const html = htmlUsable(
@@ -450,17 +497,22 @@ function createHentaiMamaSeriesAdapter(options = {}) {
         state.nextPage += 1;
         pages += 1;
         for (const record of records) {
-          const slug = slugFromPath(record._path || record.upstreamId || decodeStablePathId('hentai', record.sourceId));
+          const upstreamPath = seriesPath(record._path || record.upstreamId || decodeStablePathId('hentai', record.sourceId));
+          const slug = slugFromPath(upstreamPath);
           if (!slug || state.seen.has(slug)) continue;
           state.seen.add(slug);
-          const transformed = Object.freeze({
-            ...record,
-            sourceId: seriesId(slug),
-            upstreamId: slug,
-            detailUrl: safeSeriesUrl(slug),
-          });
-          seriesIndex.set(slug, transformed);
-          state.records.push(transformed);
+          if (catalog?.mode === 'top' && topTaxonomyRecord(record, slug)) { state.rejectedTaxonomy += 1; continue; }
+          const transformed = Object.freeze({ ...record, sourceId: seriesId(slug), upstreamId: slug, detailUrl: safeSeriesPathUrl(upstreamPath) || safeSeriesUrl(slug), seriesPath: upstreamPath });
+          if (catalog?.mode === 'top') {
+            if (Date.now() >= topDeadlineAt) break;
+            const detailed = await loadSeries(slug, upstreamPath, { requireEpisodes: true });
+            if (!detailed?.episodes?.length) { state.rejectedNoEpisodes += 1; continue; }
+            seriesIndex.set(slug, detailed);
+            state.records.push(Object.freeze({ ...transformed, ...detailed, sourceId: seriesId(slug) }));
+          } else {
+            seriesIndex.set(slug, transformed);
+            state.records.push(transformed);
+          }
         }
       }
       return state.records.slice(safeSkip, targetEnd);
@@ -489,6 +541,7 @@ function createHentaiMamaSeriesAdapter(options = {}) {
           rememberedSeries: seriesIndex.size,
           rememberedEpisodes: episodeIndex.size,
           idPrefix: SERIES_PREFIX,
+          topWindows: Object.freeze([...catalogWindows.entries()].filter(([key]) => /hentai\.top|hentai:top/i.test(key)).map(([key, state]) => Object.freeze({ key, records: state.records.length, rejectedTaxonomy: state.rejectedTaxonomy || 0, rejectedNoEpisodes: state.rejectedNoEpisodes || 0 }))),
         }),
       });
     },
@@ -501,6 +554,8 @@ module.exports = {
   createHentaiMamaSeriesAdapter,
   episodeId,
   hasHentaiCatalogEvidence,
+  hasHentaiEpisodeEvidence,
+  hasHentaiSeriesEvidence,
   htmlUsable,
   iframeUrls,
   mediaUrls,
@@ -508,5 +563,7 @@ module.exports = {
   parseRequestId,
   parseSeriesDetail,
   seriesId,
+  seriesPath,
+  topTaxonomyRecord,
   validateMedia,
 };

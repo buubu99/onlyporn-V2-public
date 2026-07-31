@@ -25,7 +25,11 @@ const manifest = {
   background:
     'https://cdni.pornpics.com/1280/5/188/87261714/87261714_013_3f11.jpg',
 
-  resources: ['catalog', 'stream', 'meta'],
+  resources: [
+    'catalog',
+    { name: 'stream', types: ['movie', 'series'], idPrefixes: ['onlyporn:', 'hmm-'] },
+    { name: 'meta', types: ['movie', 'series'], idPrefixes: ['onlyporn:', 'hmm-'] },
+  ],
   types: ['movie', 'series'],
   catalogs: [...manifestFilter.catalogs],
 

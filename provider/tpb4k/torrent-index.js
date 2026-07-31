@@ -1,5 +1,6 @@
 'use strict';
 
+const { studioSearchQueries } = require('./studio-aliases');
 const crypto = require('node:crypto');
 const { buildSceneIdentity } = require('./identity');
 const { normalizeInfoHash, parseMagnet } = require('./candidate');
@@ -539,7 +540,8 @@ function createTorrentIndexAdapter(options = {}) {
 
   async function loadWindow(catalog, skip, limit, options = {}) {
     const normalizedSkip = Math.max(Number.parseInt(String(skip || 0), 10) || 0, 0);
-    const normalizedLimit = Math.min(Math.max(Number.parseInt(String(limit || 40), 10) || 40, 1), 100);
+    const maximumLimit = catalog?.playbackBindingPool ? 300 : 100;
+    const normalizedLimit = Math.min(Math.max(Number.parseInt(String(limit || 40), 10) || 40, 1), maximumLimit);
     let page = Math.floor(normalizedSkip / TPB_PAGE_SIZE) + 1;
     let offset = normalizedSkip % TPB_PAGE_SIZE;
     const output = [];
@@ -552,15 +554,20 @@ function createTorrentIndexAdapter(options = {}) {
     );
 
     const knabenOrders = catalog?.playbackBindingPool ? ['seeders', 'date'] : ['seeders'];
+    const knabenQueries = studioSearchQueries(catalog);
+    const knabenJobs = knabenQueries.flatMap(query =>
+      knabenOrders.map(orderBy => Object.freeze({ query, orderBy }))
+    );
     const knabenResults = await Promise.allSettled(
-      knabenOrders.map(orderBy => knabenClient.searchStudio(catalog.studio, { orderBy }))
+      knabenJobs.map(job => knabenClient.searchStudio(job.query, { orderBy: job.orderBy }))
     );
     for (let orderIndex = 0; orderIndex < knabenResults.length; orderIndex += 1) {
-      const orderBy = knabenOrders[orderIndex];
+      const { query, orderBy } = knabenJobs[orderIndex];
       const result = knabenResults[orderIndex];
       if (result.status === 'rejected') {
         diagnostics.push({
           source: 'knaben',
+          query,
           orderBy,
           outcome: 'error',
           error: compactText(result.reason?.message || result.reason),
@@ -569,6 +576,7 @@ function createTorrentIndexAdapter(options = {}) {
       }
       diagnostics.push({
         source: 'knaben',
+        query,
         orderBy,
         outcome: 'accepted',
         records: result.value.length,
@@ -623,6 +631,60 @@ function createTorrentIndexAdapter(options = {}) {
       }
       if (result.records.length < TPB_PAGE_SIZE || result.records.length === 0) break;
       page += 1;
+    }
+
+    // Some public indexes spell studio brands differently. After the canonical
+    // HiddenBay window, query only approved aliases and keep the exact same
+    // hash, seeder, deadline, and deduplication gates.
+    if (catalog?.playbackBindingPool && output.length < normalizedLimit && Date.now() < deadlineAt) {
+      const aliasQueries = studioSearchQueries(catalog).slice(1);
+      for (const aliasQuery of aliasQueries) {
+        if (output.length >= normalizedLimit || Date.now() >= deadlineAt) break;
+        for (let aliasPage = 1; aliasPage <= 2; aliasPage += 1) {
+          if (output.length >= normalizedLimit || Date.now() >= deadlineAt) break;
+          const path = buildStudioSearchPath(aliasQuery, aliasPage, {
+            category: config.torrentIndex?.category || TPB_UHD_CATEGORY,
+            sort: config.torrentIndex?.sort || TPB_TOP_SORT,
+          });
+          let result;
+          try {
+            result = await fetchSearchPage(
+              path,
+              `${catalog.id}:alias:${compactComparable(aliasQuery)}:${aliasPage}`,
+              deadlineAt
+            );
+          } catch (error) {
+            diagnostics.push({
+              source: 'hiddenbay-alias',
+              query: aliasQuery,
+              page: aliasPage,
+              path,
+              outcome: 'error',
+              error: compactText(error?.message || error),
+            });
+            break;
+          }
+          diagnostics.push({
+            source: 'hiddenbay-alias',
+            query: aliasQuery,
+            page: aliasPage,
+            path,
+            mirror: result.mirror,
+            records: result.records.length,
+            attempts: result.attempts,
+          });
+          for (const record of result.records) {
+            const infoHash = extractInfoHash(record.infoHash || record.magnetLink);
+            const key = infoHash || record.sourceId;
+            if (!key || Number(record.seeders || 0) < minimumSeeders || seen.has(key)) continue;
+            seen.add(key);
+            privateIndex.remember(record, catalog);
+            output.push(publicTorrentItem(record, catalog));
+            if (output.length >= normalizedLimit) break;
+          }
+          if (result.records.length < TPB_PAGE_SIZE || result.records.length === 0) break;
+        }
+      }
     }
 
     output.sort((left, right) => right.seeders - left.seeders || left.title.localeCompare(right.title));

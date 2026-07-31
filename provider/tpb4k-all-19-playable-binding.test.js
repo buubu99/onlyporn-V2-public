@@ -90,28 +90,14 @@ test('unmatched metadata is omitted so visible studio cards cannot be dead versi
 
 
 
-test('a studio-unique release date safely binds when title formatting differs', () => {
+test('release date alone never binds an unrelated studio torrent', () => {
   const definition = catalogDefinitions.find(item => item.id === 'tpb4k.studio.dorcelclub.top');
   const result = bindStudioPlayback({
     catalog: definition,
-    metadataItems: [{
-      sourceId: 'tpdb:dorcel-unique-date',
-      title: 'Completely Different Editorial Title',
-      studio: 'DorcelClub',
-      releaseDate: '2026-07-21',
-      poster: 'https://images.example/dorcel-unique-date.jpg',
-    }],
-    torrentItems: [{
-      sourceId: 'knaben:dorcel-unique-date',
-      title: 'DorcelClub 2026 07 21 Release 2160p',
-      studio: 'DorcelClub',
-      infoHash: HASHES,
-      seeders: 9,
-      indexer: 'knaben',
-    }],
+    metadataItems: [{ sourceId: 'tpdb:dorcel-date-only', title: 'Completely Different Editorial Title', studio: 'DorcelClub', releaseDate: '2026-07-21', poster: 'https://images.example/dorcel.jpg' }],
+    torrentItems: [{ sourceId: 'knaben:date-only', title: 'DorcelClub 2026 07 21 Unrelated Release 2160p', studio: 'DorcelClub', infoHash: HASHES, seeders: 9, indexer: 'knaben' }],
   });
-  assert.equal(result.items.length, 1);
-  assert.equal(result.items[0].playbackBinding, 'unique-release-date');
+  assert.equal(result.items.length, 0);
 });
 
 test('OnlyFans hybrid torrent fallback rows cannot replace metadata poster identities', () => {
