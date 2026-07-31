@@ -200,7 +200,7 @@ test('tampered stateless child tokens are rejected', () => {
 
 test('Phase 0 release version and test wiring are deterministic', () => {
   const pkg = require('../package.json');
-  assert.equal(pkg.version, '2.7.0-alpha.18');
+  assert.equal(pkg.version, '2.7.0-alpha.20');
   assert.match(pkg.scripts['test:release'], /phase0-hardening\.test\.js/);
   assert.equal(pkg.scripts['test:phase0'], 'node --test provider/phase0-hardening.test.js');
 });

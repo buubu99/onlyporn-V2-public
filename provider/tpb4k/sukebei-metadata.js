@@ -1,6 +1,7 @@
 'use strict';
 
 const { BoundedTtlCache } = require('./cache');
+const { createSukebeiArtworkStore } = require('./sukebei-artwork-store');
 const { normalizeInfoHash, parseMagnet } = require('./candidate');
 const { normalizeFeedItem, parseRssFeed } = require('./discovery-normalize');
 const {
@@ -10,6 +11,7 @@ const {
   safeHttpsUrl,
 } = require('./metadata-normalize');
 const { fallbackPosterUrl, normalizeSearchTitle, significantTokens } = require('./poster-enrichment');
+const { sukebeiRssPosterUrl } = require('./sukebei-rss-poster');
 const { SourceHttpClient, normalizeContentType } = require('./source-http');
 const { detectResolution, extractMagnetFromHtml } = require('./torrent-index');
 const { assertSafeHttpsUrl } = require('../url-security');
@@ -502,6 +504,10 @@ function createSukebeiMetadataAdapter(options = {}) {
     maxEntries: Math.max(Number(config.metadataCacheMaxEntries || 500), 50),
   });
   const index = new Map();
+  const artworkStore = options.artworkStore || createSukebeiArtworkStore({
+    env: options.env || process.env,
+    maxEntries: Math.max(Number(config.metadataCacheMaxEntries || 500), 50),
+  });
   // StashDB tolerates the general catalog queries but Render's Sukebei burst
   // produced 44 immediate failures at eight-way concurrency. Keep the exact
   // code scan bounded so it does not look like an abusive search burst.
@@ -568,6 +574,8 @@ function createSukebeiMetadataAdapter(options = {}) {
     filtered: 0,
     unmatched: 0,
     cacheHits: 0,
+    persistentArtworkHits: 0,
+    persistentArtworkWrites: 0,
     providerRequests: {},
     providerMatches: {},
     providerErrors: {},
@@ -945,6 +953,8 @@ function createSukebeiMetadataAdapter(options = {}) {
       filtered: 0,
       unmatched: 0,
       cacheHits: 0,
+      persistentArtworkHits: 0,
+      persistentArtworkWrites: 0,
       providerRequests: {},
       providerMatches: {},
       providerErrors: {},
@@ -1007,6 +1017,31 @@ function createSukebeiMetadataAdapter(options = {}) {
       }
     }
 
+    // Rehydrate disk-backed last-known-good artwork after the in-memory cache.
+    for (const item of normalized) {
+      const sourceId = String(item.sourceId);
+      if (resolvedById.has(sourceId)) continue;
+      const persisted = artworkStore.get(sourceId);
+      if (!persisted?.poster) continue;
+      const restored = Object.freeze({
+        ...item,
+        poster: persisted.poster,
+        background: persisted.background || persisted.poster,
+        metadataProvider: persisted.metadataProvider || item.metadataProvider,
+        lookupQuery: persisted.lookupQuery || item.lookupQuery,
+        sceneCode: item.sceneCode || persisted.sceneCode,
+        releaseDate: item.releaseDate || persisted.releaseDate,
+        studio: item.studio || persisted.studio,
+        performers: Array.isArray(item.performers) && item.performers.length ? item.performers : persisted.performers,
+        tags: Array.isArray(item.tags) && item.tags.length ? item.tags : persisted.tags,
+        contentTags: Array.isArray(item.contentTags) && item.contentTags.length ? item.contentTags : persisted.contentTags,
+        lookupSource: 'sukebei-persistent-cache',
+        contentClassificationKnown: Boolean(item.tags?.length || persisted.tags?.length),
+      });
+      stats.persistentArtworkHits += 1;
+      cache.set(`sukebei:${sourceId}`, restored, positiveTtlMs);
+      resolvedById.set(sourceId, restored);
+    }
     // Stage 1: scan every selected unique JAV code through the primary provider.
     // A confirmed miss stays a miss, but a provider error falls through to the
     // secondary provider. This prevents a StashDB outage from suppressing every
@@ -1167,12 +1202,12 @@ function createSukebeiMetadataAdapter(options = {}) {
       incrementCounter(stats.filterReasons, evaluation.reason);
     }
 
+    stats.persistentArtworkWrites += artworkStore.setMany(allowed);
     // A transient metadata/poster outage must not erase valid RSS torrent
     // identities. Fallback cards retain the real RSS hash and use the honest
     // Sukebei branded asset; they never invent scene art or a debrid claim.
     const needed = safeSkip + safeLimit;
-    if (allowed.length < needed) {
-      const poster = fallbackPosterUrl('sukebei', config.posterAssetBaseUrl);
+    if (catalog?.mode === 'rss' && allowed.length < needed) {
       const existing = new Set(allowed.map(item => String(item.sourceId)));
       for (const source of normalized) {
         if (allowed.length >= needed || existing.has(String(source.sourceId))) continue;
@@ -1188,8 +1223,8 @@ function createSukebeiMetadataAdapter(options = {}) {
         const fallback = Object.freeze({
           ...source,
           infoHash,
-          poster,
-          background: poster,
+          poster: sukebeiRssPosterUrl(source, config),
+          background: sukebeiRssPosterUrl(source, config),
           description: compactText(source.description || 'Sukebei RSS torrent · scene artwork pending'),
           lookupSource: 'sukebei-rss-fallback',
           contentClassificationKnown: Array.isArray(source.tags) && source.tags.length > 0,
@@ -1262,7 +1297,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     meta,
     resolve,
     diagnostics() {
-      return Object.freeze({ sukebeiMetadata: lastDiagnostics });
+      return Object.freeze({ sukebeiMetadata: lastDiagnostics, sukebeiArtworkStore: artworkStore.diagnostics() });
     },
   });
 }

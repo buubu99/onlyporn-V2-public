@@ -79,6 +79,8 @@ function fixtureFetch(url, options = {}) {
     return Promise.resolve(response('<script>source: "https://gdvid.info/eroriman-e2-720p.mp4"</script>'));
   }
   if (parsed.hostname === 'gdvid.info') {
+    assert.match(String(options.headers?.Referer || ''), /^https:\/\//);
+    assert.match(String(options.headers?.['User-Agent'] || ''), /Mozilla/);
     const size = parsed.pathname.includes('1080p') ? '900000000' : '450000000';
     return Promise.resolve(response('', 200, 'video/mp4', { 'content-length': size }));
   }
@@ -118,17 +120,17 @@ test('HentaiMama catalog accepts benign challenge-script markers only when real 
   });
   const items = await adapter.catalog({ catalog: { id: 'tpb4k.hentai.all', mode: 'all' }, skip: 0, limit: 40 });
   assert.equal(items.length, 1);
-  assert.equal(items[0].sourceId, 'hmm-eroriman-2');
+  assert.equal(items[0].sourceId, 'ophmm-eroriman-2');
 });
 
-test('HentaiMama series metadata preserves every episode with stable hmm IDs', () => {
+test('HentaiMama series metadata preserves every episode with stable OnlyPorn-owned IDs', () => {
   const parsed = parseSeriesDetail(seriesHtml, 'eroriman-2');
-  assert.equal(parsed.sourceId, 'hmm-eroriman-2');
+  assert.equal(parsed.sourceId, 'ophmm-eroriman-2');
   assert.equal(parsed.title, 'Eroriman 2');
   assert.equal(parsed.videos.length, 2);
   assert.deepEqual(parsed.videos.map(video => video.id), [
-    'hmm-eroriman-2:1:1',
-    'hmm-eroriman-2:1:2',
+    'ophmm-eroriman-2:1:1',
+    'ophmm-eroriman-2:1:2',
   ]);
   assert.equal(parsed.poster, 'https://images.example/eroriman.jpg');
 });

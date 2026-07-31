@@ -6,162 +6,172 @@ const test = require('node:test');
 const { afterEach } = require('node:test');
 const assert = require('node:assert/strict');
 const { catalogDefinitions } = require('../catalog/tpb4k');
-const { decodeTpb4kId, encodeTpb4kId } = require('./tpb4k/id-codec');
+const { BUNDLE_VERSION, decodeTpb4kId, encodeTpb4kId } = require('./tpb4k/id-codec');
 const { clearAdapters, registerAdapter } = require('./tpb4k/index');
 const { Tpb4kProvider } = require('./tpb4k');
 const { bindStudioPlayback } = require('./tpb4k/studio-playback-binding');
 
-const HASHES = '0123456789abcdef0123456789abcdef01234567';
+const HASH_A = '0123456789abcdef0123456789abcdef01234567';
+const HASH_B = '89abcdef0123456789abcdef0123456789abcdef';
+const HASH_C = 'fedcba9876543210fedcba9876543210fedcba98';
 
-afterEach(() => {
-  clearAdapters();
-});
+afterEach(() => clearAdapters());
 
 function metadataFor(definition, suffix = 'A') {
+  const source = definition.source === 'platform-hybrid' ? 'tpdb' : 'tpdb';
   return {
-    sourceId: `tpdb:${definition.studio.toLowerCase()}-${suffix.toLowerCase()}`,
-    title: `${definition.studio} Playable Scene ${suffix}`,
+    sourceId: `${source}:${definition.studio.toLowerCase()}-${suffix.toLowerCase()}`,
+    title: definition.studio === 'OnlyFans'
+      ? `Creator Alice Private Shower Adventure ${suffix}`
+      : `${definition.studio} Playable Scene ${suffix}`,
     studio: definition.studio,
     releaseDate: '2026-07-30',
+    performers: definition.studio === 'OnlyFans' ? ['Creator Alice'] : ['Performer Alice'],
     poster: `https://images.example/${definition.studio.toLowerCase()}-${suffix}.jpg`,
     lookupSource: 'torrent-index',
   };
 }
 
-function torrentFor(definition, suffix = 'A', infoHash = HASHES) {
+function torrentFor(definition, suffix, infoHash, resolution = '2160p', seeders = 25) {
+  const creator = definition.studio === 'OnlyFans' ? 'Creator Alice ' : '';
+  const sceneTitle = definition.studio === 'OnlyFans'
+    ? `Private Shower Adventure ${suffix}`
+    : `Playable Scene ${suffix}`;
   return {
-    sourceId: `knaben:${definition.studio.toLowerCase()}-${suffix.toLowerCase()}`,
-    title: `${definition.studio} 2026 07 30 Playable Scene ${suffix} 2160p`,
+    sourceId: `knaben:${definition.studio.toLowerCase()}-${suffix.toLowerCase()}-${resolution}`,
+    title: `${definition.studio} ${creator}${sceneTitle} 2026 07 30 ${resolution}`,
     studio: definition.studio,
+    performers: definition.studio === 'OnlyFans' ? ['Creator Alice'] : ['Performer Alice'],
+    releaseDate: '2026-07-30',
     infoHash,
-    filename: `${definition.studio}.Playable.Scene.${suffix}.2160p.mkv`,
-    resolution: '4K',
+    filename: `${definition.studio}.Playable.Scene.${suffix}.${resolution}.mkv`,
+    resolution,
     indexer: 'knaben',
-    seeders: 25,
+    seeders,
     size: 4_000_000_000,
   };
 }
 
-test('all 19 professional catalog definitions can emit metadata poster cards with version-2 bound torrents', () => {
+test('all 19 professional catalog definitions can emit version-3 cards with every distinct bound hash', () => {
   const studios = catalogDefinitions.filter(item => item.id.startsWith('tpb4k.studio.'));
   assert.equal(studios.length, 19);
 
   for (const definition of studios) {
     assert.ok(['studio-metadata', 'platform-hybrid'].includes(definition.source));
     assert.equal(definition.lookupSource, 'torrent-index');
-
     const metadata = metadataFor(definition);
     const binding = bindStudioPlayback({
       catalog: definition,
       metadataItems: [metadata],
-      torrentItems: [torrentFor(definition)],
+      torrentItems: [
+        torrentFor(definition, 'A', HASH_A, '2160p', 20),
+        torrentFor(definition, 'A', HASH_B, '1080p', 30),
+      ],
       limit: 40,
     });
     assert.equal(binding.items.length, 1, definition.id);
     assert.equal(binding.items[0].poster, metadata.poster, definition.id);
+    assert.equal(binding.items[0].playbackCandidates.length, 2, definition.id);
 
     const id = encodeTpb4kId({
       source: definition.source,
       sourceId: binding.items[0].sourceId,
       catalogId: definition.id,
-      torrent: binding.items[0],
+      torrents: binding.items[0].playbackCandidates,
     });
     const decoded = decodeTpb4kId(id);
-    assert.equal(decoded.version, 2, definition.id);
+    assert.equal(decoded.version, BUNDLE_VERSION, definition.id);
     assert.equal(decoded.source, definition.source, definition.id);
-    assert.equal(decoded.torrent.infoHash, HASHES, definition.id);
-    assert.equal(decoded.torrent.indexer, 'knaben', definition.id);
+    assert.deepEqual(new Set(decoded.torrents.map(item => item.infoHash)), new Set([HASH_A, HASH_B]), definition.id);
   }
 });
 
-test('unmatched metadata is omitted so visible studio cards cannot be dead version-1 cards', () => {
+test('one hash can own only one poster while one poster can retain several hashes', () => {
   const definition = catalogDefinitions.find(item => item.id === 'tpb4k.studio.vixen.top');
   const result = bindStudioPlayback({
     catalog: definition,
-    metadataItems: [metadataFor(definition, 'NoMatch')],
+    metadataItems: [metadataFor(definition, 'A'), metadataFor(definition, 'B')],
+    torrentItems: [
+      torrentFor(definition, 'A', HASH_A, '2160p', 25),
+      torrentFor(definition, 'A', HASH_B, '1080p', 20),
+      { ...torrentFor(definition, 'B', HASH_A, '720p', 10), title: 'Vixen Playable Scene B 2026 07 30 720p' },
+      torrentFor(definition, 'B', HASH_C, '720p', 15),
+    ],
+  });
+  assert.equal(result.items.length, 2);
+  const hashes = result.items.flatMap(item => item.playbackCandidates.map(candidate => candidate.infoHash));
+  assert.equal(hashes.filter(hash => hash === HASH_A).length, 1);
+  assert.ok(result.items.some(item => item.playbackCandidates.length > 1));
+  assert.equal(result.stats.oneHashOneScene, true);
+});
+
+test('unmatched metadata and date-only lookalikes are omitted', () => {
+  const definition = catalogDefinitions.find(item => item.id === 'tpb4k.studio.dorcelclub.top');
+  const result = bindStudioPlayback({
+    catalog: definition,
+    metadataItems: [{
+      sourceId: 'tpdb:dorcel-date-only',
+      title: 'Completely Different Editorial Title',
+      studio: 'DorcelClub',
+      releaseDate: '2026-07-21',
+      poster: 'https://images.example/dorcel.jpg',
+    }],
     torrentItems: [{
-      ...torrentFor(definition, 'Different', 'fedcba9876543210fedcba9876543210fedcba98'),
-      title: 'Vixen 2024 01 01 Unrelated Torrent Name 2160p',
+      sourceId: 'knaben:date-only',
+      title: 'DorcelClub 2026 07 21 Unrelated Release 2160p',
+      studio: 'DorcelClub',
+      infoHash: HASH_A,
+      seeders: 9,
+      indexer: 'knaben',
     }],
   });
   assert.equal(result.items.length, 0);
   assert.equal(result.stats.unmatchedMetadata, 1);
+  assert.equal(result.stats.rejectedDateOnly, true);
 });
 
-
-
-test('release date alone never binds an unrelated studio torrent', () => {
-  const definition = catalogDefinitions.find(item => item.id === 'tpb4k.studio.dorcelclub.top');
-  const result = bindStudioPlayback({
-    catalog: definition,
-    metadataItems: [{ sourceId: 'tpdb:dorcel-date-only', title: 'Completely Different Editorial Title', studio: 'DorcelClub', releaseDate: '2026-07-21', poster: 'https://images.example/dorcel.jpg' }],
-    torrentItems: [{ sourceId: 'knaben:date-only', title: 'DorcelClub 2026 07 21 Unrelated Release 2160p', studio: 'DorcelClub', infoHash: HASHES, seeders: 9, indexer: 'knaben' }],
-  });
-  assert.equal(result.items.length, 0);
-});
-
-test('OnlyFans hybrid torrent fallback rows cannot replace metadata poster identities', () => {
+test('OnlyFans requires metadata identity plus creator/title evidence', () => {
   const definition = catalogDefinitions.find(item => item.id === 'tpb4k.studio.onlyfans.top');
-  const result = bindStudioPlayback({
+  const invalidIdentity = bindStudioPlayback({
     catalog: definition,
-    metadataItems: [{
-      ...metadataFor(definition, 'Fallback'),
-      sourceId: 'knaben:not-metadata',
-    }],
-    torrentItems: [torrentFor(definition, 'Fallback')],
+    metadataItems: [{ ...metadataFor(definition), sourceId: 'knaben:not-metadata' }],
+    torrentItems: [torrentFor(definition, 'A', HASH_A)],
   });
-  assert.equal(result.items.length, 0);
-  assert.equal(result.stats.metadataRecords, 0);
+  assert.equal(invalidIdentity.items.length, 0);
+
+  const platformWordOnly = bindStudioPlayback({
+    catalog: definition,
+    metadataItems: [metadataFor(definition)],
+    torrentItems: [{
+      ...torrentFor(definition, 'Different', HASH_A),
+      title: 'OnlyFans random unrelated compilation 2026',
+      performers: [],
+    }],
+  });
+  assert.equal(platformWordOnly.items.length, 0);
 });
 
-test('provider wiring binds catalog identities before preview encoding and torrent adapter exposes identity-only catalog loading', () => {
-  const providerSource = fs.readFileSync(path.join(__dirname, 'tpb4k.js'), 'utf8');
-  const torrentSource = fs.readFileSync(path.join(__dirname, 'tpb4k', 'torrent-index.js'), 'utf8');
-  const knabenSource = fs.readFileSync(path.join(__dirname, 'tpb4k', 'knaben.js'), 'utf8');
-  assert.match(providerSource, /bindStudioPlayback/);
-  assert.match(providerSource, /catalogTorrents/);
-  assert.match(providerSource, /studioPlaybackBinding/);
-  assert.match(providerSource, /item\.infoHash[\s\S]*torrent/);
-  assert.match(torrentSource, /async catalogTorrents\(/);
-  assert.match(torrentSource, /enrichPosters:\s*false/);
-  assert.match(torrentSource, /playbackBindingPool[\s\S]*'seeders', 'date'/);
-  assert.match(knabenSource, /order_by:\s*orderBy/);
-});
-
-
-test('catalog-time join emits a metadata card with a bound hash and stream resolution never performs a second title search', async () => {
+test('provider wiring uses catalog-time recovery and returns every bundled hash without click-time search', async () => {
   const definition = catalogDefinitions.find(item => item.id === 'tpb4k.studio.vixen.top');
   const metadata = metadataFor(definition, 'Bound');
-  const torrent = torrentFor(definition, 'Bound');
+  const torrents = [
+    torrentFor(definition, 'Bound', HASH_A, '2160p', 30),
+    torrentFor(definition, 'Bound', HASH_B, '1080p', 20),
+  ];
   let resolverCalls = 0;
 
   registerAdapter({
     id: 'studio-metadata',
-    async catalog() {
-      return [metadata];
-    },
-    async meta({ sourceId }) {
-      return sourceId === metadata.sourceId ? metadata : null;
-    },
-    async resolve() {
-      throw new Error('metadata adapter must never resolve playback');
-    },
+    async catalog() { return [metadata]; },
+    async meta({ sourceId }) { return sourceId === metadata.sourceId ? metadata : null; },
+    async resolve() { throw new Error('metadata adapter must never resolve playback'); },
   });
   registerAdapter({
     id: 'torrent-index',
-    async catalog() {
-      return [torrent];
-    },
-    async catalogTorrents() {
-      return [torrent];
-    },
-    async meta() {
-      return null;
-    },
-    async resolve() {
-      resolverCalls += 1;
-      throw new Error('bound version-2 cards must not perform click-time title searches');
-    },
+    async catalog() { return torrents; },
+    async catalogTorrents() { return torrents; },
+    async meta() { return null; },
+    async resolve() { resolverCalls += 1; return []; },
   });
 
   const provider = new Tpb4kProvider({
@@ -173,24 +183,27 @@ test('catalog-time join emits a metadata card with a bound hash and stream resol
       ONLYPORN_CONTENT_FILTER_ENABLED: 'false',
     },
   });
-  const catalog = await provider.handleCatalog({
-    type: 'movie',
-    id: definition.id,
-    extra: { skip: 0 },
-  });
+  const catalog = await provider.handleCatalog({ type: 'movie', id: definition.id, extra: { skip: 0 } });
   assert.equal(catalog.metas.length, 1);
-  assert.equal(catalog.metas[0].poster, metadata.poster);
   const decoded = decodeTpb4kId(catalog.metas[0].id);
-  assert.equal(decoded.version, 2);
-  assert.equal(decoded.source, 'studio-metadata');
-  assert.equal(decoded.sourceId, metadata.sourceId);
-  assert.equal(decoded.torrent.infoHash, HASHES);
+  assert.equal(decoded.version, BUNDLE_VERSION);
+  assert.deepEqual(new Set(decoded.torrents.map(item => item.infoHash)), new Set([HASH_A, HASH_B]));
+  const catalogResolverCalls = resolverCalls;
 
-  const stream = await provider.handleStream({
-    type: 'movie',
-    id: catalog.metas[0].id,
-  });
-  assert.equal(stream.streams.length, 1);
-  assert.equal(stream.streams[0].infoHash, HASHES);
-  assert.equal(resolverCalls, 0);
+  const stream = await provider.handleStream({ type: 'movie', id: catalog.metas[0].id });
+  assert.deepEqual(new Set(stream.streams.map(item => item.infoHash)), new Set([HASH_A, HASH_B]));
+  assert.equal(resolverCalls, catalogResolverCalls, 'opening a bound card performed a new title search');
+});
+
+test('source wiring contains multi-candidate, targeted recovery, and no comparison-addon runtime reference', () => {
+  const providerSource = fs.readFileSync(path.join(__dirname, 'tpb4k.js'), 'utf8');
+  const recoverySource = fs.readFileSync(path.join(__dirname, 'tpb4k', 'studio-targeted-recovery.js'), 'utf8');
+  const codecSource = fs.readFileSync(path.join(__dirname, 'tpb4k', 'id-codec.js'), 'utf8');
+  const addonSource = fs.readFileSync(path.join(__dirname, '..', 'addon.js'), 'utf8');
+  assert.match(providerSource, /recoverStudioPlayback/);
+  assert.match(providerSource, /Array\.isArray\(decoded\.torrents\)/);
+  assert.match(recoverySource, /targetedPlaybackSearch/);
+  assert.match(codecSource, /const BUNDLE_VERSION = 3/);
+  assert.match(addonSource, /idPrefixes: \['onlyporn:', 'ophmm-'\]/);
+  assert.doesNotMatch(addonSource, /tpb-adult-addon|TPB 4K IMPROVED|(['"`])hmm-/i);
 });

@@ -20,9 +20,9 @@ const {
 const { SourceHttpClient } = require('./source-http');
 
 const ORIGIN = SOURCES.hentai.origin;
-const SERIES_PREFIX = 'hmm-';
-const SERIES_RE = /^hmm-([a-z0-9][a-z0-9-]{0,199})$/i;
-const EPISODE_RE = /^hmm-([a-z0-9][a-z0-9-]{0,199}):1:(\d{1,4})$/i;
+const SERIES_PREFIX = 'ophmm-';
+const SERIES_RE = /^ophmm-([a-z0-9][a-z0-9-]{0,199})$/i;
+const EPISODE_RE = /^ophmm-([a-z0-9][a-z0-9-]{0,199}):1:(\d{1,4})$/i;
 const SERIES_PATH_RE = /^\/(?:tvshows|hentai-series)\/([^/?#]+)\/?$/i;
 const EPISODE_PATH_RE = /^\/episodes\/([^/?#]+)\/?$/i;
 const TOP_TAXONOMY_SLUGS = new Set([
@@ -33,8 +33,6 @@ const TOP_TAXONOMY_TITLES = new Set([
   '3d', 'all', 'anime', 'censored', 'english', 'hentai', 'hentai series', 'latest',
   'new', 'ova', 'raw', 'series', 'top', 'top rated', 'trending', 'uncensored',
 ]);
-const HENTAI_MEDIA_HOST = /^(?:gdvid\.info|(?:[a-z0-9-]+\.)*javprovider\.com)$/i;
-const PLAYER_HOST = /^(?:(?:[a-z0-9-]+\.)*hentaimama\.io|(?:[a-z0-9-]+\.)*javprovider\.com)$/i;
 const POST_ID_RE = /get_player_contents['"][^}\n]{0,500}\ba\s*:\s*['"]([0-9]+)['"]/i;
 const MEDIA_RE = /(?:"?file"?|source)\s*:\s*["'](https?:\/\/[^"']+\.(?:mp4|m3u8|mkv|webm)(?:\?[^"']*)?)["']/gi;
 const IFRAME_RE = /<iframe\b[^>]*\bsrc\s*=\s*(?:"([^"]+)"|'([^']+)')[^>]*>/gi;
@@ -215,7 +213,13 @@ function iframeUrls(html, baseUrl) {
   for (const match of String(html || '').matchAll(IFRAME_RE)) {
     try {
       const parsed = new URL(match[1] || match[2] || '', baseUrl);
-      if (parsed.protocol !== 'https:' || !PLAYER_HOST.test(parsed.hostname)) continue;
+      // HentaiMama's trusted episode/AJAX response can point at changing public
+      // player hosts. Do not couple playback to a fixed external host list;
+      // each URL is still checked for HTTPS, credentials, standard port, DNS,
+      // private/reserved addresses and every redirect before it is fetched.
+      if (parsed.protocol !== 'https:' || parsed.username || parsed.password) continue;
+      if (parsed.port && parsed.port !== '443') continue;
+      if (!parsed.hostname || !parsed.hostname.includes('.')) continue;
       output.push(parsed.toString());
     } catch {
       // Invalid player URL is ignored.
@@ -224,36 +228,52 @@ function iframeUrls(html, baseUrl) {
   return [...new Set(output)];
 }
 
+function normalizeEmbeddedMarkup(value) {
+  return String(value || '')
+    .replace(/\\\//g, '/')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;|&apos;/gi, "'")
+    .replace(/&amp;/gi, '&');
+}
+
+function safePublicMediaUrl(value) {
+  try {
+    const parsed = new URL(String(value || ''));
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return '';
+    if (parsed.port && parsed.port !== '443') return '';
+    if (!/\.(?:mp4|m3u8|mkv|webm)(?:$|[?#])/i.test(parsed.pathname + parsed.search)) return '';
+    return parsed.toString();
+  } catch { return ''; }
+}
+
 function mediaUrls(html) {
   const output = [];
-  for (const match of String(html || '').matchAll(MEDIA_RE)) {
-    try {
-      const parsed = new URL(match[1]);
-      if (parsed.protocol !== 'https:' || !HENTAI_MEDIA_HOST.test(parsed.hostname)) continue;
-      output.push(parsed.toString());
-    } catch {
-      // Invalid media URL is ignored.
-    }
+  const source = normalizeEmbeddedMarkup(html);
+  for (const match of source.matchAll(MEDIA_RE)) {
+    const value = safePublicMediaUrl(match[1]);
+    if (value) output.push(value);
+  }
+  // Some AJAX payloads contain a bare URL rather than a file/source key.
+  for (const match of source.matchAll(/https?:\/\/[^\s"'<>\\]+\.(?:mp4|m3u8|mkv|webm)(?:\?[^\s"'<>\\]*)?/gi)) {
+    const value = safePublicMediaUrl(match[0]);
+    if (value) output.push(value);
   }
   return [...new Set(output)];
 }
 
 function parseAjaxFields(payload) {
-  const text = String(payload || '').trim();
+  const text = normalizeEmbeddedMarkup(payload).trim();
   if (!text) return [];
-  try {
-    const parsed = JSON.parse(text);
-    if (Array.isArray(parsed)) return parsed.flatMap(value => {
-      if (value && typeof value === 'object') return Object.values(value).map(String);
-      return [String(value || '')];
-    });
-    if (parsed && typeof parsed === 'object') {
-      return Object.values(parsed).flatMap(value => Array.isArray(value) ? value.map(String) : [String(value || '')]);
-    }
-  } catch {
-    // Some mirrors return raw iframe HTML instead of JSON.
-  }
-  return [text];
+  const output = [];
+  const visit = value => {
+    if (value === null || value === undefined) return;
+    if (Array.isArray(value)) { value.forEach(visit); return; }
+    if (typeof value === 'object') { Object.values(value).forEach(visit); return; }
+    const field = normalizeEmbeddedMarkup(String(value || '')).trim();
+    if (field) output.push(field);
+  };
+  try { visit(JSON.parse(text)); } catch { output.push(text); }
+  return [...new Set(output)];
 }
 
 function responseSize(response) {
@@ -276,7 +296,7 @@ async function safeFetch(url, options = {}) {
   let current = new URL(String(url));
   const redirects = Math.min(Math.max(Number(options.maxRedirects ?? 3), 0), 5);
   for (let hop = 0; hop <= redirects; hop += 1) {
-    if (current.protocol !== 'https:' || current.username || current.password || !hostValidator(current.hostname)) throw new Error('HentaiMama redirect target is not allowlisted');
+    if (current.protocol !== 'https:' || current.username || current.password || !hostValidator(current.hostname)) throw new Error('OnlyPorn Hentai redirect target is not allowlisted');
     const safeUrl = await assertSafeHttpsUrl(current.toString(), { allowedHosts: new Set([current.hostname]), checkDns: options.checkDns !== false });
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Math.max(Number(options.timeoutMs || 15_000), 1_000));
@@ -285,39 +305,45 @@ async function safeFetch(url, options = {}) {
       response = await fetchImpl(safeUrl, { method: options.method || 'GET', redirect: 'manual', signal: controller.signal, headers: options.headers, body: options.body });
     } finally { clearTimeout(timer); }
     if (![301, 302, 303, 307, 308].includes(Number(response.status))) return response;
-    if (hop >= redirects) throw new Error('HentaiMama redirect limit exceeded');
+    if (hop >= redirects) throw new Error('OnlyPorn Hentai redirect limit exceeded');
     const location = response.headers?.get?.('location');
-    if (!location) throw new Error('HentaiMama redirect lacks Location');
+    if (!location) throw new Error('OnlyPorn Hentai redirect lacks Location');
     current = new URL(location, current);
     if (Number(response.status) === 303) options = { ...options, method: 'GET', body: undefined };
   }
-  throw new Error('HentaiMama redirect loop');
+  throw new Error('OnlyPorn Hentai redirect loop');
 }
 
 async function validateMedia(url, options = {}) {
-  const hostname = new URL(url).hostname;
-  if (!HENTAI_MEDIA_HOST.test(hostname)) return null;
+  const normalizedUrl = safePublicMediaUrl(url);
+  if (!normalizedUrl) return null;
+  const hostname = new URL(normalizedUrl).hostname;
   const allowedHosts = new Set([hostname]);
+  const playbackHeaders = {
+    Accept: 'video/*, application/vnd.apple.mpegurl, application/octet-stream',
+    'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/131 Safari/537.36',
+    ...(options.referer ? { Referer: String(options.referer) } : {}),
+  };
   let response;
   try {
-    response = await safeFetch(url, {
+    response = await safeFetch(normalizedUrl, {
       ...options,
       method: 'HEAD',
       allowedHosts,
-      hostValidator: host => HENTAI_MEDIA_HOST.test(host),
-      headers: { Accept: 'video/*, application/vnd.apple.mpegurl, application/octet-stream' },
+      hostValidator: () => true,
+      headers: playbackHeaders,
     });
   } catch {
     response = null;
   }
   if (!response || [403, 405].includes(Number(response.status))) {
     try {
-      response = await safeFetch(url, {
+      response = await safeFetch(normalizedUrl, {
         ...options,
         method: 'GET',
         allowedHosts,
-        hostValidator: host => HENTAI_MEDIA_HOST.test(host),
-        headers: { Range: 'bytes=0-0', Accept: 'video/*, application/vnd.apple.mpegurl, application/octet-stream' },
+        hostValidator: () => true,
+        headers: { ...playbackHeaders, Range: 'bytes=0-0' },
       });
     } catch {
       return null;
@@ -325,13 +351,13 @@ async function validateMedia(url, options = {}) {
   }
   const status = Number(response.status || 0);
   const contentType = String(response.headers?.get?.('content-type') || '').toLowerCase();
-  const extensionAccepted = /\.(?:mp4|m3u8|mkv|webm)(?:\?|$)/i.test(url);
+  const extensionAccepted = /\.(?:mp4|m3u8|mkv|webm)(?:\?|$)/i.test(normalizedUrl);
   const typeAccepted = /^video\//.test(contentType)
     || /mpegurl|octet-stream/.test(contentType)
     || extensionAccepted;
   try { if (typeof response.body?.cancel === 'function') await response.body.cancel(); } catch {}
   if (![200, 206].includes(status) || !typeAccepted) return null;
-  return Object.freeze({ url, size: responseSize(response), resolution: resolutionFromUrl(url) });
+  return Object.freeze({ url: normalizedUrl, size: responseSize(response), resolution: resolutionFromUrl(normalizedUrl) });
 }
 
 function createClient(options) {
@@ -362,6 +388,7 @@ function createHentaiMamaSeriesAdapter(options = {}) {
   const seriesIndex = new Map();
   const episodeIndex = new Map();
   const catalogWindows = new Map();
+  const episodeDiagnostics = new Map();
 
   async function loadSeries(slug, pathHint = '', loadOptions = {}) {
     const requireEpisodes = Boolean(loadOptions.requireEpisodes);
@@ -384,18 +411,30 @@ function createHentaiMamaSeriesAdapter(options = {}) {
   }
 
   async function resolveEpisode(request) {
+    const stages = { series: 0, episodePage: 0, inlineMedia: 0, ajaxPostId: 0, ajaxFields: 0, ajaxIframes: 0, ajaxMedia: 0, playerPages: 0, playerMedia: 0, validated: 0, errors: [] };
+    const diagnosticKey = episodeId(request.slug, request.episode || 1) || seriesId(request.slug);
     const series = await loadSeries(request.slug, '', { requireEpisodes: true });
-    if (!series?.episodes?.length) return [];
+    if (!series?.episodes?.length) { episodeDiagnostics.set(diagnosticKey, Object.freeze(stages)); return []; }
+    stages.series = 1;
     const episode = request.kind === 'episode'
       ? series.episodes.find(item => item.number === request.episode)
       : series.episodes[0];
-    if (!episode) return [];
+    if (!episode) { episodeDiagnostics.set(diagnosticKey, Object.freeze(stages)); return []; }
     const epUrl = safeEpisodeUrl(episode.slug);
     const html = htmlUsable(await client.fetchText(epUrl, { cacheKey: `hentai:episode:${episode.slug}` }), { allowEpisodeEvidence: true });
-    if (!html) return [];
+    if (!html) { episodeDiagnostics.set(diagnosticKey, Object.freeze(stages)); return []; }
+    stages.episodePage = 1;
     const playerPages = new Set(iframeUrls(html, epUrl));
+    const candidates = new Map();
+    const rememberMedia = (url, referer = epUrl) => {
+      const value = safePublicMediaUrl(url);
+      if (value && !candidates.has(value)) candidates.set(value, referer);
+    };
+    for (const url of mediaUrls(html)) rememberMedia(url, epUrl);
+    stages.inlineMedia = candidates.size;
     const postId = html.match(POST_ID_RE)?.[1] || '';
     if (postId) {
+      stages.ajaxPostId = 1;
       try {
         const body = new URLSearchParams({ action: 'get_player_contents', a: postId }).toString();
         const response = await safeFetch(`${ORIGIN}/wp-admin/admin-ajax.php`, {
@@ -408,21 +447,30 @@ function createHentaiMamaSeriesAdapter(options = {}) {
             'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8',
             Accept: 'application/json, text/plain, */*',
             Referer: epUrl,
+            'X-Requested-With': 'XMLHttpRequest',
           },
           body,
         });
         if (response.ok) {
           const text = await response.text();
-          for (const field of parseAjaxFields(text)) {
-            for (const url of iframeUrls(field, epUrl)) playerPages.add(url);
+          const ajaxFields = parseAjaxFields(text);
+          stages.ajaxFields = ajaxFields.length;
+          for (const field of ajaxFields) {
+            const ajaxIframes = iframeUrls(field, epUrl);
+            const ajaxMedia = mediaUrls(field);
+            stages.ajaxIframes += ajaxIframes.length;
+            stages.ajaxMedia += ajaxMedia.length;
+            for (const url of ajaxIframes) playerPages.add(url);
+            for (const url of ajaxMedia) rememberMedia(url, epUrl);
           }
         }
-      } catch {
+      } catch (error) {
+        stages.errors.push(`ajax:${compact(error?.message || error)}`);
         // Inline/direct player fallbacks remain available.
       }
     }
 
-    const candidates = new Set(mediaUrls(html));
+    stages.playerPages = playerPages.size;
     await Promise.all([...playerPages].map(async playerUrl => {
       try {
         const player = await safeFetch(playerUrl, {
@@ -430,22 +478,28 @@ function createHentaiMamaSeriesAdapter(options = {}) {
           checkDns: options.checkDns,
           timeoutMs: options.config.requestTimeoutMs,
           allowedHosts: new Set([new URL(playerUrl).hostname]),
-          hostValidator: host => PLAYER_HOST.test(host),
+          hostValidator: () => true,
           headers: { Accept: 'text/html, application/xhtml+xml;q=0.9', Referer: epUrl },
         });
         if (!player.ok) return;
         const body = await player.text();
-        for (const url of mediaUrls(body)) candidates.add(url);
-      } catch {
+        const found = mediaUrls(body);
+        stages.playerMedia += found.length;
+        for (const url of found) rememberMedia(url, playerUrl);
+      } catch (error) {
+        stages.errors.push(`player:${compact(error?.message || error)}`);
         // One failed player must not suppress another valid source.
       }
     }));
 
-    const validated = (await Promise.all([...candidates].map(url => validateMedia(url, {
+    const validated = (await Promise.all([...candidates.entries()].map(([url, referer]) => validateMedia(url, {
       fetchImpl: options.fetchImpl,
       checkDns: options.checkDns,
       timeoutMs: options.config.requestTimeoutMs,
+      referer,
     })))).filter(Boolean);
+    stages.validated = validated.length;
+    episodeDiagnostics.set(diagnosticKey, Object.freeze({ ...stages, errors: Object.freeze(stages.errors.slice(0, 8)) }));
     return validated.map((media, index) => ({
       source: 'hentai',
       sourceId: episodeId(request.slug, episode.number),
@@ -541,6 +595,7 @@ function createHentaiMamaSeriesAdapter(options = {}) {
           rememberedSeries: seriesIndex.size,
           rememberedEpisodes: episodeIndex.size,
           idPrefix: SERIES_PREFIX,
+          episodeDiagnostics: Object.freeze([...episodeDiagnostics.entries()].slice(-20).map(([id, value]) => Object.freeze({ id, ...value }))),
           topWindows: Object.freeze([...catalogWindows.entries()].filter(([key]) => /hentai\.top|hentai:top/i.test(key)).map(([key, state]) => Object.freeze({ key, records: state.records.length, rejectedTaxonomy: state.rejectedTaxonomy || 0, rejectedNoEpisodes: state.rejectedNoEpisodes || 0 }))),
         }),
       });

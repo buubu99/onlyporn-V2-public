@@ -11,21 +11,27 @@ const KNABEN_MAX_RESULTS = 50;
 function compactText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
-
 function compactComparable(value) {
   return compactText(value).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
 }
-
+function searchTokens(value) {
+  const noise = new Set([
+    'the', 'and', 'for', 'with', 'from', 'onlyfans', 'fansly', 'fanvue',
+    'xxx', 'porn', 'video', 'scene', 'episode', 'part', '1080p', '2160p',
+    '720p', '4k', 'uhd', 'fhd', 'x264', 'x265', 'hevc',
+  ]);
+  return [...new Set(
+    compactText(value).toLowerCase().match(/[\p{L}\p{N}]+/gu) || []
+  )].filter(token => token.length >= 3 && !noise.has(token));
+}
 function nonNegativeInteger(value) {
   const number = Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(number) && number >= 0 ? number : 0;
 }
-
 function validBytes(value) {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? Math.floor(number) : 0;
 }
-
 function detectResolution(title) {
   const text = compactText(title).toLowerCase();
   if (/\b(?:4320p|8k)\b/.test(text)) return '8K';
@@ -35,20 +41,28 @@ function detectResolution(title) {
   if (/\b480p\b/.test(text)) return '480p';
   return '';
 }
-
 function infoHashFromHit(hit = {}) {
   return normalizeInfoHash(hit.hash) || parseMagnet(hit.magnetUrl)?.infoHash || '';
 }
-
 function stableKnabenId(infoHash) {
   return `knaben:${crypto.createHash('sha256').update(infoHash).digest('hex').slice(0, 40)}`;
 }
-
-function normalizeKnabenHit(hit = {}, studio = '') {
+function normalizeKnabenHit(hit = {}, query = '', options = {}) {
   const infoHash = infoHashFromHit(hit);
   const title = compactText(hit.title).slice(0, 500);
-  const studioKey = compactComparable(studio);
-  if (!infoHash || !title || !studioKey || !compactComparable(title).includes(studioKey)) return null;
+  const queryKey = compactComparable(query);
+  const titleKey = compactComparable(title);
+  if (!infoHash || !title || !queryKey) return null;
+
+  if (options.targeted === true) {
+    const expected = searchTokens(query);
+    const titleText = compactText(title).toLowerCase();
+    const overlap = expected.filter(token => titleText.includes(token)).length;
+    const required = expected.length <= 1 ? 1 : 2;
+    if (!expected.length || overlap < required) return null;
+  } else if (!titleKey.includes(queryKey)) {
+    return null;
+  }
 
   return Object.freeze({
     sourceId: stableKnabenId(infoHash),
@@ -67,7 +81,6 @@ function normalizeKnabenHit(hit = {}, studio = '') {
     mirror: new URL(KNABEN_ADULT_ENDPOINT).origin,
   });
 }
-
 function createKnabenAdultClient(options = {}) {
   const endpoint = String(options.endpoint || KNABEN_ADULT_ENDPOINT);
   if (endpoint !== KNABEN_ADULT_ENDPOINT) {
@@ -87,16 +100,15 @@ function createKnabenAdultClient(options = {}) {
     now: options.now,
   });
   const inflight = new Map();
-
-  async function fetchStudio(studio, searchOptions = {}) {
-    const query = compactText(studio).slice(0, 180);
+  async function fetchStudio(queryValue, searchOptions = {}) {
+    const query = compactText(queryValue).slice(0, 180);
     const orderBy = searchOptions.orderBy === 'date' ? 'date' : 'seeders';
+    const targeted = searchOptions.targeted === true;
     if (query.length < 2) return [];
-    const cacheKey = `knaben:studio:${compactComparable(query)}:${orderBy}`;
+    const cacheKey = `knaben:${targeted ? 'targeted' : 'studio'}:${compactComparable(query)}:${orderBy}`;
     const cached = cache.getEntry(cacheKey);
     if (cached) return cached.negative ? [] : cached.value;
     if (inflight.has(cacheKey)) return inflight.get(cacheKey);
-
     const request = (async () => {
       const safeUrl = await assertSafeHttpsUrl(endpoint, {
         allowedHosts: new Set([new URL(endpoint).hostname]),
@@ -112,7 +124,7 @@ function createKnabenAdultClient(options = {}) {
           headers: {
             Accept: 'application/json',
             'Content-Type': 'application/json',
-            'User-Agent': 'OnlyPorn-TPB4K/2.7',
+            'User-Agent': 'OnlyPorn/2.7',
           },
           body: JSON.stringify({
             query,
@@ -130,32 +142,20 @@ function createKnabenAdultClient(options = {}) {
           return [];
         }
         const contentType = String(response.headers?.get?.('content-type') || '')
-          .split(';')[0]
-          .trim()
-          .toLowerCase();
+          .split(';')[0].trim().toLowerCase();
         if (contentType && contentType !== 'application/json') {
           cache.setNegative(cacheKey, negativeTtlMs);
           return [];
         }
-        const contentLength = Number.parseInt(
-          String(response.headers?.get?.('content-length') || 0),
-          10
-        ) || 0;
-        if (contentLength > maxResponseBytes) {
-          throw new Error('Knaben response exceeded the configured byte limit');
-        }
+        const contentLength = Number.parseInt(String(response.headers?.get?.('content-length') || 0), 10) || 0;
+        if (contentLength > maxResponseBytes) throw new Error('Knaben response exceeded the configured byte limit');
         const text = await response.text();
-        if (Buffer.byteLength(text, 'utf8') > maxResponseBytes) {
-          throw new Error('Knaben response exceeded the configured byte limit');
-        }
+        if (Buffer.byteLength(text, 'utf8') > maxResponseBytes) throw new Error('Knaben response exceeded the configured byte limit');
         const payload = JSON.parse(text);
         const records = (Array.isArray(payload?.hits) ? payload.hits : [])
-          .map(hit => normalizeKnabenHit(hit, query))
+          .map(hit => normalizeKnabenHit(hit, query, searchOptions))
           .filter(Boolean)
-          .sort((left, right) =>
-            right.seeders - left.seeders ||
-            left.title.localeCompare(right.title)
-          );
+          .sort((left, right) => right.seeders - left.seeders || left.title.localeCompare(right.title));
         if (!records.length) {
           cache.setNegative(cacheKey, negativeTtlMs);
           return [];
@@ -167,7 +167,6 @@ function createKnabenAdultClient(options = {}) {
         clearTimeout(timer);
       }
     })().finally(() => inflight.delete(cacheKey));
-
     inflight.set(cacheKey, request);
     return request;
   }
@@ -175,21 +174,19 @@ function createKnabenAdultClient(options = {}) {
   return Object.freeze({
     configured: options.enabled !== false,
     endpointOrigin: new URL(endpoint).origin,
-    async searchStudio(studio, searchOptions = {}) {
+    async searchStudio(query, searchOptions = {}) {
       if (options.enabled === false) return [];
-      return fetchStudio(studio, searchOptions);
+      return fetchStudio(query, searchOptions);
     },
-    cacheSize() {
-      return cache.size;
-    },
+    cacheSize() { return cache.size; },
   });
 }
-
 module.exports = {
   KNABEN_ADULT_ENDPOINT,
   KNABEN_MAX_RESULTS,
   createKnabenAdultClient,
   infoHashFromHit,
   normalizeKnabenHit,
+  searchTokens,
   stableKnabenId,
 };

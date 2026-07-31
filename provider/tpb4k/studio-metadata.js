@@ -135,19 +135,41 @@ function platformEvidence(scene = {}, normalized = {}, queries = []) {
   return Object.freeze({ accepted: false, reason: 'platform-unverified' });
 }
 
+function identityText(value, fields = ['name', 'username', 'handle', 'title']) {
+  if (value && typeof value === 'object') {
+    for (const field of fields) {
+      const text = compactText(value[field]);
+      if (text) return text;
+    }
+    return '';
+  }
+  return compactText(value);
+}
+function platformIdentityFields(scene = {}, normalized = {}, studio = '') {
+  if (compactKey(studio) !== 'onlyfans') return Object.freeze({});
+  const creator = [scene.creator, scene.model, scene.performer, scene.user, scene.account, ...(Array.isArray(normalized.performers) ? normalized.performers : [])]
+    .map(value => identityText(value)).find(Boolean) || '';
+  const username = [scene.username, scene.handle, scene.creator, scene.user, scene.account]
+    .map(value => identityText(value, ['username', 'handle', 'name'])).find(Boolean) || '';
+  const channel = identityText(scene.channel, ['name', 'username', 'handle']);
+  const account = identityText(scene.account, ['username', 'handle', 'name']);
+  return Object.freeze({ creator, username, channel, account });
+}
 function bindCatalogIdentity(provider, rawScene, normalized, studio) {
   const tags = normalizeTags([
     ...(Array.isArray(normalized.tags) ? normalized.tags : []),
     ...(Array.isArray(normalized.contentTags) ? normalized.contentTags : []),
   ]);
   const requestedStudio = normalizeStudioName(studio);
-  const lookupQuery = [requestedStudio, normalized.releaseDate, normalized.sceneCode, normalized.title]
+  const platformIdentity = platformIdentityFields(rawScene, normalized, requestedStudio);
+  const lookupQuery = [requestedStudio, platformIdentity.creator, platformIdentity.username, platformIdentity.channel, platformIdentity.account, normalized.releaseDate, normalized.sceneCode, normalized.title]
     .map(compactText)
     .filter(Boolean)
     .join(' ')
     .slice(0, 300);
   return Object.freeze({
     ...normalized,
+    ...platformIdentity,
     studio: requestedStudio,
     tags,
     contentTags: tags,
@@ -488,6 +510,7 @@ module.exports = {
   createStudioMetadataAdapter,
   metadataMergeKey,
   parseSourceId,
+  platformIdentityFields,
   platformEvidence,
   rawStudioNames,
   sortMetadata,

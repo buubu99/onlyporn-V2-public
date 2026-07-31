@@ -26,6 +26,16 @@ const DEFAULT_TRACKERS = Object.freeze([
 ]);
 
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+const INDEXER_RELIABILITY = Object.freeze({
+  pornrips: 100,
+  sukebei: 96,
+  '1337x': 92,
+  hiddenbay: 88,
+  piratebay: 88,
+  tpb: 88,
+  knaben: 84,
+  unknown: 50,
+});
 
 function cleanText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
@@ -144,6 +154,18 @@ function normalizeResolution(...values) {
   return height ? `${height}p` : 'Unknown';
 }
 
+function indexerReliability(value) {
+  const key = cleanText(value).toLowerCase().replace(/[^a-z0-9]+/g, '');
+  if (!key) return INDEXER_RELIABILITY.unknown;
+  if (key.includes('pornrips')) return INDEXER_RELIABILITY.pornrips;
+  if (key.includes('sukebei')) return INDEXER_RELIABILITY.sukebei;
+  if (key.includes('1337')) return INDEXER_RELIABILITY['1337x'];
+  if (key.includes('hiddenbay')) return INDEXER_RELIABILITY.hiddenbay;
+  if (key.includes('piratebay')) return INDEXER_RELIABILITY.piratebay;
+  if (key === 'tpb') return INDEXER_RELIABILITY.tpb;
+  if (key.includes('knaben')) return INDEXER_RELIABILITY.knaben;
+  return INDEXER_RELIABILITY.unknown;
+}
 function normalizeSeeders(value) {
   const number = Number.parseInt(String(value ?? ''), 10);
   return Number.isFinite(number) && number >= 0 ? number : 0;
@@ -224,7 +246,7 @@ function normalizeCandidate(input = {}) {
 
   const candidate = {
     kind,
-    source: cleanText(input.source || 'unknown').toLowerCase(),
+    source: cleanText(input.source || input.indexer || 'unknown').toLowerCase(),
     sourceId: cleanText(input.sourceId || input.id),
     title,
     filename,
@@ -281,7 +303,8 @@ function candidateScore(candidate) {
     candidate.resolutionHeight * 1_000_000_000 +
     kindPreference * 100_000_000 +
     Math.min(candidate.seeders, 99_999) * 1_000 +
-    Math.min(Math.floor(candidate.size / (1024 * 1024)), 999)
+    indexerReliability(candidate.source) * 10 +
+    Math.min(Math.floor(candidate.size / (1024 * 1024)), 9)
   );
 }
 
@@ -340,7 +363,7 @@ function formatSize(bytes) {
 function toStremioStream(candidate) {
   if (!candidate || candidate.kind === 'invalid') return null;
 
-  const filename = candidate.filename || candidate.title || candidate.sourceId || 'TPB 4K result';
+  const filename = candidate.filename || candidate.title || candidate.sourceId || 'OnlyPorn result';
   const labels = [candidate.resolution];
   if (candidate.cached === 'cached') labels.push('Cached');
   if (candidate.cached === 'uncached') labels.push('Uncached');
@@ -348,7 +371,7 @@ function toStremioStream(candidate) {
   if (candidate.size) labels.push(formatSize(candidate.size));
 
   const stream = {
-    name: `TPB 4K · ${labels.filter(Boolean).join(' · ')}`,
+    name: `OnlyPorn · ${labels.filter(Boolean).join(' · ')}`,
     title: filename,
     description: [
       filename,
@@ -357,7 +380,7 @@ function toStremioStream(candidate) {
       candidate.source ? `🔎 ${candidate.source}` : '',
     ].filter(Boolean).join('\n'),
     behaviorHints: {
-      bingeGroup: `onlyporn-tpb4k-${candidate.infoHash || candidate.source}`,
+      bingeGroup: `onlyporn-torrent-${candidate.infoHash || candidate.source}`,
       filename,
       ...(candidate.size ? { videoSize: candidate.size } : {}),
     },
@@ -386,6 +409,7 @@ module.exports = {
   candidateScore,
   classifyDirectUrl,
   dedupeCandidates,
+  indexerReliability,
   normalizeCandidate,
   normalizeInfoHash,
   normalizeResolution,

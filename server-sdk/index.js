@@ -14,6 +14,7 @@ function serveHTTP(addonInterface, opts = {}) {
 
     const app = express();
     app.set('trust proxy', true);
+    if (typeof opts.configureApp === 'function') opts.configureApp(app);
     const router = getRouter(addonInterface);
 
     app.use((req, _res, next) => {

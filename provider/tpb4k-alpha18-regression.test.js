@@ -57,7 +57,7 @@ test('Hentai Top rejects taxonomy cards while All/New remain unmodified fast cat
   };
   const top = createHentaiMamaSeriesAdapter({ config: config(), fetchImpl, checkDns: false, minRequestIntervalMs: 0, maxRetries: 0 });
   const topItems = await top.catalog({ catalog: { id: 'tpb4k.hentai.top', mode: 'top' }, limit: 40 });
-  assert.deepEqual(topItems.map(item => item.sourceId), ['hmm-eroriman-2']);
+  assert.deepEqual(topItems.map(item => item.sourceId), ['ophmm-eroriman-2']);
   assert.equal(calls.includes('/tvshows/3d/'), false);
   assert.equal(calls.includes('/tvshows/eroriman-2/'), true);
 
@@ -98,14 +98,17 @@ test('page-specific benign challenge evidence is accepted and challenge-only HTM
   assert.equal(htmlUsable(challenge, { allowSeriesEvidence: true }), '');
 });
 
-test('alpha.18 wiring expands torrent pools, restores Sukebei safely and declares resource prefixes', () => {
+test('Alpha.19 preserves broad pools, isolates Sukebei RSS, and owns its resource namespace', () => {
   const provider = fs.readFileSync(path.join(__dirname, 'tpb4k.js'), 'utf8');
   const torrent = fs.readFileSync(path.join(__dirname, 'tpb4k', 'torrent-index.js'), 'utf8');
   const sukebei = fs.readFileSync(path.join(__dirname, 'tpb4k', 'sukebei-metadata.js'), 'utf8');
   const addon = fs.readFileSync(path.join(__dirname, '..', 'addon.js'), 'utf8');
-  assert.match(provider, /torrentPoolLimit = 300/);
+  assert.match(provider, /limit: 300/);
+  assert.match(provider, /recoverStudioPlayback/);
   assert.match(torrent, /studioSearchQueries/);
-  assert.match(torrent, /knabenQueries/);
-  assert.match(sukebei, /sukebei-rss-fallback/);
-  assert.match(addon, /idPrefixes: \['onlyporn:', 'hmm-'\]/);
+  assert.match(torrent, /knaben-targeted/);
+  assert.match(sukebei, /catalog\?\.mode === 'rss'/);
+  assert.match(sukebei, /sukebeiRssPosterUrl/);
+  assert.match(addon, /idPrefixes: \['onlyporn:', 'ophmm-'\]/);
+  assert.doesNotMatch(addon, /(['"`])hmm-/);
 });

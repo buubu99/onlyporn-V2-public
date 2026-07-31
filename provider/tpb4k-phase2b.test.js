@@ -74,13 +74,13 @@ test('discovery and native smoke scripts are present and do not contain configur
   }
 });
 
-test('all 28 TPB4K catalog IDs remain unique and unified-resolution', () => {
-  assert.equal(tpb4kCatalogs.length, 28);
-  assert.equal(new Set(tpb4kCatalogs.map(item => item.id)).size, 28);
+test('all 29 OnlyPorn catalog IDs remain unique and unified-resolution', () => {
+  assert.equal(tpb4kCatalogs.length, 29);
+  assert.equal(new Set(tpb4kCatalogs.map(item => item.id)).size, 29);
   assert.equal(tpb4kCatalogs.some(item => /\.(?:2160p|1080p|4k)\./i.test(item.id.replace(/^tpb4k\./, ''))), false);
 });
 
 test('Phase 2B release wiring retains the TPB torrent-index adapter', () => {
-  assert.equal(require('../package.json').version, '2.7.0-alpha.18');
+  assert.equal(require('../package.json').version, '2.7.0-alpha.20');
   assert.match(require('../package.json').scripts['test:release'], /tpb4k-phase2b\.test\.js/);
 });

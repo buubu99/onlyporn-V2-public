@@ -718,11 +718,19 @@ function createTorrentIndexAdapter(options = {}) {
   function sceneQueries(item = {}, catalog = {}) {
     const identity = buildSceneIdentity(item);
     const studio = compactText(item.studio || catalog.studio);
+    const studioKey = compactComparable(studio);
     const title = normalizeSearchTitle(item.title, studio).query;
+    const identities = [
+      item.creator, item.username, item.channel, item.account, item.model, item.performer,
+      ...(Array.isArray(item.performers) ? item.performers : []),
+    ].map(compactText).filter(value => value.length >= 3);
+    const creator = identities[0] || '';
+    const platform = studioKey === 'onlyfans';
     const values = [
       identity.sceneCode,
-      [studio, title].map(compactText).filter(Boolean).join(' '),
+      platform ? [creator, title, 'OnlyFans'].map(compactText).filter(Boolean).join(' ') : [studio, title].map(compactText).filter(Boolean).join(' '),
       compactText(item.lookupQuery),
+      platform ? [creator, title].map(compactText).filter(Boolean).join(' ') : '',
     ];
     const output = [];
     const seen = new Set();
@@ -732,11 +740,10 @@ function createTorrentIndexAdapter(options = {}) {
       if (query.length < 3 || seen.has(key)) continue;
       seen.add(key);
       output.push(query);
-      if (output.length >= 2) break;
+      if (output.length >= 3) break;
     }
     return output;
   }
-
   function compactComparable(value) {
     return compactText(value).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');
   }
@@ -746,24 +753,36 @@ function createTorrentIndexAdapter(options = {}) {
     const recordKey = compactComparable(record.title);
     const codeKey = compactComparable(identity.sceneCode);
     if (codeKey) return recordKey.includes(codeKey);
-
     const studio = compactText(item.studio || catalog.studio);
     const studioKey = compactComparable(studio);
+    const targeted = Boolean(catalog?.targetedPlaybackSearch);
+    const platform = studioKey === 'onlyfans';
     const studioEvidence = Boolean(studioKey && recordKey.includes(studioKey));
-    const expectedTokens = significantTokens(item.title, studio);
+    const expectedTokens = significantTokens(item.title, studio)
+      .filter(token => !platform || !['onlyfans', 'only', 'fans', 'fansly', 'fanvue'].includes(String(token).toLowerCase()));
     const actualTokens = new Set(significantTokens(record.title, studio));
+    const identityKeys = [
+      item.creator, item.username, item.channel, item.account, item.model, item.performer,
+      ...(Array.isArray(item.performers) ? item.performers : []),
+    ].map(compactComparable).filter(value => value.length >= 4);
+    const identityEvidence = identityKeys.some(value => recordKey.includes(value));
     if (!expectedTokens.length) return false;
     const overlap = expectedTokens.filter(token => actualTokens.has(token)).length;
     const coverage = overlap / expectedTokens.length;
-    if (expectedTokens.length === 1) {
-      return expectedTokens[0].length >= 3 && overlap === 1 && studioEvidence;
-    }
-    return coverage >= 0.75 && (studioEvidence || coverage === 1);
+    if (platform) return overlap >= 2 && coverage >= 0.45 && identityEvidence;
+    if (expectedTokens.length === 1) return expectedTokens[0].length >= 3 && overlap === 1 && (studioEvidence || targeted);
+    return coverage >= 0.75 && (studioEvidence || targeted || coverage === 1);
   }
-
   async function searchIndexers(query, catalogId, deadlineAt) {
     const key = crypto.createHash('sha256').update(query).digest('hex').slice(0, 16);
     const searches = [
+      {
+        source: 'knaben-targeted',
+        run: async () => ({
+          records: await knabenClient.searchStudio(query, { orderBy: 'seeders', targeted: true }),
+          mirror: knabenClient.endpointOrigin,
+        }),
+      },
       {
         source: 'hiddenbay',
         run: () => fetchSearchPage(

@@ -649,5 +649,5 @@ test('built-in provider exposes only playable metadata-first version-2 studio ca
   const meta = await provider.handleMeta({ type: 'movie', id: catalog.metas[0].id });
   assert.match(meta.meta.poster, /^https:\/\/images\.example\//);
   assert.equal(meta.meta.posterShape, 'poster');
-  assert.equal(meta.meta.extra.tpb4k.lookupSource, 'torrent-index');
+  assert.equal(meta.meta.extra.onlyporn.lookupSource, 'torrent-index');
 });
