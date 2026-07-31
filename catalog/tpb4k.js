@@ -60,7 +60,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.brazzersexxtra.top',
     name: 'OnlyPorn: BrazzersExxtra · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'BrazzersExxtra',
@@ -68,7 +68,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.cum4k.top',
     name: 'OnlyPorn: Cum4K · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'Cum4K',
@@ -76,7 +76,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.devilsfilm.top',
     name: 'OnlyPorn: DevilsFilm · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'DevilsFilm',
@@ -84,7 +84,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.digitalplayground.top',
     name: 'OnlyPorn: DigitalPlayground · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'DigitalPlayground',
@@ -92,7 +92,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.dorcelclub.top',
     name: 'OnlyPorn: DorcelClub · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'DorcelClub',
@@ -100,7 +100,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.metart.top',
     name: 'OnlyPorn: MetArt · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'MetArt',
@@ -108,7 +108,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.metartx.top',
     name: 'OnlyPorn: MetArtX · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'MetArtX',
@@ -116,7 +116,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.milfty.top',
     name: 'OnlyPorn: Milfty · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'Milfty',
@@ -124,7 +124,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.milfy.top',
     name: 'OnlyPorn: Milfy · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'Milfy',
@@ -132,7 +132,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.newsensations.top',
     name: 'OnlyPorn: NewSensations · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'NewSensations',
@@ -140,7 +140,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.pornmegaload.top',
     name: 'OnlyPorn: PornMegaLoad · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'PornMegaLoad',
@@ -148,7 +148,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.onlyfans.top',
     name: 'OnlyPorn: OnlyFans · Top',
-    source: 'torrent-index',
+    source: 'platform-hybrid',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'OnlyFans',
@@ -158,7 +158,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.playboyplus.top',
     name: 'OnlyPorn: PlayboyPlus · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'PlayboyPlus',
@@ -166,7 +166,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.sexmex.top',
     name: 'OnlyPorn: SexMex · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'SexMex',
@@ -174,7 +174,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.thelifeerotic.top',
     name: 'OnlyPorn: TheLifeErotic · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'TheLifeErotic',
@@ -182,7 +182,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.vixen.top',
     name: 'OnlyPorn: Vixen · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'Vixen',
@@ -190,7 +190,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.wowgirls.top',
     name: 'OnlyPorn: WowGirls · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'WowGirls',
@@ -198,7 +198,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.sexart.top',
     name: 'OnlyPorn: SexArt · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'SexArt',
@@ -206,7 +206,7 @@ const SELECTED_CATALOGS = [
   {
     id: 'tpb4k.studio.xvideosred.top',
     name: 'OnlyPorn: XVideosRED · Top',
-    source: 'torrent-index',
+    source: 'studio-metadata',
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'XVideosRED',
