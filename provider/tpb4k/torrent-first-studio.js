@@ -5,7 +5,16 @@ const { normalizedAliasKeys, studioAliases } = require('./studio-aliases');
 const { studioReleasePosterUrl } = require('./studio-release-poster');
 const MAX_CANDIDATES_PER_SCENE = 12;
 function validInfoHash(value) { const text = compact(value).toLowerCase(); return /^[a-f0-9]{40}$/.test(text) ? text : ''; }
-function validPoster(value) { try { const url = new URL(compact(value)); return url.protocol === 'https:' && !url.username && !url.password; } catch { return false; } }
+function validPoster(value) {
+  try {
+    const url = new URL(compact(value));
+    const host = url.hostname.toLowerCase();
+    if (url.protocol !== 'https:' || url.username || url.password) return false;
+    if (host === 'imagetwist.com' || host.endsWith('.imagetwist.com')
+      || host === 'imgtwist.com' || host.endsWith('.imgtwist.com')) return false;
+    return true;
+  } catch { return false; }
+}
 
 const RELEASE_NOISE = new Set([
   '2160p', '1080p', '720p', '480p', '4k', '8k', 'uhd', 'hdr', 'hdr10', 'dv',
@@ -14,7 +23,7 @@ const RELEASE_NOISE = new Set([
   'repack', 'internal', 'uncensored', 'xxx', 'porn', 'video', 'videos', 'com',
   'mp4', 'mkv', 'wmv', 'avi', 'torrent', 'pack', 'complete', 'collection',
 ]);
-const WEAK_MINIMUMS = Object.freeze({ onlyfans: 12, digitalplayground: 8, xvideosred: 8, sexmex: 8 });
+const WEAK_MINIMUMS = Object.freeze({ onlyfans: 40, digitalplayground: 20, xvideosred: 20, sexmex: 12 });
 
 function compact(value) { return String(value || '').normalize('NFKC').replace(/\s+/g, ' ').trim(); }
 function compactKey(value) { return compact(value).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ''); }
@@ -50,7 +59,7 @@ function sceneCode(value) {
   return `${prefix.toLowerCase()}${Number(generic[2])}`;
 }
 function creatorKey(item = {}, catalog = {}) {
-  const direct = compactKey(item.creator || item.username || item.channel || item.account || item.model || '');
+  const direct = compactKey(item.creator || item.username || item.channel || item.account || item.model || item.performer || item.performers?.[0] || '');
   if (direct.length >= 4) return direct;
   if (studioKey(catalog) !== 'onlyfans') return '';
   const title = compact(item.title || item.filename).replace(/\[[^\]]+\]/g, ' ');
@@ -119,6 +128,32 @@ function bindCard(base, values) {
   });
 }
 function metadataPosterValid(item = {}) { return validPoster(item.poster) && !/fallback|placeholder|default/i.test(String(item.lookupSource || '')); }
+function tokenSet(value, studio = '') {
+  return new Set(cleanReleaseTitle(value, studio).filter(token => token.length >= 3));
+}
+function metadataPosterMatch(item = {}, catalog = {}, metadataItems = []) {
+  const itemCode = sceneCode(`${item.sceneCode || ''} ${item.title || ''} ${item.filename || ''}`);
+  const itemCreator = creatorKey(item, catalog);
+  const itemTokens = tokenSet(item.title || item.filename, catalog.studio);
+  let best = null;
+  for (const meta of Array.isArray(metadataItems) ? metadataItems : []) {
+    if (!metadataPosterValid(meta)) continue;
+    const metaCode = sceneCode(`${meta.sceneCode || ''} ${meta.title || ''}`);
+    const metaCreator = creatorKey(meta, catalog);
+    const metaTokens = tokenSet(meta.title, catalog.studio);
+    let common = 0;
+    for (const token of itemTokens) if (metaTokens.has(token)) common += 1;
+    const creatorExact = Boolean(itemCreator && metaCreator && itemCreator === metaCreator);
+    const codeExact = Boolean(itemCode && metaCode && itemCode === metaCode);
+    const score = (codeExact ? 1000 : 0) + (creatorExact ? 300 : 0) + common * 35
+      + (String(item.releaseDate || '').slice(0, 10)
+        && String(item.releaseDate || '').slice(0, 10) === String(meta.releaseDate || '').slice(0, 10) ? 40 : 0);
+    const eligible = codeExact || (creatorExact && common >= 1) || common >= 4;
+    if (!eligible || !score) continue;
+    if (!best || score > best.score) best = { score, meta };
+  }
+  return best?.meta || null;
+}
 function studioEvidence(item = {}, catalog = {}) {
   const aliases = normalizedAliasKeys(catalog.studio);
   const haystack = compactKey(`${item.studio || ''} ${item.title || ''} ${item.filename || ''} ${item.lookupQuery || ''}`);
@@ -126,7 +161,10 @@ function studioEvidence(item = {}, catalog = {}) {
   return compact(item.lookupSource).includes('torrent') || compact(item.metadataProvider).length > 0;
 }
 function baseCard(item, catalog, options = {}) {
-  const verifiedPoster = metadataPosterValid(item) ? compact(item.poster) : '';
+  const matchedMetadata = metadataPosterMatch(item, catalog, options.metadataItems);
+  const verifiedPoster = metadataPosterValid(item)
+    ? compact(item.poster)
+    : (metadataPosterValid(matchedMetadata) ? compact(matchedMetadata.poster) : '');
   const poster = verifiedPoster || studioReleasePosterUrl(item, catalog, options.config || {}, options.env || process.env);
   return Object.freeze({
     ...item,
@@ -136,14 +174,16 @@ function baseCard(item, catalog, options = {}) {
     studio: compact(catalog.studio || item.studio),
     poster,
     background: verifiedPoster ? compact(item.background || item.poster) : poster,
-    description: compact(item.description || `OnlyPorn ${catalog.studio} torrent release`),
-    performers: Array.isArray(item.performers) ? item.performers : [],
-    tags: Array.isArray(item.tags) ? item.tags : [],
-    releaseDate: compact(item.releaseDate),
-    sceneCode: compact(item.sceneCode),
-    metadataProvider: compact(item.metadataProvider),
-    upstreamId: compact(item.upstreamId),
-    detailUrl: compact(item.detailUrl),
+    description: compact(item.description || matchedMetadata?.description || `OnlyPorn ${catalog.studio} torrent release`),
+    performers: Array.isArray(item.performers) && item.performers.length
+      ? item.performers : (Array.isArray(matchedMetadata?.performers) ? matchedMetadata.performers : []),
+    tags: Array.isArray(item.tags) && item.tags.length
+      ? item.tags : (Array.isArray(matchedMetadata?.tags) ? matchedMetadata.tags : []),
+    releaseDate: compact(item.releaseDate || matchedMetadata?.releaseDate),
+    sceneCode: compact(item.sceneCode || matchedMetadata?.sceneCode),
+    metadataProvider: compact(item.metadataProvider || matchedMetadata?.metadataProvider),
+    upstreamId: compact(item.upstreamId || matchedMetadata?.upstreamId),
+    detailUrl: compact(item.detailUrl || matchedMetadata?.detailUrl),
   });
 }
 
@@ -152,6 +192,7 @@ function mergeTorrentFirstStudio(options = {}) {
   const limit = Math.min(Math.max(Number.parseInt(String(options.limit || 40), 10) || 40, 1), 100);
   const existing = Array.isArray(options.existingItems) ? options.existingItems : [];
   const discovered = Array.isArray(options.torrentItems) ? options.torrentItems : [];
+  const metadataItems = Array.isArray(options.metadataItems) ? options.metadataItems : [];
   const groups = new Map();
   const order = [];
   const usedHashes = new Set();
@@ -176,7 +217,7 @@ function mergeTorrentFirstStudio(options = {}) {
     if (!key || key.endsWith(':')) continue;
     let group = groups.get(key);
     if (!group) {
-      group = { base: baseCard(item, catalog, options), values: [], existing: false };
+      group = { base: baseCard(item, catalog, { ...options, metadataItems }), values: [], existing: false };
       groups.set(key, group);
       order.push(key);
     }
@@ -223,6 +264,7 @@ module.exports = {
   WEAK_MINIMUMS,
   cleanReleaseTitle,
   mergeTorrentFirstStudio,
+  metadataPosterMatch,
   minimumCards,
   sceneIdentity,
   shouldUseTorrentFirst,
