@@ -226,6 +226,32 @@ function extractPlayerCandidates(html, pageUrl) {
   return [...unique.values()];
 }
 
+function prioritizePlayerCandidates(queue, visited, candidates, referer, depth) {
+  const queued = new Set(queue.map(item => item?.url).filter(Boolean));
+  const pending = [];
+
+  for (const candidate of candidates) {
+    if (
+      !candidate?.url ||
+      visited.has(candidate.url) ||
+      queued.has(candidate.url)
+    ) continue;
+
+    queued.add(candidate.url);
+    pending.push({
+      url: candidate.url,
+      context: candidate.context,
+      referer,
+      depth,
+    });
+  }
+
+  // A decoded media URL may be extensionless or disguised. Inspect it before
+  // spending the remaining 12-page budget on more reserve-player pages, while
+  // preserving every fallback already in the queue.
+  if (pending.length) queue.unshift(...pending);
+}
+
 class JavHdPornProvider extends Provider {
   constructor() {
     super('https://www.javhdporn.net', 'javhdporn', 24, {
@@ -710,19 +736,16 @@ class JavHdPornProvider extends Provider {
           }
         }
 
-        for (const candidate of [
-          ...encryptedCandidates,
-          ...extractPlayerCandidates(html, safeUrl),
-        ]) {
-          if (!visited.has(candidate.url)) {
-            queue.push({
-              url: candidate.url,
-              context: candidate.context,
-              referer: safeUrl,
-              depth: item.depth + 1,
-            });
-          }
-        }
+        prioritizePlayerCandidates(
+          queue,
+          visited,
+          [
+            ...encryptedCandidates,
+            ...extractPlayerCandidates(html, safeUrl),
+          ],
+          safeUrl,
+          item.depth + 1
+        );
       } catch (error) {
         logger.debug(
           { provider: this.name, url: sanitizeUrlForLogs(item.url), error: error.message },
@@ -802,6 +825,7 @@ create._test = {
   isoDurationToRuntime,
   normalizePoster,
   normalizeSourceValue,
+  prioritizePlayerCandidates,
   decodeReservePlayers,
   isJavPlayerHost,
 };

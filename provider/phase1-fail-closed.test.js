@@ -171,7 +171,7 @@ test('Hardening Phase 1 release wiring is deterministic and preserves prior repa
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const relay = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
 
-  assert.equal(pkg.version, '2.7.0-alpha.24');
+  assert.equal(pkg.version, '2.7.0-alpha.25');
   assert.equal(pkg.scripts['test:hardening1'], 'node --test provider/phase1-fail-closed.test.js');
   assert.match(pkg.scripts['test:release'], /phase1-fail-closed\.test\.js/);
   assert.match(pkg.scripts['test:release'], /phase0-hardening\.test\.js/);
