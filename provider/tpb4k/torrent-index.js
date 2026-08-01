@@ -726,12 +726,24 @@ function createTorrentIndexAdapter(options = {}) {
     ].map(compactText).filter(value => value.length >= 3);
     const creator = identities[0] || '';
     const platform = studioKey === 'onlyfans';
-    const values = [
-      identity.sceneCode,
-      platform ? [creator, title, 'OnlyFans'].map(compactText).filter(Boolean).join(' ') : [studio, title].map(compactText).filter(Boolean).join(' '),
-      compactText(item.lookupQuery),
-      platform ? [creator, title].map(compactText).filter(Boolean).join(' ') : '',
-    ];
+    const aliases = studioSearchQueries({ studio, playbackBindingPool: true });
+    const readableAliases = [...aliases].sort((left, right) => {
+      const leftReadable = /[\s.]/.test(left) ? 1 : 0;
+      const rightReadable = /[\s.]/.test(right) ? 1 : 0;
+      return rightReadable - leftReadable;
+    });
+    const values = platform
+      ? [
+        identity.sceneCode,
+        [creator, title, 'OnlyFans'].map(compactText).filter(Boolean).join(' '),
+        [creator, title].map(compactText).filter(Boolean).join(' '),
+        compactText(item.lookupQuery),
+      ]
+      : [
+        identity.sceneCode,
+        ...readableAliases.slice(0, 2).map(alias => [alias, title].map(compactText).filter(Boolean).join(' ')),
+        compactText(item.lookupQuery),
+      ];
     const output = [];
     const seen = new Set();
     for (const value of values) {
@@ -740,7 +752,7 @@ function createTorrentIndexAdapter(options = {}) {
       if (query.length < 3 || seen.has(key)) continue;
       seen.add(key);
       output.push(query);
-      if (output.length >= 3) break;
+      if (output.length >= 4) break;
     }
     return output;
   }
@@ -803,11 +815,28 @@ function createTorrentIndexAdapter(options = {}) {
         ),
       },
     ];
-    const settled = await Promise.allSettled(searches.map(search => search.run()));
+    const remainingMs = Math.max(deadlineAt - Date.now(), 0);
+    const sourceBudgetMs = Math.min(2_800, Math.max(remainingMs - 250, 250));
+    const settleWithin = promise => {
+      let timer;
+      return Promise.race([
+        Promise.resolve(promise)
+          .then(value => ({ status: 'fulfilled', value }), reason => ({ status: 'rejected', reason }))
+          .finally(() => clearTimeout(timer)),
+        new Promise(resolve => {
+          timer = setTimeout(() => resolve({ status: 'timed-out' }), sourceBudgetMs);
+        }),
+      ]);
+    };
+    const settled = await Promise.all(searches.map(search => settleWithin(search.run())));
     const records = [];
     const diagnostics = [];
     settled.forEach((result, index) => {
       const source = searches[index].source;
+      if (result.status === 'timed-out') {
+        diagnostics.push({ source, outcome: 'timeout' });
+        return;
+      }
       if (result.status === 'rejected') {
         diagnostics.push({
           source,
@@ -932,11 +961,12 @@ function createTorrentIndexAdapter(options = {}) {
         seenRecords.add(key);
         records.push(record);
       }
+      if (records.length >= 8) break;
     }
 
     const selected = records
       .sort((left, right) => Number(right.seeders || 0) - Number(left.seeders || 0))
-      .slice(0, 18);
+      .slice(0, 8);
     const candidates = await mapLimited(
       selected,
       Math.min(Math.max(Number(config.torrentIndex?.detailConcurrency || 3), 1), 5),

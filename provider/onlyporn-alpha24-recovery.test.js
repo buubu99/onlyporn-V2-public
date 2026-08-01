@@ -6,12 +6,16 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { catalogDefinitions } = require('../catalog/tpb4k');
+const { decodeTpb4kId } = require('./tpb4k/id-codec');
+const { clearAdapters, registerAdapter } = require('./tpb4k/index');
+const { fillCatalogWithMetadata } = require('./tpb4k/catalog-metadata-fill');
 const {
   externalPosterValid,
   mergeTorrentFirstStudio,
   metadataPosterMatch,
 } = require('./tpb4k/torrent-first-studio');
 const { augmentStudioPlayback, prioritizeFailoverCandidates } = require('./tpb4k/studio-targeted-recovery');
+const { Tpb4kProvider } = require('./tpb4k');
 
 const ROOT = path.resolve(__dirname, '..');
 const HASH_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -43,6 +47,86 @@ test('generic studio assets, generated title cards, and ImageTwist are never rea
   assert.equal(externalPosterValid({ poster: 'https://onlyporn.example/onlyporn/poster/studio-release/a.svg' }), false);
   assert.equal(externalPosterValid({ poster: 'https://imagetwist.com/error.jpg' }), false);
   assert.equal(externalPosterValid({ poster: 'https://cdn.theporndb.net/scene/ruth.jpg' }), true);
+});
+
+test('affected catalogs keep playable cards first and fill the row with real metadata cards', () => {
+  const playable = [{ sourceId: 'tpdb:one', title: 'Scene One', studio: 'XVideosRED' }];
+  const metadata = [
+    { sourceId: 'tpdb:one', title: 'Scene One', studio: 'XVideosRED', poster: 'https://images.example/one.jpg' },
+    { sourceId: 'tpdb:two', title: 'Scene Two', studio: 'XVideosRED', poster: 'https://images.example/two.jpg' },
+  ];
+  const filled = fillCatalogWithMetadata(
+    { id: 'tpb4k.studio.xvideosred.top' },
+    playable,
+    metadata,
+    40
+  );
+  assert.deepEqual(filled.map(item => item.sourceId), ['tpdb:one', 'tpdb:two']);
+  assert.equal(filled[0], playable[0]);
+});
+
+test('healthy studio catalogs are not changed by the selective metadata fill policy', () => {
+  const playable = [{ sourceId: 'tpdb:vixen-one', title: 'Vixen One', studio: 'Vixen' }];
+  const metadata = [{ sourceId: 'tpdb:vixen-two', title: 'Vixen Two', studio: 'Vixen' }];
+  const filled = fillCatalogWithMetadata(
+    { id: 'tpb4k.studio.vixen.top' },
+    playable,
+    metadata,
+    40
+  );
+  assert.deepEqual(filled, playable);
+});
+
+test('XVideosRED remains visible without pre-bound torrents and resolves playback when opened', async () => {
+  const scenes = [1, 2, 3].map(index => ({
+    source: 'studio-metadata',
+    sourceId: `tpdb:xvr-${index}`,
+    title: `XVideos RED Scene ${index}`,
+    studio: 'XVideosRED',
+    poster: `https://images.example/xvr-${index}.jpg`,
+    background: `https://images.example/xvr-${index}.jpg`,
+    releaseDate: `2026-07-${20 + index}`,
+  }));
+  clearAdapters();
+  registerAdapter({
+    id: 'studio-metadata', configured: true,
+    async catalog() { return scenes; },
+    async meta({ sourceId }) { return scenes.find(item => item.sourceId === sourceId) || null; },
+    async resolve() { return []; },
+  });
+  registerAdapter({
+    id: 'torrent-index', configured: true,
+    async catalog() { return []; },
+    async catalogTorrents() { return []; },
+    async meta() { return null; },
+    async resolve({ item }) {
+      return [{
+        source: 'knaben', sourceId: `knaben:${item.sourceId}`, infoHash: HASH_A,
+        title: item.title, filename: `${item.title}.mp4`, seeders: 12,
+      }];
+    },
+  });
+  const provider = new Tpb4kProvider({
+    env: {
+      TPB4K_ENABLED: 'true',
+      TPB4K_CATALOG_LIMIT: '3',
+      TPB4K_MINIMUM_SEEDERS: '3',
+      ONLYPORN_DISABLE_PERSISTENT_CACHE: 'true',
+    },
+    installBuiltIns: false,
+  });
+  const catalog = await provider.handleCatalog({
+    type: 'movie', id: 'tpb4k.studio.xvideosred.top', extra: {},
+  });
+  assert.equal(catalog.metas.length, 3);
+  const unboundMeta = catalog.metas.find(meta => {
+    const decoded = decodeTpb4kId(meta.id);
+    return !Array.isArray(decoded.torrents) || decoded.torrents.length === 0;
+  });
+  assert.ok(unboundMeta, 'metadata fill should preserve a card without catalog-time torrent binding');
+  const stream = await provider.handleStream({ type: 'movie', id: unboundMeta.id });
+  assert.equal(stream.streams.length, 1);
+  assert.equal(stream.streams[0].infoHash, HASH_A);
 });
 
 test('weak-studio recovery keeps a torrent only when it can bind real per-release artwork', () => {

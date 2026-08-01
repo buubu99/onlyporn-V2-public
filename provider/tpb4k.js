@@ -8,6 +8,7 @@ const {
   toStremioStream,
 } = require('./tpb4k/candidate');
 const { readTpb4kConfig, publicConfigStatus, redactSecrets } = require('./tpb4k/config');
+const { fillCatalogWithMetadata } = require('./tpb4k/catalog-metadata-fill');
 const { createCatalogResponseStore } = require('./tpb4k/catalog-response-store');
 const { decodeTpb4kId, encodeTpb4kId } = require('./tpb4k/id-codec');
 const { buildSceneIdentity } = require('./tpb4k/identity');
@@ -30,7 +31,7 @@ const {
 const MOVIE_TYPE = 'movie';
 const SERIES_TYPE = 'series';
 const RELEASE_VERSION = require('../package.json').version;
-const CATALOG_CACHE_REVISION = 'r6';
+const CATALOG_CACHE_REVISION = 'r7';
 const HENTAI_PREFIX = 'ophmm-';
 const HENTAI_TOP_PREFIX = 'ophtop-';
 const TORRENT_FIRST_STUDIOS = new Set(['onlyfans', 'digitalplayground', 'xvideosred', 'sexmex']);
@@ -350,7 +351,12 @@ class Tpb4kProvider {
           skip: 0,
           limit: config.catalogLimit,
         });
-        rawItems = [...binding.items];
+        rawItems = [...fillCatalogWithMetadata(
+          definition,
+          binding.items,
+          metadataItems,
+          config.catalogLimit
+        )];
         catalogPlayabilityBinding = binding.stats;
         catalogTargetedRecovery = binding.recovery;
       } else if (requiresPlayableBinding) {
@@ -468,6 +474,12 @@ class Tpb4kProvider {
           rawItems = [...binding.items];
           studioTargetedRecovery = binding.recovery;
         }
+        rawItems = [...fillCatalogWithMetadata(
+          definition,
+          rawItems,
+          metadataItems,
+          config.catalogLimit
+        )];
         studioPlaybackBinding = binding.stats;
       } else {
         rawItems = await adapter.catalog({
