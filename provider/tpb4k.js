@@ -469,9 +469,11 @@ class Tpb4kProvider {
     try { rawItem = await adapter.meta({ sourceId: decoded.sourceId, catalogId: decoded.catalogId, config }); }
     catch { logger().warn({ provider: this.name, source: decoded.source }, 'OnlyPorn metadata adapter failed safely'); }
     const normalized = rawItem ? normalizeDiscoveryItem(adapter, rawItem) : null;
-    const item = normalized && Array.isArray(rawItem?.videos) ? Object.freeze({ ...normalized, videos: rawItem.videos }) : normalized;
-    if (!item) {
-      let preview = null;
+    let item = normalized && Array.isArray(rawItem?.videos) ? Object.freeze({ ...normalized, videos: rawItem.videos }) : normalized;
+    const needsCatalogPoster = decoded.catalogId.startsWith('tpb4k.studio.')
+      && !realStudioPoster(item?.poster);
+    let preview = null;
+    if (!item || needsCatalogPoster) {
       for (const record of this.catalogResponseCache.values()) {
         preview = record?.value?.metas?.find(meta => String(meta?.id || '') === String(args.id || '')) || null;
         if (preview) break;
@@ -489,6 +491,8 @@ class Tpb4kProvider {
           // The adapter failure remains isolated; an empty meta is returned below.
         }
       }
+    }
+    if (!item) {
       const recovered = catalogPreviewMeta(preview, args.id, decoded);
       if (recovered) {
         logger().info({
@@ -500,6 +504,20 @@ class Tpb4kProvider {
         return { meta: recovered };
       }
       return { meta: {} };
+    }
+    const catalogPoster = realStudioPoster(preview?.poster);
+    if (needsCatalogPoster && catalogPoster) {
+      item = Object.freeze({
+        ...item,
+        poster: catalogPoster,
+        background: safePoster(preview?.background) || catalogPoster,
+      });
+      logger().info({
+        provider: this.name,
+        catalogId: decoded.catalogId,
+        source: decoded.source,
+        sourceId: decoded.sourceId,
+      }, 'OnlyPorn metadata reused the catalog card poster');
     }
     const evaluation = evaluateContent(item, this.contentFilter);
     if (evaluation.excluded) return { meta: {} };

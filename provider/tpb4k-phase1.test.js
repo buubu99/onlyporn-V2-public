@@ -329,6 +329,48 @@ test('provider recovers metadata from the persisted catalog card when a transien
   assert.equal(result.meta.extra.onlyporn.playbackCandidates, 1);
 });
 
+test('studio detail metadata preserves the exact real poster shown on its catalog card', async () => {
+  const id = encodeTpb4kId({
+    source: 'torrent-index',
+    sourceId: 'torrent-first:onlyfans-poster-fixture',
+    catalogId: 'tpb4k.studio.onlyfans.top',
+    torrents: [{ infoHash: HASH_4K, filename: 'OnlyFans.Poster.Fixture.mp4' }],
+  });
+  registerAdapter({
+    id: 'torrent-index',
+    async catalog() { return []; },
+    async meta({ sourceId }) {
+      return {
+        sourceId,
+        title: 'OnlyFans Poster Fixture',
+        studio: 'OnlyFans',
+        poster: 'https://onlyporn.example/assets/tpb4k/studios/onlyfans.png',
+      };
+    },
+    async resolve() { return []; },
+  });
+  const provider = new Tpb4kProvider({
+    installBuiltIns: false,
+    env: { TPB4K_ENABLED: 'true', ONLYPORN_DISABLE_PERSISTENT_CACHE: 'true' },
+  });
+  provider.catalogResponseCache.set('poster-fixture', {
+    savedAt: Date.now(),
+    value: {
+      metas: [{
+        id,
+        type: 'movie',
+        name: 'OnlyFans Poster Fixture',
+        poster: 'https://images.example/onlyfans-real-scene.jpg',
+      }],
+    },
+  });
+
+  const result = await provider.handleMeta({ type: 'movie', id });
+
+  assert.equal(result.meta.poster, 'https://images.example/onlyfans-real-scene.jpg');
+  assert.equal(result.meta.background, 'https://images.example/onlyfans-real-scene.jpg');
+});
+
 test('ThePornDB recent resolves exact scene torrents instead of remaining metadata-only', async () => {
   registerAdapter({
     id: 'tpdb',
