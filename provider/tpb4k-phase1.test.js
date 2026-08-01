@@ -290,6 +290,44 @@ test('provider foundation normalizes catalog, meta, and stream results without l
   assert.equal(result.streams.some(stream => stream.infoHash === HASH_1080), false);
 });
 
+test('provider recovers metadata from the persisted catalog card when a transient adapter index forgets it', async () => {
+  registerAdapter({
+    id: 'pornrips',
+    async catalog() {
+      return [{
+        sourceId: 'forgotten-after-catalog',
+        title: 'Durable Catalog Metadata Fixture',
+        poster: 'https://images.example/durable-catalog.jpg',
+        description: 'Metadata retained with the catalog response',
+        studio: 'Fixture Studio',
+        infoHash: HASH_4K,
+      }];
+    },
+    async meta() { return null; },
+    async resolve() { return []; },
+  });
+  const provider = new Tpb4kProvider({
+    installBuiltIns: false,
+    env: {
+      TPB4K_ENABLED: 'true',
+      TPB4K_CATALOG_LIMIT: '1',
+      ONLYPORN_DISABLE_PERSISTENT_CACHE: 'true',
+    },
+  });
+  const catalog = await provider.handleCatalog({
+    type: 'movie',
+    id: 'tpb4k.pornrips.recent',
+    extra: { skip: 0 },
+  });
+  const result = await provider.handleMeta({ type: 'movie', id: catalog.metas[0].id });
+
+  assert.equal(result.meta.id, catalog.metas[0].id);
+  assert.equal(result.meta.name, 'Durable Catalog Metadata Fixture');
+  assert.equal(result.meta.poster, 'https://images.example/durable-catalog.jpg');
+  assert.equal(result.meta.extra.onlyporn.metadataProvider, 'catalog-response');
+  assert.equal(result.meta.extra.onlyporn.playbackCandidates, 1);
+});
+
 test('provider supplies a branded HTTPS fallback when an upstream catalog omits artwork', async () => {
   registerAdapter({
     id: 'tpdb',

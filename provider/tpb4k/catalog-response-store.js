@@ -86,6 +86,21 @@ function createCatalogResponseStore(options = {}) {
       }
       return record;
     },
+    findMeta(id) {
+      load();
+      const normalizedId = clean(id);
+      if (!normalizedId) return null;
+      const current = now();
+      for (const [key, record] of records) {
+        if (current - record.savedAt > ttlMs) {
+          records.delete(key);
+          continue;
+        }
+        const meta = record.value.metas.find(item => clean(item?.id) === normalizedId);
+        if (meta) return meta;
+      }
+      return null;
+    },
     set(key, value) {
       load();
       const normalizedKey = clean(key).slice(0, 500);

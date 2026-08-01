@@ -168,6 +168,37 @@ function toMetaResponse(item, id, config, type = MOVIE_TYPE, catalogId = '') {
     },
   };
 }
+function catalogPreviewMeta(preview, id, decoded) {
+  if (!preview || String(preview.id || '') !== String(id || '') || !preview.name) return null;
+  const type = catalogType(decoded.catalogId);
+  const poster = safePoster(preview.poster);
+  const tags = Array.isArray(preview.tags) ? preview.tags : [];
+  return {
+    id,
+    type,
+    name: String(preview.name),
+    poster,
+    background: safePoster(preview.background) || poster,
+    posterShape: preview.posterShape || 'poster',
+    genres: Array.isArray(preview.genres) ? preview.genres : [],
+    tags,
+    description: preview.description,
+    links: Array.isArray(preview.links) ? preview.links : [],
+    extra: {
+      onlyporn: {
+        source: decoded.source,
+        sourceId: decoded.sourceId,
+        identity: '',
+        releaseDate: '',
+        sceneCode: '',
+        tags,
+        metadataProvider: 'catalog-response',
+        lookupSource: '',
+        playbackCandidates: Array.isArray(decoded.torrents) ? decoded.torrents.length : 0,
+      },
+    },
+  };
+}
 function diagnosticStudioKey(value) { return String(value || '').normalize('NFKC').toLowerCase().replace(/[^a-z0-9]+/g, ''); }
 function mergeReasons(...values) {
   const output = {};
@@ -433,9 +464,39 @@ class Tpb4kProvider {
     let rawItem = null;
     try { rawItem = await adapter.meta({ sourceId: decoded.sourceId, catalogId: decoded.catalogId, config }); }
     catch { logger().warn({ provider: this.name, source: decoded.source }, 'OnlyPorn metadata adapter failed safely'); }
-    const normalized = normalizeDiscoveryItem(adapter, rawItem);
+    const normalized = rawItem ? normalizeDiscoveryItem(adapter, rawItem) : null;
     const item = normalized && Array.isArray(rawItem?.videos) ? Object.freeze({ ...normalized, videos: rawItem.videos }) : normalized;
-    if (!item) return { meta: {} };
+    if (!item) {
+      let preview = null;
+      for (const record of this.catalogResponseCache.values()) {
+        preview = record?.value?.metas?.find(meta => String(meta?.id || '') === String(args.id || '')) || null;
+        if (preview) break;
+      }
+      if (!preview) preview = this.catalogResponseStore.findMeta(args.id);
+      if (!preview) {
+        try {
+          const catalog = await this.handleCatalog({
+            type: catalogType(decoded.catalogId),
+            id: decoded.catalogId,
+            extra: { skip: 0 },
+          });
+          preview = catalog?.metas?.find(meta => String(meta?.id || '') === String(args.id || '')) || null;
+        } catch {
+          // The adapter failure remains isolated; an empty meta is returned below.
+        }
+      }
+      const recovered = catalogPreviewMeta(preview, args.id, decoded);
+      if (recovered) {
+        logger().info({
+          provider: this.name,
+          catalogId: decoded.catalogId,
+          source: decoded.source,
+          sourceId: decoded.sourceId,
+        }, 'OnlyPorn metadata recovered from catalog response');
+        return { meta: recovered };
+      }
+      return { meta: {} };
+    }
     const evaluation = evaluateContent(item, this.contentFilter);
     if (evaluation.excluded) return { meta: {} };
     return { meta: toMetaResponse(item, args.id, config, catalogType(decoded.catalogId), decoded.catalogId) };
