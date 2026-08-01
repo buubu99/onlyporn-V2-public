@@ -91,6 +91,15 @@ test('JAVHDPorn accepts vdcdn only inside its own protected media profile', () =
   );
 });
 
+test('JAVHDPorn accepts the exact HLS CDN captured by the working browser session', () => {
+  const source = 'https://edge-hls.saawsedge.com/live/fixture/tokenized-source.m3u8';
+  assert.equal(mediaRelay._test.validateTargetUrl(source, 'javhdporn'), source);
+  assert.throws(
+    () => mediaRelay._test.validateTargetUrl(source, 'xvideos'),
+    /not approved/
+  );
+});
+
 test('vdcdn master rewriting preserves custom token lines and relays image-named segments', () => {
   mediaRelay._test.entries.clear();
   const entry = {

@@ -28,6 +28,7 @@ const PROVIDER_SUFFIXES = {
     'streamhls.click',
     'tiktokcdn.com',
     'vdcdn.xyz',
+    'edge-hls.saawsedge.com',
   ],
 };
 

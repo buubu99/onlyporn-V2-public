@@ -226,6 +226,26 @@ function extractPlayerCandidates(html, pageUrl) {
   return [...unique.values()];
 }
 
+function prioritizePlayerCandidates(queue, visited, candidates, referer, depth) {
+  const pending = [];
+  for (const candidate of candidates) {
+    if (!candidate?.url || visited.has(candidate.url)) continue;
+    pending.push({
+      url: candidate.url,
+      context: candidate.context,
+      referer,
+      depth,
+    });
+  }
+
+  // The API can return more reserve players than MAX_PLAYER_PAGES. Put media
+  // decoded from the current player first so extensionless HLS URLs are probed
+  // before the remaining decoy/reserve pages exhaust that safety budget.
+  for (let index = pending.length - 1; index >= 0; index -= 1) {
+    queue.unshift(pending[index]);
+  }
+}
+
 class JavHdPornProvider extends Provider {
   constructor() {
     super('https://www.javhdporn.net', 'javhdporn', 24, {
@@ -634,7 +654,7 @@ class JavHdPornProvider extends Provider {
     const visited = new Set();
     const media = new Map();
 
-    while (queue.length && visited.size < MAX_PLAYER_PAGES) {
+    while (queue.length && visited.size < MAX_PLAYER_PAGES && media.size === 0) {
       const item = queue.shift();
       if (!item || visited.has(item.url)) continue;
       visited.add(item.url);
@@ -710,19 +730,16 @@ class JavHdPornProvider extends Provider {
           }
         }
 
-        for (const candidate of [
-          ...encryptedCandidates,
-          ...extractPlayerCandidates(html, safeUrl),
-        ]) {
-          if (!visited.has(candidate.url)) {
-            queue.push({
-              url: candidate.url,
-              context: candidate.context,
-              referer: safeUrl,
-              depth: item.depth + 1,
-            });
-          }
-        }
+        prioritizePlayerCandidates(
+          queue,
+          visited,
+          [
+            ...encryptedCandidates,
+            ...extractPlayerCandidates(html, safeUrl),
+          ],
+          safeUrl,
+          item.depth + 1
+        );
       } catch (error) {
         logger.debug(
           { provider: this.name, url: sanitizeUrlForLogs(item.url), error: error.message },
@@ -802,6 +819,7 @@ create._test = {
   isoDurationToRuntime,
   normalizePoster,
   normalizeSourceValue,
+  prioritizePlayerCandidates,
   decodeReservePlayers,
   isJavPlayerHost,
 };

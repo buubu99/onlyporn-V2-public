@@ -79,6 +79,28 @@ test('JAVHDPorn evaluates reserve players before the primary player', () => {
   assert.match(source, /reservePlayers: reserveCandidates\.length/);
 });
 
+test('JAVHDPorn prioritizes a decoded HLS source before reserve pages exhaust the budget', () => {
+  const queue = Array.from({ length: 14 }, (_, index) => ({
+    url: `https://video1.javhdporn.net/p/reserve-${index}`,
+    context: `reserve[${index}]`,
+    referer: 'https://www.javhdporn.net/video/nima-038/',
+    depth: 0,
+  }));
+  const decodedHls = 'https://edge-hls.saawsedge.com/live/nima038/tokenized-source.m3u8';
+
+  createJavHdPorn._test.prioritizePlayerCandidates(
+    queue,
+    new Set(),
+    [{ url: decodedHls, context: 'JWPlayer source' }],
+    'https://video1.javhdporn.net/p/working-reserve',
+    1
+  );
+
+  assert.equal(queue[0].url, decodedHls);
+  assert.equal(queue[0].referer, 'https://video1.javhdporn.net/p/working-reserve');
+  assert.equal(queue[1].url, 'https://video1.javhdporn.net/p/reserve-0');
+});
+
 test('JAVHDPorn never exposes a raw HLS URL rejected by the protected relay', async () => {
   const provider = createJavHdPorn();
   const result = await provider.streamFromMedia({
