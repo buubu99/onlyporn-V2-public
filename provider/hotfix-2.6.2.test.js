@@ -125,7 +125,7 @@ test('vdcdn master rewriting preserves custom token lines and relays image-named
   assert.match(rewritten, /#EXT-X-TOKEN=fixture-token-must-remain/);
   const relayUrl = rewritten.split('\n').find(line => line.startsWith('https://onlyporn.example/media/'));
   assert.ok(relayUrl);
-  assert.match(relayUrl, /\/media\/r1\.[A-Za-z0-9_.-]+\/segment\.bin$/);
+  assert.match(relayUrl, /\/media\/r1\.[A-Za-z0-9_.-]+\/segment\.ts$/);
   assert.ok(relayUrl.length < 140, 'JAVHDPorn child relay URL must remain compact');
   const stored = mediaRelay._test.resolveRelayEntry(tokenFromRelayUrl(relayUrl));
   assert.equal(stored.provider, 'javhdporn');

@@ -66,6 +66,10 @@ test('a multi-hour VOD playlist creates one session instead of thousands of segm
     .filter(line => line.startsWith('https://onlyporn.example/media/'));
 
   assert.equal(relayLines.length, 2000);
+  assert.ok(
+    relayLines.every(line => line.endsWith('/segment.ts')),
+    'HLS media URLs must use an FFmpeg-approved MPEG-TS extension'
+  );
   assert.equal(
     mediaRelay._test.entries.size,
     1,
@@ -174,6 +178,7 @@ test('HTTP relay resolves a compact signed child playlist token without a child 
 
   assert.equal(response.statusCode, 200);
   assert.match(response.body, /https:\/\/onlyporn\.example\/media\/r1\./);
+  assert.match(response.body, /\/segment\.ts/);
   assert.equal(mediaRelay._test.entries.size, 1);
 });
 

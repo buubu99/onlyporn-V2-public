@@ -129,7 +129,12 @@ function filenameFor(kind) {
   if (kind === 'hls') return 'index.m3u8';
   if (kind === 'mp4') return 'video.mp4';
   if (kind === 'key') return 'key.bin';
-  return 'segment.bin';
+  // Stremio's FFmpeg rejects HLS media objects whose public URL ends in .bin,
+  // even when the response is a valid video/mp2t payload. The protected relay
+  // may decode an upstream .image/.webp object, but its public transport name
+  // must remain an FFmpeg-approved MPEG-TS extension.
+  if (kind === 'segment') return 'segment.ts';
+  return 'media.bin';
 }
 
 const KIND_TO_CODE = Object.freeze({

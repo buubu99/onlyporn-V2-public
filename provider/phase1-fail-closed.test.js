@@ -163,7 +163,7 @@ test('JAVHDPorn custom token lines remain untouched under fail-closed rewriting'
   );
 
   assert.match(rewritten, /#EXT-X-TOKEN=fixture-token-must-remain/);
-  assert.match(rewritten, /https:\/\/onlyporn\.example\/media\/r1\.[A-Za-z0-9_.-]+\/segment\.bin/);
+  assert.match(rewritten, /https:\/\/onlyporn\.example\/media\/r1\.[A-Za-z0-9_.-]+\/segment\.ts/);
   assert.doesNotMatch(rewritten, /\nseg0\.webp(?:\n|$)/);
 });
 
