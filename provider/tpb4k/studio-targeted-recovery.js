@@ -202,4 +202,25 @@ async function augmentStudioPlayback(options = {}) {
     }),
   });
 }
-module.exports = { augmentStudioPlayback, existingCandidateCounts, profile, recoverStudioPlayback };
+function prioritizeFailoverCandidates(items = []) {
+  return Object.freeze([...items]
+    .map((item, index) => ({ item, index }))
+    .sort((left, right) => {
+      const leftCandidates = left.item?.playbackCandidates?.length || (left.item?.infoHash ? 1 : 0);
+      const rightCandidates = right.item?.playbackCandidates?.length || (right.item?.infoHash ? 1 : 0);
+      const leftReady = leftCandidates > 1 ? 1 : 0;
+      const rightReady = rightCandidates > 1 ? 1 : 0;
+      return rightReady - leftReady
+        || rightCandidates - leftCandidates
+        || Number(right.item?.seeders || 0) - Number(left.item?.seeders || 0)
+        || left.index - right.index;
+    })
+    .map(entry => entry.item));
+}
+module.exports = {
+  augmentStudioPlayback,
+  existingCandidateCounts,
+  prioritizeFailoverCandidates,
+  profile,
+  recoverStudioPlayback,
+};

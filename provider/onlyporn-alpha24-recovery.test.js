@@ -11,7 +11,7 @@ const {
   mergeTorrentFirstStudio,
   metadataPosterMatch,
 } = require('./tpb4k/torrent-first-studio');
-const { augmentStudioPlayback } = require('./tpb4k/studio-targeted-recovery');
+const { augmentStudioPlayback, prioritizeFailoverCandidates } = require('./tpb4k/studio-targeted-recovery');
 
 const ROOT = path.resolve(__dirname, '..');
 const HASH_A = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -102,6 +102,12 @@ test('SexMex special recovery adds a distinct failover hash when the first RD to
   assert.equal(result.stats.multiCandidateScenes, 1);
 });
 
+test('SexMex puts existing multi-hash scenes before one-hash queued scenes', () => {
+  const single = { sourceId: 'single', infoHash: HASH_A, seeders: 100, playbackCandidates: [{ infoHash: HASH_A }] };
+  const multi = { sourceId: 'multi', infoHash: HASH_B, seeders: 5, playbackCandidates: [{ infoHash: HASH_B }, { infoHash: HASH_A }] };
+  assert.deepEqual(prioritizeFailoverCandidates([single, multi]).map(item => item.sourceId), ['multi', 'single']);
+});
+
 test('runtime filters all known fake studio posters and avoids transient empty metadata cache poisoning', () => {
   const provider = fs.readFileSync(path.join(ROOT, 'provider/tpb4k.js'), 'utf8');
   const metadata = fs.readFileSync(path.join(ROOT, 'provider/tpb4k/studio-metadata.js'), 'utf8');
@@ -114,6 +120,8 @@ test('runtime filters all known fake studio posters and avoids transient empty m
   assert.match(provider, /requireRealPoster: true/);
   assert.match(provider, /weakStudioKey === 'sexmex'/);
   assert.match(provider, /augmentStudioPlayback/);
+  assert.match(provider, /prioritizeFailoverCandidates/);
+  assert.match(provider, /RELEASE_VERSION/);
   assert.match(metadata, /if \(window\.length \|\| !providerFailed\) cache\.set/);
   assert.match(sukebei, /catalog: catalogDefinition/);
   assert.match(sukebei, /catalogDefinition\?\.mode === 'top'/);

@@ -15,7 +15,11 @@ const { getAdapter, installBuiltInAdapters } = require('./tpb4k/index');
 const { normalizeDiscoveryItem } = require('./tpb4k/source-contract');
 const { fallbackPosterUrl } = require('./tpb4k/poster-enrichment');
 const { bindStudioPlayback } = require('./tpb4k/studio-playback-binding');
-const { augmentStudioPlayback, recoverStudioPlayback } = require('./tpb4k/studio-targeted-recovery');
+const {
+  augmentStudioPlayback,
+  prioritizeFailoverCandidates,
+  recoverStudioPlayback,
+} = require('./tpb4k/studio-targeted-recovery');
 const { mergeTorrentFirstStudio, shouldUseTorrentFirst } = require('./tpb4k/torrent-first-studio');
 const {
   evaluateContent,
@@ -25,6 +29,7 @@ const {
 
 const MOVIE_TYPE = 'movie';
 const SERIES_TYPE = 'series';
+const RELEASE_VERSION = require('../package.json').version;
 const HENTAI_PREFIX = 'ophmm-';
 const HENTAI_TOP_PREFIX = 'ophtop-';
 const TORRENT_FIRST_STUDIOS = new Set(['onlyfans', 'digitalplayground', 'xvideosred', 'sexmex']);
@@ -192,7 +197,10 @@ class Tpb4kProvider {
 
   async handleCatalog(args) {
     if (!this.enabled()) return { metas: [] };
-    const cacheKey = `${String(args?.type || '')}:${String(args?.id || '')}:${String(args?.extra?.skip || 0)}`;
+    // A deploy must never rehydrate a last-known-good catalogue produced by a
+    // previous release. Keeping the version in the key prevents a stale disk
+    // entry from undoing a new poster, identity, or failover policy.
+    const cacheKey = `${RELEASE_VERSION}:${String(args?.type || '')}:${String(args?.id || '')}:${String(args?.extra?.skip || 0)}`;
     let cached = this.catalogResponseCache.get(cacheKey);
     if (!cached) {
       const persisted = this.catalogResponseStore.get(cacheKey);
@@ -335,7 +343,10 @@ class Tpb4kProvider {
               config,
             });
             fallback = Object.freeze({
-              items: augmented.items,
+              // AIOStreams can only fail over after a multi-hash scene is
+              // selected. Put the already-discovered reliable SexMex scenes
+              // first instead of burying them below one-hash queued results.
+              items: prioritizeFailoverCandidates(augmented.items),
               stats: Object.freeze({ ...fallback.stats, failoverAugmentation: augmented.stats }),
             });
           }
