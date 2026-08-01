@@ -371,6 +371,53 @@ test('studio detail metadata preserves the exact real poster shown on its catalo
   assert.equal(result.meta.background, 'https://images.example/onlyfans-real-scene.jpg');
 });
 
+test('Continue Watching recovers studio artwork when the saved torrent bundle is older than the catalog card', async () => {
+  const sourceId = 'torrent-first:onlyfans-continue-watching';
+  const catalogId = 'tpb4k.studio.onlyfans.top';
+  const savedId = encodeTpb4kId({
+    source: 'torrent-index', sourceId, catalogId,
+    torrents: [{ infoHash: HASH_4K, filename: 'OnlyFans.Old.Bundle.mp4' }],
+  });
+  const currentId = encodeTpb4kId({
+    source: 'torrent-index', sourceId, catalogId,
+    torrents: [{ infoHash: HASH_ALT, filename: 'OnlyFans.Current.Bundle.mp4' }],
+  });
+  registerAdapter({
+    id: 'torrent-index',
+    async catalog() { return []; },
+    async meta() {
+      return {
+        sourceId,
+        title: 'OnlyFans Continue Watching Fixture',
+        studio: 'OnlyFans',
+        poster: 'https://onlyporn.example/assets/tpb4k/studios/onlyfans.png',
+      };
+    },
+    async resolve() { return []; },
+  });
+  const provider = new Tpb4kProvider({
+    installBuiltIns: false,
+    env: { TPB4K_ENABLED: 'true', ONLYPORN_DISABLE_PERSISTENT_CACHE: 'true' },
+  });
+  provider.catalogResponseCache.set('continue-watching-fixture', {
+    savedAt: Date.now(),
+    value: {
+      metas: [{
+        id: currentId,
+        type: 'movie',
+        name: 'OnlyFans Continue Watching Fixture',
+        poster: 'https://images.example/onlyfans-continue-watching.jpg',
+      }],
+    },
+  });
+
+  const result = await provider.handleMeta({ type: 'movie', id: savedId });
+
+  assert.equal(result.meta.id, savedId);
+  assert.equal(result.meta.poster, 'https://images.example/onlyfans-continue-watching.jpg');
+  assert.equal(result.meta.background, 'https://images.example/onlyfans-continue-watching.jpg');
+});
+
 test('ThePornDB recent resolves exact scene torrents instead of remaining metadata-only', async () => {
   registerAdapter({
     id: 'tpdb',
@@ -410,7 +457,11 @@ test('ThePornDB recent resolves exact scene torrents instead of remaining metada
   });
   const provider = new Tpb4kProvider({
     installBuiltIns: false,
-    env: { TPB4K_ENABLED: 'true', TPB4K_CATALOG_LIMIT: '1' },
+    env: {
+      TPB4K_ENABLED: 'true',
+      TPB4K_CATALOG_LIMIT: '1',
+      ONLYPORN_DISABLE_PERSISTENT_CACHE: 'true',
+    },
   });
   const catalog = await provider.handleCatalog({
     type: 'movie', id: 'tpb4k.tpdb.recent', extra: { skip: 0 },
@@ -484,7 +535,11 @@ test('provider supplies a branded HTTPS fallback when an upstream catalog omits 
   });
   const provider = new Tpb4kProvider({
     installBuiltIns: false,
-    env: { TPB4K_ENABLED: 'true', TPB4K_CATALOG_LIMIT: '1' },
+    env: {
+      TPB4K_ENABLED: 'true',
+      TPB4K_CATALOG_LIMIT: '1',
+      ONLYPORN_DISABLE_PERSISTENT_CACHE: 'true',
+    },
   });
   const catalog = await provider.handleCatalog({
     type: 'movie',

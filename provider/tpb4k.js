@@ -201,6 +201,13 @@ function catalogPreviewMeta(preview, id, decoded) {
   };
 }
 function diagnosticStudioKey(value) { return String(value || '').normalize('NFKC').toLowerCase().replace(/[^a-z0-9]+/g, ''); }
+function sameCatalogIdentity(meta, decoded) {
+  const identity = decodeTpb4kId(meta?.id);
+  return Boolean(identity
+    && identity.catalogId === decoded.catalogId
+    && identity.source === decoded.source
+    && identity.sourceId === decoded.sourceId);
+}
 function mergeReasons(...values) {
   const output = {};
   for (const value of values) for (const [key, amount] of Object.entries(value || {})) output[key] = (output[key] || 0) + Math.max(Number(amount || 0), 0);
@@ -480,10 +487,13 @@ class Tpb4kProvider {
     let preview = null;
     if (!item || needsCatalogPoster) {
       for (const record of this.catalogResponseCache.values()) {
-        preview = record?.value?.metas?.find(meta => String(meta?.id || '') === String(args.id || '')) || null;
+        preview = record?.value?.metas?.find(meta =>
+          String(meta?.id || '') === String(args.id || '') || sameCatalogIdentity(meta, decoded)
+        ) || null;
         if (preview) break;
       }
       if (!preview) preview = this.catalogResponseStore.findMeta(args.id);
+      if (!preview) preview = this.catalogResponseStore.findMetaByIdentity(decoded);
       if (!preview) {
         try {
           const catalog = await this.handleCatalog({
@@ -491,7 +501,9 @@ class Tpb4kProvider {
             id: decoded.catalogId,
             extra: { skip: 0 },
           });
-          preview = catalog?.metas?.find(meta => String(meta?.id || '') === String(args.id || '')) || null;
+          preview = catalog?.metas?.find(meta =>
+            String(meta?.id || '') === String(args.id || '') || sameCatalogIdentity(meta, decoded)
+          ) || null;
         } catch {
           // The adapter failure remains isolated; an empty meta is returned below.
         }

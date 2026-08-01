@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { decodeTpb4kId } = require('./id-codec');
 
 const STORE_VERSION = 1;
 const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
@@ -21,6 +22,14 @@ function normalizeRecord(value, now, ttlMs) {
   const savedAt = Math.max(Number(value.savedAt || 0), 0);
   if (!key || !savedAt || now - savedAt > ttlMs || !validValue(value.value)) return null;
   return Object.freeze({ key, savedAt, value: Object.freeze({ metas: Object.freeze([...value.value.metas]) }) });
+}
+
+function sameIdentity(metaId, identity = {}) {
+  const decoded = decodeTpb4kId(metaId);
+  return Boolean(decoded
+    && clean(decoded.catalogId) === clean(identity.catalogId)
+    && clean(decoded.source) === clean(identity.source)
+    && clean(decoded.sourceId) === clean(identity.sourceId));
 }
 
 function createCatalogResponseStore(options = {}) {
@@ -97,6 +106,20 @@ function createCatalogResponseStore(options = {}) {
           continue;
         }
         const meta = record.value.metas.find(item => clean(item?.id) === normalizedId);
+        if (meta) return meta;
+      }
+      return null;
+    },
+    findMetaByIdentity(identity) {
+      load();
+      if (!clean(identity?.catalogId) || !clean(identity?.source) || !clean(identity?.sourceId)) return null;
+      const current = now();
+      for (const [key, record] of records) {
+        if (current - record.savedAt > ttlMs) {
+          records.delete(key);
+          continue;
+        }
+        const meta = record.value.metas.find(item => sameIdentity(item?.id, identity));
         if (meta) return meta;
       }
       return null;
