@@ -22,7 +22,7 @@ const {
   parseSourceId,
 } = require('./tpb4k/adapters/metadata');
 const { readTpb4kConfig } = require('./tpb4k/config');
-const { clearAdapters, listAdapters } = require('./tpb4k/index');
+const { clearAdapters, listAdapters, registerAdapter } = require('./tpb4k/index');
 const { decodeTpb4kId } = require('./tpb4k/id-codec');
 const { buildSceneIdentity } = require('./tpb4k/identity');
 const { QUERY_SCENES, SCENE_FIELDS, sceneInput } = require('./tpb4k/stashbox-client');
@@ -284,7 +284,7 @@ test('missing metadata keys degrade to empty catalogs and never create fake stre
   assert.deepEqual(await bundle.adapters[0].resolve({}), []);
 });
 
-test('TPDB recent catalog and meta handlers return stable metadata while stream resolution remains empty', async () => {
+test('TPDB recent catalog and meta handlers expose only torrent-bound playable scenes', async () => {
   const { calls, fetchImpl } = createMetadataFetch();
   const provider = new Tpb4kProvider({
     fetchImpl,
@@ -293,6 +293,22 @@ test('TPDB recent catalog and meta handlers return stable metadata while stream 
       TPB4K_CATALOG_LIMIT: '1',
       TPDB_API_KEY: 'tpdb-fixture',
       TPDB_REST_API_URL: 'https://api.theporndb.example',
+    },
+  });
+  const playableHash = '1357913579135791357913579135791357913579';
+  registerAdapter({
+    id: 'torrent-index',
+    async catalog() { return []; },
+    async meta() { return null; },
+    async resolve({ item }) {
+      return [{
+        source: 'knaben',
+        sourceId: `knaben:${item.sourceId}`,
+        title: item.title,
+        filename: `${item.title}.mkv`,
+        infoHash: playableHash,
+        seeders: 10,
+      }];
     },
   });
   assert.deepEqual(listAdapters(), ['hentai', 'platform-hybrid', 'pornrips', 'stripchat', 'studio-metadata', 'sukebei', 'torrent-index', 'tpdb', 'yesporn']);
@@ -312,7 +328,8 @@ test('TPDB recent catalog and meta handlers return stable metadata while stream 
   assert.match(meta.meta.poster, /^https:\/\/images\.example\//);
 
   const streams = await provider.handleStream({ type: 'movie', id: catalog.metas[0].id });
-  assert.deepEqual(streams, { streams: [] });
+  assert.equal(streams.streams.length, 1);
+  assert.equal(streams.streams[0].infoHash, playableHash);
   const restCalls = calls.filter(call => call.method === 'GET');
   assert.equal(restCalls.length, 2);
   assert.equal(

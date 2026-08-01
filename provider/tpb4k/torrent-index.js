@@ -986,6 +986,9 @@ function createTorrentIndexAdapter(options = {}) {
     async resolve(args = {}) {
       return resolveScene(args);
     },
+    async enrichMetadata(items = [], behavior = {}) {
+      return posterEnricher.enrichItems(items, behavior);
+    },
     diagnostics() {
       return lastDiagnostic;
     },

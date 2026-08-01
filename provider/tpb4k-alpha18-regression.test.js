@@ -106,7 +106,8 @@ test('Alpha.19 preserves broad pools, isolates Sukebei RSS, and owns its resourc
   assert.match(provider, /\['xvideosred', 'digitalplayground'\]\.includes\(weakStudioKey\)/);
   assert.match(provider, /const enrichmentPoolLimit/);
   assert.match(provider, /limit: enrichmentPoolLimit/);
-  assert.match(provider, /limit: discoveryPoolLimit/);
+  assert.match(provider, /limit: metadataPoolLimit/);
+  assert.match(provider, /limit: torrentPoolLimit/);
   assert.match(provider, /recoverStudioPlayback/);
   assert.match(torrent, /studioSearchQueries/);
   assert.match(torrent, /knaben-targeted/);

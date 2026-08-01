@@ -5,11 +5,12 @@ const { bindStudioPlayback, validInfoHash } = require('./studio-playback-binding
 function compact(value) { return String(value || '').normalize('NFKC').replace(/\s+/g, ' ').trim(); }
 function key(value) { return compact(value).toLowerCase().replace(/[^a-z0-9]+/g, ''); }
 function profile(catalog = {}) {
+  if (compact(catalog.id) === 'tpb4k.tpdb.recent') return Object.freeze({ maxTargets: 24, minimumCards: 8, desiredCandidates: 3, concurrency: 3, targetTimeoutMs: 6_500, totalBudgetMs: 24_000 });
   const studio = key(catalog.studio);
   if (studio === 'onlyfans') return Object.freeze({ maxTargets: 15, minimumCards: 8, desiredCandidates: 2, concurrency: 3, targetTimeoutMs: 6_500, totalBudgetMs: 22_000 });
   if (studio === 'digitalplayground' || studio === 'xvideosred') return Object.freeze({ maxTargets: 15, minimumCards: 8, desiredCandidates: 2, concurrency: 3, targetTimeoutMs: 6_500, totalBudgetMs: 22_000 });
   if (studio === 'sexmex') return Object.freeze({ maxTargets: 10, minimumCards: 8, desiredCandidates: 3, concurrency: 3, targetTimeoutMs: 6_000, totalBudgetMs: 18_000 });
-  return Object.freeze({ maxTargets: 6, minimumCards: 1, desiredCandidates: 2, concurrency: 3, targetTimeoutMs: 5_000, totalBudgetMs: 12_000 });
+  return Object.freeze({ maxTargets: 8, minimumCards: 6, desiredCandidates: 2, concurrency: 3, targetTimeoutMs: 5_000, totalBudgetMs: 12_000 });
 }
 function timeout(promise, milliseconds) {
   let timer;

@@ -372,22 +372,24 @@ test('studio detail metadata preserves the exact real poster shown on its catalo
 });
 
 test('Continue Watching recovers studio artwork when the saved torrent bundle is older than the catalog card', async () => {
-  const sourceId = 'torrent-first:onlyfans-continue-watching';
   const catalogId = 'tpb4k.studio.onlyfans.top';
   const savedId = encodeTpb4kId({
-    source: 'torrent-index', sourceId, catalogId,
+    source: 'torrent-index', sourceId: 'torrent-first:onlyfans-old-identity', catalogId,
     torrents: [{ infoHash: HASH_4K, filename: 'OnlyFans.Old.Bundle.mp4' }],
   });
   const currentId = encodeTpb4kId({
-    source: 'torrent-index', sourceId, catalogId,
-    torrents: [{ infoHash: HASH_ALT, filename: 'OnlyFans.Current.Bundle.mp4' }],
+    source: 'torrent-index', sourceId: 'torrent-first:onlyfans-current-identity', catalogId,
+    torrents: [
+      { infoHash: HASH_4K, filename: 'OnlyFans.Current.Bundle.mp4' },
+      { infoHash: HASH_ALT, filename: 'OnlyFans.Current.Alternate.mp4' },
+    ],
   });
   registerAdapter({
     id: 'torrent-index',
     async catalog() { return []; },
     async meta() {
       return {
-        sourceId,
+        sourceId: 'torrent-first:onlyfans-old-identity',
         title: 'OnlyFans Continue Watching Fixture',
         studio: 'OnlyFans',
         poster: 'https://onlyporn.example/assets/tpb4k/studios/onlyfans.png',
@@ -524,12 +526,12 @@ test('PornRips preserves its authoritative torrent and adds index alternatives f
 
 test('provider supplies a branded HTTPS fallback when an upstream catalog omits artwork', async () => {
   registerAdapter({
-    id: 'tpdb',
+    id: 'yesporn',
     async catalog() {
-      return [{ sourceId: 'tpdb:no-poster', title: 'Posterless TPDB fixture' }];
+      return [{ sourceId: 'yesporn:no-poster', title: 'Posterless YesPorn fixture' }];
     },
     async meta({ sourceId }) {
-      return { sourceId, title: 'Posterless TPDB fixture' };
+      return { sourceId, title: 'Posterless YesPorn fixture' };
     },
     async resolve() { return []; },
   });
@@ -543,15 +545,15 @@ test('provider supplies a branded HTTPS fallback when an upstream catalog omits 
   });
   const catalog = await provider.handleCatalog({
     type: 'movie',
-    id: 'tpb4k.tpdb.recent',
+    id: 'tpb4k.yesporn.recent',
     extra: {},
   });
   assert.equal(catalog.metas.length, 1);
   assert.equal(catalog.metas[0].posterShape, 'poster');
-  assert.match(catalog.metas[0].poster, /assets\/tpb4k\/studios\/tpdb\.png$/);
+  assert.match(catalog.metas[0].poster, /assets\/tpb4k\/studios\/yesporn\.png$/);
 
   const meta = await provider.handleMeta({ type: 'movie', id: catalog.metas[0].id });
-  assert.match(meta.meta.poster, /assets\/tpb4k\/studios\/tpdb\.png$/);
+  assert.match(meta.meta.poster, /assets\/tpb4k\/studios\/yesporn\.png$/);
   assert.equal(meta.meta.background, meta.meta.poster);
 });
 
@@ -587,6 +589,40 @@ test('Sukebei cards use the landscape presentation of the reference TPB4K addon'
 
   const meta = await provider.handleMeta({ type: 'movie', id: catalog.metas[0].id });
   assert.equal(meta.meta.posterShape, 'landscape');
+});
+
+test('Sukebei resolves an explicit main-file index instead of trusting debrid auto-selection', async () => {
+  let resolveCalls = 0;
+  registerAdapter({
+    id: 'sukebei',
+    async catalog() {
+      return [{
+        sourceId: 'sukebei:multi-file',
+        title: 'Sukebei Multi-file Fixture',
+        poster: 'https://images.example/sukebei-multi.jpg',
+        infoHash: HASH_4K,
+        seeders: 40,
+      }];
+    },
+    async meta({ sourceId }) {
+      return { sourceId, title: 'Sukebei Multi-file Fixture', poster: 'https://images.example/sukebei-multi.jpg' };
+    },
+    async resolve() {
+      resolveCalls += 1;
+      return [{ infoHash: HASH_4K, fileIdx: 2, filename: 'Sukebei.Main.Movie.mp4', seeders: 40 }];
+    },
+  });
+  const provider = new Tpb4kProvider({
+    installBuiltIns: false,
+    env: { TPB4K_ENABLED: 'true', TPB4K_CATALOG_LIMIT: '1' },
+  });
+  const catalog = await provider.handleCatalog({ type: 'movie', id: 'tpb4k.sukebei.top', extra: {} });
+  const result = await provider.handleStream({ type: 'movie', id: catalog.metas[0].id });
+
+  assert.equal(resolveCalls, 1);
+  assert.equal(result.streams.length, 1);
+  assert.equal(result.streams[0].fileIdx, 2);
+  assert.equal(result.streams[0].behaviorHints.filename, 'Sukebei.Main.Movie.mp4');
 });
 
 test('release wiring preserves v2.6.4 hardening and keeps TPB4K off production by default', () => {

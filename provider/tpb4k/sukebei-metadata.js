@@ -15,6 +15,7 @@ const { fallbackPosterUrl, normalizeSearchTitle, significantTokens } = require('
 const { sukebeiRssPosterUrl } = require('./sukebei-rss-poster');
 const { SourceHttpClient, normalizeContentType } = require('./source-http');
 const { detectResolution, extractMagnetFromHtml } = require('./torrent-index');
+const { decodeTorrent, readBoundedBuffer, safeNativeRequest } = require('./native-discovery');
 const { assertSafeHttpsUrl } = require('../url-security');
 const { evaluateContent, readContentFilterConfig } = require('../content-filter');
 
@@ -28,6 +29,10 @@ const CODE_PREFIX_EXCLUSIONS = new Set([
   'PACK', 'VIDEO', 'MOVIE', 'TITLE', 'DATE', 'UPDATE', 'COMPILATION',
   'PPV',
 ]);
+
+const SUKEBEI_MAX_TORRENT_BYTES = 2_000_000;
+const PLAYABLE_VIDEO_EXTENSION = /\.(?:avi|m2ts|m4v|mkv|mov|mp4|mpeg|mpg|ts|webm|wmv)$/i;
+const PROMOTIONAL_FILE_MARKER = /(?:^|[\s._/[\]()-])(?:ad|ads|advert(?:isement)?|promo|preview|sample|trailer)(?:$|[\s._/[\]()-])/i;
 
 function compactText(value) {
   return String(value || '').normalize('NFKC').replace(/\s+/g, ' ').trim();
@@ -155,6 +160,7 @@ function parseSukebeiTopHtml(html, origin = 'https://sukebei.nyaa.si/') {
   for (const row of rows) {
     const anchors = [...row.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/gi)].map(match => match[0]);
     const detailAnchor = anchors.find(anchor => /\/view\/\d+/i.test(htmlAttribute(anchor, 'href')));
+    const torrentAnchor = anchors.find(anchor => /\/download\/\d+\.torrent(?:$|[?#])/i.test(htmlAttribute(anchor, 'href')));
     const magnetAnchor = anchors.find(anchor => /^magnet:\?/i.test(htmlAttribute(anchor, 'href')));
     if (!detailAnchor || !magnetAnchor) continue;
 
@@ -165,6 +171,17 @@ function parseSukebeiTopHtml(html, origin = 'https://sukebei.nyaa.si/') {
       continue;
     }
     if (!safeHttpsUrl(detailUrl)) continue;
+
+    let torrentUrl = '';
+    try {
+      torrentUrl = new URL(
+        torrentAnchor ? htmlAttribute(torrentAnchor, 'href') : detailUrl.replace(/\/view\/(\d+)$/i, '/download/$1.torrent'),
+        origin
+      ).toString();
+    } catch {
+      torrentUrl = '';
+    }
+    if (!safeHttpsUrl(torrentUrl)) torrentUrl = '';
 
     const magnetLink = decodeHtmlAttribute(htmlAttribute(magnetAnchor, 'href'));
     const magnet = parseMagnet(magnetLink);
@@ -190,6 +207,7 @@ function parseSukebeiTopHtml(html, origin = 'https://sukebei.nyaa.si/') {
       title,
       link: detailUrl,
       detailUrl,
+      torrentUrl,
       magnetLink,
       infoHash,
       trackers: magnet?.trackers || [],
@@ -202,6 +220,39 @@ function parseSukebeiTopHtml(html, origin = 'https://sukebei.nyaa.si/') {
     }));
   }
   return output;
+}
+
+function selectSukebeiMainFile(files = []) {
+  const playable = (Array.isArray(files) ? files : [])
+    .filter(file => Number.isInteger(file?.index) && file.index >= 0)
+    .filter(file => PLAYABLE_VIDEO_EXTENSION.test(compactText(file.path)))
+    .map(file => Object.freeze({
+      index: file.index,
+      path: compactText(file.path),
+      length: Math.max(Number(file.length || 0), 0),
+      promotional: PROMOTIONAL_FILE_MARKER.test(compactText(file.path)),
+    }));
+  if (!playable.length) return null;
+  const mainPool = playable.some(file => !file.promotional)
+    ? playable.filter(file => !file.promotional)
+    : playable;
+  return [...mainPool].sort((left, right) => right.length - left.length || left.index - right.index)[0] || null;
+}
+
+function sukebeiTorrentUrl(source = {}) {
+  const direct = safeHttpsUrl(source.torrentUrl) ? String(source.torrentUrl) : '';
+  if (direct) return direct;
+  try {
+    const detail = new URL(String(source.detailUrl || ''));
+    const match = detail.pathname.match(/^\/view\/(\d+)\/?$/i);
+    if (!match) return '';
+    detail.pathname = `/download/${match[1]}.torrent`;
+    detail.search = '';
+    detail.hash = '';
+    return safeHttpsUrl(detail.toString()) ? detail.toString() : '';
+  } catch {
+    return '';
+  }
 }
 
 function landingPageImage(html, pageUrl) {
@@ -611,6 +662,9 @@ function createSukebeiMetadataAdapter(options = {}) {
   const positiveTtlMs = Math.max(Number(config.metadataCacheTtlMs || 600_000), 5_000);
   const negativeTtlMs = Math.max(Number(config.metadataNegativeTtlMs || 120_000), 5_000);
   const posterResolutionCache = options.posterResolutionCache || new BoundedTtlCache({
+    maxEntries: Math.max(Number(config.discoveryCacheMaxEntries || 250), 50),
+  });
+  const torrentSelectionCache = options.torrentSelectionCache || new BoundedTtlCache({
     maxEntries: Math.max(Number(config.discoveryCacheMaxEntries || 250), 50),
   });
   let lastDiagnostics = freezeDiagnostics({
@@ -1384,17 +1438,64 @@ function createSukebeiMetadataAdapter(options = {}) {
     }
     if (!infoHash) return [];
 
+    let selectedFile = null;
+    const selectionKey = `sukebei:torrent-file:${infoHash}`;
+    const cachedSelection = torrentSelectionCache.getEntry(selectionKey);
+    if (cachedSelection && !cachedSelection.negative) {
+      selectedFile = cachedSelection.value;
+    } else if (!cachedSelection) {
+      const torrentUrl = sukebeiTorrentUrl(source);
+      if (torrentUrl) {
+        let request;
+        try {
+          const parsedTorrentUrl = new URL(torrentUrl);
+          request = await safeNativeRequest(torrentUrl, {
+            fetchImpl: options.fetchImpl,
+            checkDns: options.checkDns,
+            timeoutMs: Math.min(Math.max(Number(config.requestTimeoutMs || 15_000), 1_000), 8_000),
+            origin: parsedTorrentUrl.origin,
+            allowedHosts: new Set([parsedTorrentUrl.hostname.toLowerCase()]),
+            headers: {
+              Accept: 'application/x-bittorrent, application/octet-stream;q=0.9',
+              'User-Agent': 'OnlyPorn-TPB4K/2.7',
+            },
+          });
+          const status = Number(request.response?.status || 0);
+          const contentType = normalizeContentType(request.response?.headers?.get?.('content-type'));
+          if (status >= 200 && status < 300 && (!contentType || [
+            'application/x-bittorrent',
+            'application/octet-stream',
+          ].includes(contentType))) {
+            const torrent = decodeTorrent(await readBoundedBuffer(
+              request.response,
+              SUKEBEI_MAX_TORRENT_BYTES
+            ));
+            if (normalizeInfoHash(torrent.infoHash) === infoHash) {
+              selectedFile = selectSukebeiMainFile(torrent.files);
+            }
+          }
+        } catch {
+          selectedFile = null;
+        } finally {
+          request?.clearTimeout?.();
+        }
+      }
+      if (selectedFile) torrentSelectionCache.set(selectionKey, selectedFile, positiveTtlMs);
+      else torrentSelectionCache.setNegative(selectionKey, negativeTtlMs);
+    }
+
     return [Object.freeze({
       source: 'sukebei',
       sourceId: source.sourceId,
       title: source.title,
-      filename,
+      filename: selectedFile?.path || filename,
       magnet: magnetLink,
       infoHash,
+      ...(selectedFile ? { fileIdx: selectedFile.index } : {}),
       trackers: Object.freeze([...(trackers || [])]),
       seeders: source.seeders,
-      size: source.size,
-      resolution: detectResolution(filename || source.title),
+      size: selectedFile?.length || source.size,
+      resolution: detectResolution(selectedFile?.path || filename || source.title),
       detailUrl: source.detailUrl,
     })];
   }
@@ -1426,5 +1527,7 @@ module.exports = {
   queryExactCodeProvider,
   resolveVerifiedPosterUrl,
   scoreCandidate,
+  selectSukebeiMainFile,
+  sukebeiTorrentUrl,
   titleOverlap,
 };

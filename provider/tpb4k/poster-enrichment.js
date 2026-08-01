@@ -326,22 +326,35 @@ function createPosterEnricher(options = {}) {
     stats.rejectionReasons[reason] = (stats.rejectionReasons[reason] || 0) + 1;
   }
 
-  function fallbackItem(item, reason = 'not-found') {
-    const poster = fallbackPosterUrl(item.studio, fallbackBase);
+  function behaviorKey(behavior = {}) {
+    return behavior.preserveSourcePoster || behavior.replaceTitle
+      ? `source-${behavior.preserveSourcePoster ? 1 : 0}-title-${behavior.replaceTitle ? 1 : 0}`
+      : 'default';
+  }
+
+  function itemCacheKey(item, behavior = {}) {
+    return `poster:${behaviorKey(behavior)}:${item.sourceId}`;
+  }
+
+  function fallbackItem(item, reason = 'not-found', behavior = {}) {
+    const sourcePoster = safeHttpsUrl(item.poster);
+    const preserveSource = Boolean(behavior.preserveSourcePoster && sourcePoster);
+    const poster = preserveSource ? sourcePoster : fallbackPosterUrl(item.studio, fallbackBase);
     return Object.freeze({
       ...item,
       poster,
-      background: poster,
-      posterSource: 'fallback:studio',
+      background: preserveSource ? (safeHttpsUrl(item.background) || poster) : poster,
+      posterSource: preserveSource ? 'source:preserved' : 'fallback:studio',
       posterFallbackReason: reason,
       metadataMatchScore: 0,
     });
   }
 
-  function matchedItem(sourceItem, best) {
+  function matchedItem(sourceItem, best, behavior = {}) {
     const merged = mergeMetadataPreservingIdentity(sourceItem, best.normalized);
     return Object.freeze({
       ...merged,
+      ...(behavior.replaceTitle && best.normalized.title ? { title: best.normalized.title } : {}),
       posterSource: `metadata:${best.provider}`,
       metadataMatchScore: Math.round(best.score * 100),
     });
@@ -442,6 +455,7 @@ function createPosterEnricher(options = {}) {
     const results = await mapWithConcurrency(entries, concurrency, async entry => {
       const queryInfo = normalizeSearchTitle(entry.item.title, entry.item.studio);
       const aliases = [...studioAliases(entry.item.studio)].slice(0, targetedAliasLimit);
+      if (!aliases.length) aliases.push('');
       let providerCompleted = false;
       let hadError = false;
       for (const alias of aliases) {
@@ -474,7 +488,7 @@ function createPosterEnricher(options = {}) {
     return results;
   }
 
-  async function enrichItems(items = []) {
+  async function enrichItems(items = [], behavior = {}) {
     const startedAt = now();
     const deadlineAt = startedAt + deadlineMs;
     const input = Array.isArray(items) ? items : [];
@@ -512,7 +526,7 @@ function createPosterEnricher(options = {}) {
     const pending = [];
     for (let index = 0; index < input.length; index += 1) {
       const item = input[index];
-      const cached = cache.getEntry(`poster:${item.sourceId}`);
+      const cached = cache.getEntry(itemCacheKey(item, behavior));
       if (!cached) {
         pending.push({ index, item, state: { providersCompleted: new Set(), hadError: false, deadline: false } });
         continue;
@@ -522,7 +536,7 @@ function createPosterEnricher(options = {}) {
         stats.negativeCacheHits += 1;
         stats.fallback += 1;
         stats.notFound += 1;
-        output[index] = fallbackItem(item, 'negative-cache');
+        output[index] = fallbackItem(item, 'negative-cache', behavior);
       } else {
         stats.matched += 1;
         const source = String(cached.value?.posterSource || '').replace(/^metadata:/, '');
@@ -537,7 +551,7 @@ function createPosterEnricher(options = {}) {
     }
 
     if (!providers.length) {
-      for (const entry of pending) output[entry.index] = fallbackItem(entry.item, 'metadata-unconfigured');
+      for (const entry of pending) output[entry.index] = fallbackItem(entry.item, 'metadata-unconfigured', behavior);
       stats.unconfigured = pending.length;
       stats.fallback += pending.length;
       stats.elapsedMs = now() - startedAt;
@@ -563,8 +577,8 @@ function createPosterEnricher(options = {}) {
           unresolved.push(entry);
           continue;
         }
-        const enriched = matchedItem(entry.item, best);
-        cache.set(`poster:${entry.item.sourceId}`, enriched, positiveTtlMs);
+        const enriched = matchedItem(entry.item, best, behavior);
+        cache.set(itemCacheKey(entry.item, behavior), enriched, positiveTtlMs);
         output[entry.index] = enriched;
         stats.matched += 1;
         stats.poolMatches += 1;
@@ -590,8 +604,8 @@ function createPosterEnricher(options = {}) {
           next.push(entry);
           continue;
         }
-        const enriched = matchedItem(entry.item, result.best);
-        cache.set(`poster:${entry.item.sourceId}`, enriched, positiveTtlMs);
+        const enriched = matchedItem(entry.item, result.best, behavior);
+        cache.set(itemCacheKey(entry.item, behavior), enriched, positiveTtlMs);
         output[entry.index] = enriched;
         stats.matched += 1;
         stats.targetedMatches += 1;
@@ -612,10 +626,10 @@ function createPosterEnricher(options = {}) {
         stats.deadlineFallbacks += 1;
       } else if (confirmedNotFound) {
         reason = 'not-found';
-        cache.setNegative(`poster:${entry.item.sourceId}`, negativeTtlMs);
+        cache.setNegative(itemCacheKey(entry.item, behavior), negativeTtlMs);
         stats.notFound += 1;
       }
-      output[entry.index] = fallbackItem(entry.item, reason);
+      output[entry.index] = fallbackItem(entry.item, reason, behavior);
       stats.fallback += 1;
     }
 

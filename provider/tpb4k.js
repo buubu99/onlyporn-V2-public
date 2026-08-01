@@ -30,10 +30,11 @@ const {
 const MOVIE_TYPE = 'movie';
 const SERIES_TYPE = 'series';
 const RELEASE_VERSION = require('../package.json').version;
-const CATALOG_CACHE_REVISION = 'r5';
+const CATALOG_CACHE_REVISION = 'r6';
 const HENTAI_PREFIX = 'ophmm-';
 const HENTAI_TOP_PREFIX = 'ophtop-';
 const TORRENT_FIRST_STUDIOS = new Set(['onlyfans', 'digitalplayground', 'xvideosred', 'sexmex']);
+const PLAYABILITY_GATED_CATALOGS = new Set(['tpb4k.pornrips.recent', 'tpb4k.tpdb.recent']);
 const CATALOG_CACHE_TTL_MS = 15 * 60 * 1000;
 const CATALOG_STALE_TTL_MS = 24 * 60 * 60 * 1000;
 let loggerInstance;
@@ -94,14 +95,19 @@ function fallbackKey(item = {}) {
   return item.source || 'onlyporn';
 }
 function resolvedPoster(item, config = {}, catalogId = '') {
-  const poster = catalogId.startsWith('tpb4k.studio.')
+  const nativePoster = catalogId.startsWith('tpb4k.studio.')
     ? realStudioPoster(item?.poster)
     : safePoster(item?.poster);
+  const poster = PLAYABILITY_GATED_CATALOGS.has(catalogId)
+    ? (safePoster(item?.background) || nativePoster)
+    : nativePoster;
   if (catalogId === 'tpb4k.sukebei.top') return poster;
   if (item?.source === 'studio-metadata') return poster;
   return poster || safePoster(fallbackPosterUrl(fallbackKey(item), config.posterAssetBaseUrl));
 }
-function resolvedPosterShape(item = {}) { return item.source === 'sukebei' ? 'landscape' : 'poster'; }
+function resolvedPosterShape(item = {}, catalogId = '') {
+  return item.source === 'sukebei' || PLAYABILITY_GATED_CATALOGS.has(catalogId) ? 'landscape' : 'poster';
+}
 function torrentBundle(item = {}) {
   if (Array.isArray(item.playbackCandidates) && item.playbackCandidates.length) return item.playbackCandidates;
   return item.infoHash ? [{
@@ -132,7 +138,7 @@ function toMetaPreview(item, catalogId, config) {
     type,
     name: item.title,
     poster,
-    posterShape: resolvedPosterShape(item),
+    posterShape: resolvedPosterShape(item, catalogId),
     genres: [item.studio, item.resolution, item.quality, ...(Array.isArray(item.tags) ? item.tags.slice(0, 20) : [])].filter(Boolean),
     tags: Array.isArray(item.tags) ? item.tags : [],
     description: item.description,
@@ -148,7 +154,7 @@ function toMetaResponse(item, id, config, type = MOVIE_TYPE, catalogId = '') {
     name: item.title,
     poster,
     background: safePoster(item.background) || poster,
-    posterShape: resolvedPosterShape(item),
+    posterShape: resolvedPosterShape(item, catalogId),
     genres: [item.studio, item.resolution, item.quality, ...(Array.isArray(item.tags) ? item.tags.slice(0, 30) : [])].filter(Boolean),
     tags: Array.isArray(item.tags) ? item.tags : [],
     description: item.description,
@@ -170,7 +176,7 @@ function toMetaResponse(item, id, config, type = MOVIE_TYPE, catalogId = '') {
   };
 }
 function catalogPreviewMeta(preview, id, decoded) {
-  if (!preview || String(preview.id || '') !== String(id || '') || !preview.name) return null;
+  if (!preview || !preview.name) return null;
   const type = catalogType(decoded.catalogId);
   const poster = safePoster(preview.poster);
   const tags = Array.isArray(preview.tags) ? preview.tags : [];
@@ -201,17 +207,32 @@ function catalogPreviewMeta(preview, id, decoded) {
   };
 }
 function diagnosticStudioKey(value) { return String(value || '').normalize('NFKC').toLowerCase().replace(/[^a-z0-9]+/g, ''); }
+function torrentHashes(identity = {}) {
+  return new Set((Array.isArray(identity.torrents) ? identity.torrents : [])
+    .map(torrent => String(torrent?.infoHash || '').toLowerCase())
+    .filter(hash => /^[a-f0-9]{40}$/.test(hash)));
+}
 function sameCatalogIdentity(meta, decoded) {
   const identity = decodeTpb4kId(meta?.id);
-  return Boolean(identity
-    && identity.catalogId === decoded.catalogId
-    && identity.source === decoded.source
-    && identity.sourceId === decoded.sourceId);
+  if (!identity || identity.catalogId !== decoded.catalogId) return false;
+  if (identity.source === decoded.source && identity.sourceId === decoded.sourceId) return true;
+  const expectedHashes = torrentHashes(decoded);
+  return [...torrentHashes(identity)].some(hash => expectedHashes.has(hash));
 }
 function mergeReasons(...values) {
   const output = {};
   for (const value of values) for (const [key, amount] of Object.entries(value || {})) output[key] = (output[key] || 0) + Math.max(Number(amount || 0), 0);
   return output;
+}
+function isRegressedStudioRefresh(args = {}, cachedValue, freshValue) {
+  const definition = getCatalogDefinition(args.id);
+  const cachedCount = Array.isArray(cachedValue?.metas) ? cachedValue.metas.length : 0;
+  const freshCount = Array.isArray(freshValue?.metas) ? freshValue.metas.length : 0;
+  const skip = Math.max(Number.parseInt(String(args?.extra?.skip || 0), 10) || 0, 0);
+  return definition?.mode === 'studio-top'
+    && skip === 0
+    && cachedCount >= 6
+    && freshCount < Math.max(2, Math.floor(cachedCount * 0.35));
 }
 
 class Tpb4kProvider {
@@ -261,6 +282,15 @@ class Tpb4kProvider {
     const operation = this._handleCatalogFresh(args)
       .then(value => {
         if (Array.isArray(value?.metas) && value.metas.length) {
+          if (cached?.value?.metas?.length && isRegressedStudioRefresh(args, cached.value, value)) {
+            logger().warn({
+              provider: this.name,
+              catalogId: String(args?.id || ''),
+              previousCards: cached.value.metas.length,
+              refreshCards: value.metas.length,
+            }, 'OnlyPorn rejected a regressed studio catalog refresh');
+            return cached.value;
+          }
           const record = Object.freeze({ savedAt: Date.now(), value });
           this.catalogResponseCache.set(cacheKey, record);
           this.catalogResponseStore.set(cacheKey, value);
@@ -293,13 +323,37 @@ class Tpb4kProvider {
     let studioPlaybackBinding;
     let studioTargetedRecovery;
     let torrentFirstStudioFallback;
+    let catalogPlayabilityBinding;
+    let catalogTargetedRecovery;
+    let pornripsMetadataEnrichment;
     try {
       const requestedLimit = this.contentFilter.enabled
         ? Math.min(config.catalogLimit * config.contentFilterOverscanFactor, 100)
         : config.catalogLimit;
       const requiresPlayableBinding = ['studio-metadata', 'platform-hybrid'].includes(definition.source)
         && definition.lookupSource === 'torrent-index';
-      if (requiresPlayableBinding) {
+      if (definition.id === 'tpb4k.tpdb.recent') {
+        const resolverAdapter = getAdapter(definition.lookupSource);
+        if (!resolverAdapter) throw new Error('OnlyPorn TPDB torrent resolver is unavailable');
+        const metadataItems = await adapter.catalog({
+          catalog: definition,
+          skip,
+          limit: Math.min(Math.max(config.catalogLimit * 2, 40), 100),
+          config,
+        });
+        const binding = await recoverStudioPlayback({
+          catalog: { ...definition, targetedPlaybackSearch: true },
+          metadataItems,
+          torrentItems: [],
+          resolverAdapter,
+          config,
+          skip: 0,
+          limit: config.catalogLimit,
+        });
+        rawItems = [...binding.items];
+        catalogPlayabilityBinding = binding.stats;
+        catalogTargetedRecovery = binding.recovery;
+      } else if (requiresPlayableBinding) {
         const resolverAdapter = getAdapter(definition.lookupSource);
         if (!resolverAdapter) throw new Error('OnlyPorn studio torrent resolver is unavailable');
         const loadTorrentPool = typeof resolverAdapter.catalogTorrents === 'function'
@@ -309,18 +363,18 @@ class Tpb4kProvider {
         const torrentFirstEnabled = TORRENT_FIRST_STUDIOS.has(weakStudioKey)
           && shouldUseTorrentFirst(definition, 0)
           && typeof resolverAdapter.catalog === 'function';
-        const discoveryPoolLimit = weakStudioKey === 'onlyfans' ? 600
-          : (torrentFirstEnabled ? 400 : 300);
+        const metadataPoolLimit = weakStudioKey === 'onlyfans' ? 120 : 80;
+        const torrentPoolLimit = torrentFirstEnabled ? 160 : 120;
         // Keep the broad metadata/torrent identity pools needed to find exact
         // release matches. Only the network-heavy poster-enrichment branch is
         // narrowed for these two weak catalogues so it can finish its targeted
         // lookups inside the fixed deadline.
         const enrichmentPoolLimit = ['xvideosred', 'digitalplayground'].includes(weakStudioKey)
           ? 60
-          : discoveryPoolLimit;
+          : 100;
         const [metadataItems, torrentItems, enrichedTorrentItems] = await Promise.all([
-          adapter.catalog({ catalog: { ...definition, playbackBindingPool: true }, skip: 0, limit: discoveryPoolLimit, config }),
-          loadTorrentPool({ catalog: { ...definition, source: 'torrent-index', playbackBindingPool: true }, skip: 0, limit: discoveryPoolLimit, config }),
+          adapter.catalog({ catalog: { ...definition, playbackBindingPool: true }, skip: 0, limit: metadataPoolLimit, config }),
+          loadTorrentPool({ catalog: { ...definition, source: 'torrent-index', playbackBindingPool: true }, skip: 0, limit: torrentPoolLimit, config }),
           torrentFirstEnabled ? resolverAdapter.catalog({
             catalog: {
               ...definition,
@@ -351,7 +405,7 @@ class Tpb4kProvider {
             env: this.env,
             requireRealPoster: true,
           });
-          if (weakStudioKey === 'onlyfans' && shouldUseTorrentFirst(definition, fallback.items.length)) {
+          if (shouldUseTorrentFirst(definition, fallback.items.length)) {
             binding = await recoverStudioPlayback({
               catalog: definition,
               metadataItems,
@@ -382,7 +436,7 @@ class Tpb4kProvider {
               finalCards: fallback.items.length,
             });
           }
-          if (weakStudioKey === 'sexmex' && fallback.items.length) {
+          if ((weakStudioKey === 'sexmex' || weakStudioKey === 'digitalplayground') && fallback.items.length) {
             const augmented = await augmentStudioPlayback({
               catalog: definition,
               items: fallback.items,
@@ -393,7 +447,9 @@ class Tpb4kProvider {
               // AIOStreams can only fail over after a multi-hash scene is
               // selected. Put the already-discovered reliable SexMex scenes
               // first instead of burying them below one-hash queued results.
-              items: prioritizeFailoverCandidates(augmented.items),
+              items: weakStudioKey === 'sexmex'
+                ? prioritizeFailoverCandidates(augmented.items)
+                : augmented.items,
               stats: Object.freeze({ ...fallback.stats, failoverAugmentation: augmented.stats }),
             });
           }
@@ -420,6 +476,17 @@ class Tpb4kProvider {
           limit: ['studio-metadata', 'platform-hybrid', 'torrent-index'].includes(definition.source) ? config.catalogLimit : requestedLimit,
           config,
         });
+        if (definition.id === 'tpb4k.pornrips.recent') {
+          const enrichmentAdapter = getAdapter('torrent-index');
+          if (typeof enrichmentAdapter?.enrichMetadata === 'function') {
+            const enrichment = await enrichmentAdapter.enrichMetadata(rawItems, {
+              preserveSourcePoster: true,
+              replaceTitle: true,
+            });
+            rawItems = [...enrichment.items];
+            pornripsMetadataEnrichment = enrichment.stats;
+          }
+        }
       }
     } catch (error) {
       logger().warn({ provider: this.name, catalogId: definition.id, source: definition.source, error: redactSecrets(error?.message || error, this.env) }, 'OnlyPorn catalog adapter failed safely');
@@ -459,6 +526,9 @@ class Tpb4kProvider {
       ...(studioPlaybackBinding ? { studioPlaybackBinding } : {}),
       ...(studioTargetedRecovery ? { studioTargetedRecovery } : {}),
       ...(torrentFirstStudioFallback ? { torrentFirstStudioFallback } : {}),
+      ...(catalogPlayabilityBinding ? { catalogPlayabilityBinding } : {}),
+      ...(catalogTargetedRecovery ? { catalogTargetedRecovery } : {}),
+      ...(pornripsMetadataEnrichment ? { pornripsMetadataEnrichment } : {}),
       ...(diagnosticsStale ? { diagnosticsStale: true } : {}),
       contentFilter: {
         removed: metadataFiltered + contentFiltered.removed,
@@ -561,7 +631,10 @@ class Tpb4kProvider {
       // Metadata is a best-effort preflight; returned candidates are filtered below.
     }
 
-    let rawCandidates = Array.isArray(decoded.torrents)
+    const sukebeiNeedsFileSelection = decoded.source === 'sukebei'
+      && Array.isArray(decoded.torrents)
+      && decoded.torrents.some(torrent => !Number.isInteger(torrent?.fileIdx));
+    let rawCandidates = Array.isArray(decoded.torrents) && !sukebeiNeedsFileSelection
       ? decoded.torrents.map(torrent => ({
         ...torrent,
         source: torrent.indexer || 'torrent-index',

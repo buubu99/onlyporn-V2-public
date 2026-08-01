@@ -26,10 +26,14 @@ function normalizeRecord(value, now, ttlMs) {
 
 function sameIdentity(metaId, identity = {}) {
   const decoded = decodeTpb4kId(metaId);
-  return Boolean(decoded
-    && clean(decoded.catalogId) === clean(identity.catalogId)
-    && clean(decoded.source) === clean(identity.source)
-    && clean(decoded.sourceId) === clean(identity.sourceId));
+  if (!decoded || clean(decoded.catalogId) !== clean(identity.catalogId)) return false;
+  if (clean(decoded.source) === clean(identity.source)
+    && clean(decoded.sourceId) === clean(identity.sourceId)) return true;
+  const expectedHashes = new Set((Array.isArray(identity.torrents) ? identity.torrents : [])
+    .map(torrent => clean(torrent?.infoHash).toLowerCase())
+    .filter(hash => /^[a-f0-9]{40}$/.test(hash)));
+  return (Array.isArray(decoded.torrents) ? decoded.torrents : [])
+    .some(torrent => expectedHashes.has(clean(torrent?.infoHash).toLowerCase()));
 }
 
 function createCatalogResponseStore(options = {}) {
@@ -112,7 +116,10 @@ function createCatalogResponseStore(options = {}) {
     },
     findMetaByIdentity(identity) {
       load();
-      if (!clean(identity?.catalogId) || !clean(identity?.source) || !clean(identity?.sourceId)) return null;
+      if (!clean(identity?.catalogId)) return null;
+      const hasSourceIdentity = clean(identity?.source) && clean(identity?.sourceId);
+      const hasTorrentIdentity = Array.isArray(identity?.torrents) && identity.torrents.length > 0;
+      if (!hasSourceIdentity && !hasTorrentIdentity) return null;
       const current = now();
       for (const [key, record] of records) {
         if (current - record.savedAt > ttlMs) {

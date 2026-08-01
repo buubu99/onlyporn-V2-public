@@ -458,7 +458,7 @@ test('a genuine empty TPB result table does not fall through to another mirror',
   assert.equal(calls.length, 1);
 });
 
-test('Sukebei RSS infoHash becomes an honest P2P candidate without a detail-page round trip', async () => {
+test('Sukebei RSS infoHash becomes an honest P2P candidate without scraping its HTML detail page', async () => {
   const rss = `<?xml version="1.0"?><rss><channel><item>
     <guid>https://sukebei.example/view/77</guid>
     <title>ABP-123 Sample 1080p</title>
@@ -468,7 +468,7 @@ test('Sukebei RSS infoHash becomes an honest P2P candidate without a detail-page
     <nyaa:seeders>31</nyaa:seeders>
     <nyaa:size>2.8 GiB</nyaa:size>
   </item></channel></rss>`;
-  let requests = 0;
+  const requests = [];
   const baseConfig = readTpb4kConfig(env());
   const adapter = createSukebeiMetadataAdapter({
     config: {
@@ -479,8 +479,8 @@ test('Sukebei RSS infoHash becomes an honest P2P candidate without a detail-page
     endpoint: 'https://sukebei.example/?page=rss&c=0_0&f=0',
     metadataClients: {},
     checkDns: false,
-    fetchImpl: async () => {
-      requests += 1;
+    fetchImpl: async url => {
+      requests.push(String(url));
       return response(rss, 200, 'application/rss+xml');
     },
   });
@@ -492,7 +492,8 @@ test('Sukebei RSS infoHash becomes an honest P2P candidate without a detail-page
   assert.equal(candidates[0].seeders, 31);
   assert.equal(candidates[0].resolution, '1080p');
   assert.equal(Object.hasOwn(candidates[0], 'cached'), false);
-  assert.equal(requests, 1);
+  assert.equal(requests.length, 2);
+  assert.match(requests[1], /\/download\/77\.torrent$/);
 });
 
 test('catalog-time version-2 binding avoids a second title search', async () => {

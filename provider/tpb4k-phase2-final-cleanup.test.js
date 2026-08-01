@@ -10,6 +10,8 @@ const {
   landingPageImage,
   parseSukebeiTopHtml,
   resolveVerifiedPosterUrl,
+  selectSukebeiMainFile,
+  sukebeiTorrentUrl,
 } = require('./tpb4k/sukebei-metadata');
 const { createStudioMetadataAdapter, platformEvidence } = require('./tpb4k/studio-metadata');
 const { getCatalogDefinition } = require('../catalog/tpb4k');
@@ -96,10 +98,23 @@ test('Sukebei official top page parser keeps ranked playable video torrents', ()
   assert.equal(items.length, 1);
   assert.equal(items[0].title, '+++ [FHD] MIDA-727 Example');
   assert.equal(items[0].detailUrl, 'https://sukebei.nyaa.si/view/4668522');
+  assert.equal(items[0].torrentUrl, 'https://sukebei.nyaa.si/download/4668522.torrent');
   assert.equal(items[0].infoHash, hash);
   assert.equal(items[0].seeders, '637');
   assert.equal(items[0].size, '4.8 GiB');
   assert.deepEqual(items[0].tags, ['Real Life', 'Videos']);
+});
+
+test('Sukebei torrent selection rejects promo clips and binds the largest real video file', () => {
+  const selected = selectSukebeiMainFile([
+    { index: 0, path: 'release/sample.mp4', length: 20_000_000 },
+    { index: 1, path: 'release/main-part-1.mp4', length: 5_500_000_000 },
+    { index: 2, path: 'release/main-part-2.mp4', length: 2_400_000_000 },
+    { index: 3, path: 'release/cover.jpg', length: 500_000 },
+  ]);
+  assert.equal(selected.index, 1);
+  assert.equal(selected.path, 'release/main-part-1.mp4');
+  assert.equal(sukebeiTorrentUrl({ detailUrl: 'https://sukebei.nyaa.si/view/4668522' }), 'https://sukebei.nyaa.si/download/4668522.torrent');
 });
 
 test('StashDB JAV matching uses searchScene(term:) instead of SceneQueryInput.code', async () => {
@@ -632,6 +647,7 @@ test('OnlyFans catalog uses explicit platform metadata queries instead of a none
 
 test('StashDB network circuit opens after one failure and TPDB remains available for following catalogs', async () => {
   let stashCalls = 0;
+  let sexartRecords = 0;
   const adapter = createStudioMetadataAdapter({
     env: { ONLYPORN_CONTENT_FILTER_ENABLED: 'false' },
     config: {
@@ -645,7 +661,11 @@ test('StashDB network circuit opens after one failure and TPDB remains available
     metadataClients: {
       tpdb: {
         configured: true,
-        async queryScenes(options) { return [scene(`tpdb-${options.studio || options.query}`, { site: { name: options.studio || 'Vixen' } })]; },
+        async queryScenes(options) {
+          if (/vixen|wow\s*girls/i.test(String(options.studio || ''))) return [];
+          if (/sexart/i.test(String(options.studio || '')) && sexartRecords++ > 0) return [];
+          return [scene(`tpdb-${options.studio || options.query}`, { site: { name: options.studio || 'Vixen' } })];
+        },
         async findScene() { return null; },
       },
       stashdb: {
@@ -658,8 +678,10 @@ test('StashDB network circuit opens after one failure and TPDB remains available
   });
   const vixen = getCatalogDefinition('tpb4k.studio.vixen.top');
   const sexart = getCatalogDefinition('tpb4k.studio.sexart.top');
-  assert.equal((await adapter.catalog({ catalog: vixen, skip: 0, limit: 1 })).length, 1);
-  assert.equal((await adapter.catalog({ catalog: sexart, skip: 0, limit: 1 })).length, 1);
+  const wowgirls = getCatalogDefinition('tpb4k.studio.wowgirls.top');
+  assert.equal((await adapter.catalog({ catalog: vixen, skip: 0, limit: 1 })).length, 0);
+  assert.equal((await adapter.catalog({ catalog: sexart, skip: 0, limit: 2 })).length, 1);
+  assert.equal((await adapter.catalog({ catalog: wowgirls, skip: 0, limit: 1 })).length, 0);
   assert.equal(stashCalls, 1);
   assert.equal(adapter.diagnostics().metadataCatalog.providerCircuitOpen.stashdb, 1);
 });

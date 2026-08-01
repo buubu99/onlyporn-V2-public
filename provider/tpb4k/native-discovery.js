@@ -245,15 +245,31 @@ function decodeTorrent(buffer) {
   }
   const nameBuffer = info['name.utf-8'] || info.name;
   const filename = Buffer.isBuffer(nameBuffer) ? cleanText(nameBuffer.toString('utf8')) : '';
-  const size = Number.isSafeInteger(info.length)
-    ? info.length
-    : Array.isArray(info.files)
-      ? info.files.reduce((total, file) => total + (Number.isSafeInteger(file?.length) ? file.length : 0), 0)
-      : 0;
+  const files = Array.isArray(info.files)
+    ? info.files.map((file, index) => {
+      const pathParts = file?.['path.utf-8'] || file?.path;
+      const relativePath = Array.isArray(pathParts)
+        ? pathParts
+          .filter(Buffer.isBuffer)
+          .map(part => cleanText(part.toString('utf8')))
+          .filter(Boolean)
+          .join('/')
+        : '';
+      return Object.freeze({
+        index,
+        path: [filename, relativePath].filter(Boolean).join('/') || `file-${index}`,
+        length: Number.isSafeInteger(file?.length) ? file.length : 0,
+      });
+    })
+    : (Number.isSafeInteger(info.length)
+      ? [Object.freeze({ index: 0, path: filename || 'file-0', length: info.length })]
+      : []);
+  const size = files.reduce((total, file) => total + file.length, 0);
   return {
     infoHash: crypto.createHash('sha1').update(buffer.subarray(infoStart, infoEnd)).digest('hex'),
     filename,
     size,
+    files: Object.freeze(files),
   };
 }
 
@@ -809,6 +825,8 @@ module.exports = {
   parseHentaiCatalog,
   parsePornripsCatalog,
   pornripsSceneKey,
+  readBoundedBuffer,
+  safeNativeRequest,
   parseYespornCatalog,
   torrentUrlFromDetail,
 };

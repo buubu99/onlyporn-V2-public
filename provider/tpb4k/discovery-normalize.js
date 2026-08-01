@@ -68,6 +68,9 @@ function normalizeFeedItem(source, item = {}, index = 0) {
     seeders: Number.parseInt(String(item.seeders ?? 0), 10) || 0,
     size: item.size || 0,
     detailUrl: [item.detailUrl, item.url, item.link].map(safeHttps).find(Boolean) || '',
+    torrentUrl: [item.torrentUrl, item.downloadUrl, item.link]
+      .map(safeHttps)
+      .find(value => /\.torrent(?:$|\?)/i.test(value)) || '',
     upstreamId: text(item.upstreamId || item.id || item.guid),
     infoHash,
     magnetLink,

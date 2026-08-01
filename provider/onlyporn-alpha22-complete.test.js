@@ -56,7 +56,7 @@ test('normal studios keep the stable binder while only four weak catalogues can 
   assert.match(provider, /this\.catalogInFlight = new Map\(\)/);
   assert.doesNotMatch(provider, /const catalogResponseCache = new Map\(\)/);
   assert.doesNotMatch(provider, /const catalogInFlight = new Map\(\)/);
-  assert.match(provider, /weakStudioKey === 'onlyfans' \? 600/);
+  assert.match(provider, /weakStudioKey === 'onlyfans' \? 120/);
   assert.equal(shouldUseTorrentFirst({ studio: 'OnlyFans' }, 39), true);
   assert.equal(shouldUseTorrentFirst({ studio: 'OnlyFans' }, 40), false);
   assert.equal(shouldUseTorrentFirst({ studio: 'DigitalPlayground' }, 19), true);

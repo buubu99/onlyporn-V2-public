@@ -417,15 +417,27 @@ function createStudioMetadataAdapter(options = {}) {
       filterReasons: {},
       providerCircuitOpen: {},
     };
-    const needed = Math.min(Math.max((safeSkip + safeLimit) * overscanFactor, safeLimit), 300);
+    const needed = catalog?.playbackBindingPool
+      ? Math.min(Math.max(safeSkip + safeLimit, safeLimit), 300)
+      : Math.min(Math.max((safeSkip + safeLimit) * overscanFactor, safeLimit), 300);
     const byIdentity = new Map();
 
-    // TPDB is the primary catalog source, while StashDB supplements tags and
-    // performer metadata. The two providers run concurrently behind one shared
-    // limiter, preventing the home screen from creating a metadata request storm.
-    const providerResults = await Promise.all(
-      providers.map(provider => queryProvider(provider, catalog, studio, needed, stats))
-    );
+    // TPDB is the primary catalogue source. Avoid firing StashDB for every one
+    // of the studio rows during a cold AIOStreams home-screen refresh when TPDB
+    // already supplied the requested window; this prevents the shared metadata
+    // queue from turning the final catalogues into 30-second timeouts.
+    const providerResults = [];
+    const primaryProvider = providers.includes('tpdb') ? 'tpdb' : providers[0];
+    const primaryRecords = await queryProvider(primaryProvider, catalog, studio, needed, stats);
+    providerResults.push(primaryRecords);
+    if (primaryRecords.length < needed) {
+      const supplements = await Promise.all(
+        providers
+          .filter(provider => provider !== primaryProvider)
+          .map(provider => queryProvider(provider, catalog, studio, needed - primaryRecords.length, stats))
+      );
+      providerResults.push(...supplements);
+    }
     for (const records of providerResults) {
       for (const item of records) {
         const identity = metadataMergeKey(item);
