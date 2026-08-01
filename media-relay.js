@@ -5,7 +5,9 @@ const logger = require('./logger');
 
 const SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 const MAX_SESSIONS = 8000;
+const MAX_COMPACT_CHILDREN_PER_SESSION = 12000;
 const CHILD_TOKEN_VERSION = 'c1';
+const COMPACT_CHILD_TOKEN_VERSION = 'r1';
 const CHILD_TOKEN_SIGNATURE_BYTES = 18;
 const PLAYLIST_CHILD_ERROR_CODE = 'HLS_CHILD_REJECTED';
 const CHILD_TOKEN_SECRET = crypto.randomBytes(32);
@@ -170,6 +172,9 @@ function createSessionEntry({ url, headers = {}, provider, kind, ttlMs = SESSION
     provider,
     kind: resolvedKind,
     sessionToken: token,
+    compactChildren: new Map(),
+    compactChildIds: new Map(),
+    nextCompactChildId: 0,
   };
 
   entries.set(token, entry, ttlMs);
@@ -214,6 +219,60 @@ function createChildToken(sessionEntry, url, kind) {
   return `${unsignedToken}.${signChildToken(unsignedToken)}`;
 }
 
+function createCompactChildToken(sessionEntry, url, kind) {
+  const safeUrl = validateTargetUrl(url, sessionEntry.provider);
+  const resolvedKind = kind || kindFromUrl(safeUrl);
+  const kindCode = KIND_TO_CODE[resolvedKind] || KIND_TO_CODE.binary;
+  const childKey = `${kindCode}\0${safeUrl}`;
+  let childId = sessionEntry.compactChildIds.get(childKey);
+
+  if (!childId) {
+    if (sessionEntry.compactChildren.size >= MAX_COMPACT_CHILDREN_PER_SESSION) {
+      throw new Error('Media relay compact child limit exceeded');
+    }
+    sessionEntry.nextCompactChildId += 1;
+    childId = sessionEntry.nextCompactChildId.toString(36);
+    sessionEntry.compactChildIds.set(childKey, childId);
+    sessionEntry.compactChildren.set(childId, { url: safeUrl, kind: resolvedKind });
+  }
+
+  const unsignedToken = [
+    COMPACT_CHILD_TOKEN_VERSION,
+    sessionEntry.sessionToken,
+    kindCode,
+    childId,
+  ].join('.');
+  return `${unsignedToken}.${signChildToken(unsignedToken)}`;
+}
+
+function resolveCompactChildToken(token) {
+  if (typeof token !== 'string' || token.length > 256) return undefined;
+  const parts = token.split('.');
+  if (parts.length !== 5 || parts[0] !== COMPACT_CHILD_TOKEN_VERSION) return undefined;
+
+  const [version, sessionToken, kindCode, childId, signature] = parts;
+  const kind = CODE_TO_KIND[kindCode];
+  if (!kind || !sessionToken || !childId || !signature) return undefined;
+
+  const unsignedToken = [version, sessionToken, kindCode, childId].join('.');
+  if (!signaturesEqual(signature, signChildToken(unsignedToken))) return undefined;
+
+  const sessionEntry = entries.get(sessionToken);
+  const child = sessionEntry?.compactChildren?.get(childId);
+  if (!child || child.kind !== kind) return undefined;
+
+  try {
+    return {
+      ...sessionEntry,
+      url: validateTargetUrl(child.url, sessionEntry.provider),
+      kind,
+      sessionToken,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 function resolveChildToken(token) {
   if (typeof token !== 'string' || token.length > 16_384) return undefined;
   const parts = token.split('.');
@@ -249,7 +308,7 @@ function resolveChildToken(token) {
 }
 
 function resolveRelayEntry(token) {
-  return entries.get(token) || resolveChildToken(token);
+  return entries.get(token) || resolveCompactChildToken(token) || resolveChildToken(token);
 }
 
 class PlaylistChildRelayError extends Error {
@@ -282,7 +341,11 @@ function relayChild(entry, parentUrl, value, kind) {
     if (!publicBase) throw new Error('Media relay public base URL is not initialized');
     const sessionEntry = ensureSessionEntry(entry, parentUrl);
     const resolvedKind = kind || kindFromUrl(resolved);
-    const token = createChildToken(sessionEntry, resolved, resolvedKind);
+    // Keep child references compact because AIOStreams and Stremio wrap this URL
+    // again. Targets live inside the one signed playback session, so a long VOD
+    // still consumes one global cache entry while every child stays validated and
+    // behind the OnlyPorn relay.
+    const token = createCompactChildToken(sessionEntry, resolved, resolvedKind);
     return `${publicBase}/media/${token}/${filenameFor(resolvedKind)}`;
   } catch (error) {
     if (error instanceof PlaylistChildRelayError) throw error;
@@ -597,10 +660,13 @@ module.exports = {
   setPublicBase,
   _test: {
     entries,
+    MAX_COMPACT_CHILDREN_PER_SESSION,
     MAX_SESSIONS,
     PLAYLIST_CHILD_ERROR_CODE,
     SESSION_TTL_MS,
     createChildToken,
+    createCompactChildToken,
+    resolveCompactChildToken,
     hostnameAllowed,
     isJavTransportSegment,
     normalizeJavTransportSegment,

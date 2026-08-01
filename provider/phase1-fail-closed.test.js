@@ -49,7 +49,7 @@ test('Hardening Phase 1 rewrites an approved HLS child through the protected rel
     entry
   );
 
-  assert.match(rewritten, /^#EXTM3U\n#EXTINF:6\.0,\nhttps:\/\/onlyporn\.example\/media\/c1\./);
+  assert.match(rewritten, /^#EXTM3U\n#EXTINF:6\.0,\nhttps:\/\/onlyporn\.example\/media\/r1\./);
   assert.doesNotMatch(rewritten, /hv-h\.phncdn\.com\/hls\/fixture\/segments/);
   assert.equal(mediaRelay._test.entries.size, 1, 'Phase 0 one-session behavior must remain active');
 });
@@ -163,7 +163,7 @@ test('JAVHDPorn custom token lines remain untouched under fail-closed rewriting'
   );
 
   assert.match(rewritten, /#EXT-X-TOKEN=fixture-token-must-remain/);
-  assert.match(rewritten, /https:\/\/onlyporn\.example\/media\/c1\./);
+  assert.match(rewritten, /https:\/\/onlyporn\.example\/media\/r1\.[A-Za-z0-9_.-]+\/segment\.bin/);
   assert.doesNotMatch(rewritten, /\nseg0\.webp(?:\n|$)/);
 });
 

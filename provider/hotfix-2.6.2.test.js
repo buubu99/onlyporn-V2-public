@@ -116,6 +116,8 @@ test('vdcdn master rewriting preserves custom token lines and relays image-named
   assert.match(rewritten, /#EXT-X-TOKEN=fixture-token-must-remain/);
   const relayUrl = rewritten.split('\n').find(line => line.startsWith('https://onlyporn.example/media/'));
   assert.ok(relayUrl);
+  assert.match(relayUrl, /\/media\/r1\.[A-Za-z0-9_.-]+\/segment\.bin$/);
+  assert.ok(relayUrl.length < 140, 'JAVHDPorn child relay URL must remain compact');
   const stored = mediaRelay._test.resolveRelayEntry(tokenFromRelayUrl(relayUrl));
   assert.equal(stored.provider, 'javhdporn');
   assert.equal(stored.kind, 'segment');
@@ -123,7 +125,7 @@ test('vdcdn master rewriting preserves custom token lines and relays image-named
   assert.equal(stored.headers.Cookie, 'fixture=1');
   assert.equal(stored.headers.Origin, 'https://video.javhdporn.net');
   assert.match(stored.headers.Referer, /video\.javhdporn\.net\/p\/fixture/);
-  assert.equal(mediaRelay._test.entries.size, 1, 'segment child token must reuse one session');
+  assert.equal(mediaRelay._test.entries.size, 1, 'segment child must preserve one root session');
 });
 
 test('raw MPEG-TS disguised as image/webp remains byte-identical', () => {

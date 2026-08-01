@@ -118,7 +118,7 @@ test('nested HLS playlists reuse the original playback session', () => {
 });
 
 
-test('HTTP relay resolves a signed child playlist token without a child cache entry', async () => {
+test('HTTP relay resolves a compact signed child playlist token without a child cache entry', async () => {
   mediaRelay._test.entries.clear();
   const masterUrl =
     'https://hv-h.phncdn.com/hls/fixture/master.m3u8?h=root&e=9999999999&f=1';
@@ -173,11 +173,11 @@ test('HTTP relay resolves a signed child playlist token without a child cache en
   }
 
   assert.equal(response.statusCode, 200);
-  assert.match(response.body, /https:\/\/onlyporn\.example\/media\/c1\./);
+  assert.match(response.body, /https:\/\/onlyporn\.example\/media\/r1\./);
   assert.equal(mediaRelay._test.entries.size, 1);
 });
 
-test('tampered stateless child tokens are rejected', () => {
+test('tampered compact child tokens are rejected', () => {
   mediaRelay._test.entries.clear();
   const relayUrl = mediaRelay.register({
     url: 'https://hv-h.phncdn.com/hls/fixture/master.m3u8?h=root&e=9999999999&f=1',
