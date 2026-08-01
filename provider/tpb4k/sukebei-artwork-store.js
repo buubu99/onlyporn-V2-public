@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 
-const STORE_VERSION = 1;
+const STORE_VERSION = 3;
 const DEFAULT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 const DEFAULT_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 const DEFAULT_MAX_ENTRIES = 1_000;
@@ -13,7 +13,13 @@ function truthy(value) { return /^(?:1|true|yes|on)$/i.test(clean(value)); }
 function safeHttps(value) {
   try {
     const url = new URL(clean(value));
-    return url.protocol === 'https:' && !url.username && !url.password ? url.toString() : '';
+    const host = url.hostname.toLowerCase();
+    const pathname = url.pathname.toLowerCase();
+    if (url.protocol !== 'https:' || url.username || url.password) return '';
+    if (host === 'imagetwist.com' || host.endsWith('.imagetwist.com')
+      || host === 'imgtwist.com' || host.endsWith('.imgtwist.com')) return '';
+    if (/(?:hotlink|hot-link|placeholder|deleted|not[-_ ]?found|error[-_ ]?image)/i.test(pathname)) return '';
+    return url.toString();
   } catch { return ''; }
 }
 function isGeneratedRssPoster(value) {
@@ -65,23 +71,17 @@ function equivalent(left, right) {
 }
 
 function createSukebeiArtworkStore(options = {}) {
-  const suppliedEnv = options.env && typeof options.env === 'object' ? options.env : {};
-  const env = { ...process.env, ...suppliedEnv };
+  const env = { ...process.env, ...(options.env || {}) };
   const now = typeof options.now === 'function' ? options.now : Date.now;
   const maxAgeMs = Math.max(Number(options.maxAgeMs || env.ONLYPORN_SUKEBEI_ARTWORK_MAX_AGE_MS || DEFAULT_MAX_AGE_MS), 60_000);
   const refreshIntervalMs = Math.max(Number(options.refreshIntervalMs || env.ONLYPORN_SUKEBEI_ARTWORK_REFRESH_MS || DEFAULT_REFRESH_INTERVAL_MS), 60_000);
   const maxEntries = Math.min(Math.max(Number(options.maxEntries || env.ONLYPORN_SUKEBEI_ARTWORK_MAX_ENTRIES || DEFAULT_MAX_ENTRIES), 50), 5_000);
-  const explicitFilePath = clean(options.filePath);
-  // The deployment test runner sets the process-level disable flag. Adapter
-  // tests often pass a narrow env object for content-filter settings; that
-  // object must never hide the process-level isolation flag. An explicit
-  // filePath remains available for the artwork-store lifecycle unit test.
-  const processDisabled = truthy(process.env.ONLYPORN_DISABLE_PERSISTENT_CACHE);
-  const suppliedEnvDisabled = truthy(suppliedEnv.ONLYPORN_DISABLE_PERSISTENT_CACHE);
-  const disabledForSharedDefault = !explicitFilePath && (processDisabled || suppliedEnvDisabled);
-  const enabled = options.enabled !== false && !disabledForSharedDefault;
+  const explicitFilePath = Boolean(clean(options.filePath));
+  const cacheDisabled = truthy(process.env.ONLYPORN_DISABLE_PERSISTENT_CACHE)
+    || truthy(env.ONLYPORN_DISABLE_PERSISTENT_CACHE);
+  const enabled = options.enabled !== false && (!cacheDisabled || explicitFilePath);
   const filePath = enabled
-    ? path.resolve(explicitFilePath || path.join(defaultCacheDirectory(env), 'sukebei-artwork-v1.json'))
+    ? path.resolve(clean(options.filePath) || path.join(defaultCacheDirectory(env), 'sukebei-artwork-v3.json'))
     : '';
   let records = null;
   let writes = 0;

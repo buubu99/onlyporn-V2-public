@@ -351,7 +351,7 @@ test('nineteen studio definitions are metadata-first catalogs with torrent looku
 test('Phase 2A release wiring preserves 29 catalogs, 38 feature catalogs, and prior hardening', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const relay = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
-  assert.equal(pkg.version, '2.7.0-alpha.21');
+  assert.equal(pkg.version, '2.7.0-alpha.22');
   assert.equal(catalogDefinitions.length, 29);
   assert.match(pkg.scripts['test:release'], /tpb4k-phase2a\.test\.js/);
   assert.match(relay, /const SESSION_TTL_MS = 8 \* 60 \* 60 \* 1000/);

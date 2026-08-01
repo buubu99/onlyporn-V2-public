@@ -19,7 +19,8 @@ function torrent(hash, title, poster, resolution = '1080p', seeders = 10, source
 
 test('weak platform and studio catalogues activate torrent-first recovery thresholds', () => {
   assert.equal(shouldUseTorrentFirst({ studio: 'OnlyFans' }, 3), true);
-  assert.equal(shouldUseTorrentFirst({ studio: 'OnlyFans' }, 12), false);
+  assert.equal(shouldUseTorrentFirst({ studio: 'OnlyFans' }, 12), true);
+  assert.equal(shouldUseTorrentFirst({ studio: 'OnlyFans' }, 40), false);
   assert.equal(shouldUseTorrentFirst({ studio: 'DigitalPlayground' }, 0), true);
   assert.equal(shouldUseTorrentFirst({ studio: 'XVideos RED' }, 7), true);
 });

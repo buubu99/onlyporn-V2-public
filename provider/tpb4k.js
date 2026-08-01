@@ -8,11 +8,13 @@ const {
   toStremioStream,
 } = require('./tpb4k/candidate');
 const { readTpb4kConfig, publicConfigStatus, redactSecrets } = require('./tpb4k/config');
+const { createCatalogResponseStore } = require('./tpb4k/catalog-response-store');
 const { decodeTpb4kId, encodeTpb4kId } = require('./tpb4k/id-codec');
 const { buildSceneIdentity } = require('./tpb4k/identity');
 const { getAdapter, installBuiltInAdapters } = require('./tpb4k/index');
 const { normalizeDiscoveryItem } = require('./tpb4k/source-contract');
 const { fallbackPosterUrl } = require('./tpb4k/poster-enrichment');
+const { sukebeiRssPosterUrl } = require('./tpb4k/sukebei-rss-poster');
 const { bindStudioPlayback } = require('./tpb4k/studio-playback-binding');
 const { recoverStudioPlayback } = require('./tpb4k/studio-targeted-recovery');
 const { mergeTorrentFirstStudio, shouldUseTorrentFirst } = require('./tpb4k/torrent-first-studio');
@@ -25,6 +27,9 @@ const {
 const MOVIE_TYPE = 'movie';
 const SERIES_TYPE = 'series';
 const HENTAI_PREFIX = 'ophmm-';
+const TORRENT_FIRST_STUDIOS = new Set(['onlyfans', 'digitalplayground', 'xvideosred', 'sexmex']);
+const CATALOG_CACHE_TTL_MS = 15 * 60 * 1000;
+const CATALOG_STALE_TTL_MS = 24 * 60 * 60 * 1000;
 let loggerInstance;
 
 function logger() {
@@ -38,7 +43,13 @@ function safePoster(value) {
   if (!text) return undefined;
   try {
     const parsed = new URL(text);
-    return parsed.protocol === 'https:' && !parsed.username && !parsed.password ? parsed.toString() : undefined;
+    const host = parsed.hostname.toLowerCase();
+    const path = `${parsed.pathname}${parsed.search}`.toLowerCase();
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return undefined;
+    if (host === 'imagetwist.com' || host.endsWith('.imagetwist.com')
+      || host === 'imgtwist.com' || host.endsWith('.imgtwist.com')) return undefined;
+    if (/(?:hotlink|hot-link|placeholder|deleted|not[-_ ]?found|error[-_ ]?image)/i.test(path)) return undefined;
+    return parsed.toString();
   } catch { return undefined; }
 }
 function catalogType(catalogId) {
@@ -59,8 +70,10 @@ function fallbackKey(item = {}) {
   if (['torrent-index', 'studio-metadata'].includes(item.source) && item.studio) return item.studio;
   return item.source || 'onlyporn';
 }
-function resolvedPoster(item, config = {}) {
+function resolvedPoster(item, config = {}, catalogId = '') {
   const poster = safePoster(item?.poster);
+  if (catalogId === 'tpb4k.sukebei.rss') return sukebeiRssPosterUrl(item, config);
+  if (catalogId === 'tpb4k.sukebei.top') return poster;
   if (item?.source === 'studio-metadata') return poster;
   return poster || safePoster(fallbackPosterUrl(fallbackKey(item), config.posterAssetBaseUrl));
 }
@@ -89,7 +102,7 @@ function toMetaPreview(item, catalogId, config) {
       catalogId,
       torrents: torrentBundle(item),
     });
-  const poster = resolvedPoster(item, config);
+  const poster = resolvedPoster(item, config, catalogId);
   return {
     id,
     type,
@@ -102,9 +115,9 @@ function toMetaPreview(item, catalogId, config) {
     links: toLinks(identity),
   };
 }
-function toMetaResponse(item, id, config, type = MOVIE_TYPE) {
+function toMetaResponse(item, id, config, type = MOVIE_TYPE, catalogId = '') {
   const identity = buildSceneIdentity(item);
-  const poster = resolvedPoster(item, config);
+  const poster = resolvedPoster(item, config, catalogId);
   return {
     id,
     type,
@@ -145,6 +158,9 @@ class Tpb4kProvider {
     this.env = options.env || process.env;
     this.fetchImpl = options.fetchImpl;
     this.contentFilter = readContentFilterConfig(this.env);
+    this.catalogResponseCache = new Map();
+    this.catalogInFlight = new Map();
+    this.catalogResponseStore = createCatalogResponseStore({ env: this.env });
     if (options.installBuiltIns !== false) installBuiltInAdapters({ env: this.env, fetchImpl: this.fetchImpl });
   }
   static create(options) { return new Tpb4kProvider(options); }
@@ -156,6 +172,49 @@ class Tpb4kProvider {
   enabled() { return isTpb4kEnabled(this.env); }
 
   async handleCatalog(args) {
+    if (!this.enabled()) return { metas: [] };
+    const cacheKey = `${String(args?.type || '')}:${String(args?.id || '')}:${String(args?.extra?.skip || 0)}`;
+    let cached = this.catalogResponseCache.get(cacheKey);
+    if (!cached) {
+      const persisted = this.catalogResponseStore.get(cacheKey);
+      if (persisted?.value?.metas?.length) {
+        cached = Object.freeze({ savedAt: persisted.savedAt, value: persisted.value });
+        this.catalogResponseCache.set(cacheKey, cached);
+      }
+    }
+    const age = cached ? Date.now() - cached.savedAt : Infinity;
+    if (cached && age < CATALOG_CACHE_TTL_MS) return cached.value;
+    if (cached && age > CATALOG_STALE_TTL_MS) {
+      this.catalogResponseCache.delete(cacheKey);
+      cached = null;
+    }
+    if (this.catalogInFlight.has(cacheKey)) {
+      if (cached?.value?.metas?.length) return cached.value;
+      return this.catalogInFlight.get(cacheKey);
+    }
+    const operation = this._handleCatalogFresh(args)
+      .then(value => {
+        if (Array.isArray(value?.metas) && value.metas.length) {
+          const record = Object.freeze({ savedAt: Date.now(), value });
+          this.catalogResponseCache.set(cacheKey, record);
+          this.catalogResponseStore.set(cacheKey, value);
+        } else if (cached?.value?.metas?.length) return cached.value;
+        return value;
+      })
+      .catch(error => {
+        if (cached?.value?.metas?.length) return cached.value;
+        throw error;
+      })
+      .finally(() => this.catalogInFlight.delete(cacheKey));
+    this.catalogInFlight.set(cacheKey, operation);
+    if (cached?.value?.metas?.length) {
+      operation.catch(() => {});
+      return cached.value;
+    }
+    return operation;
+  }
+
+  async _handleCatalogFresh(args) {
     if (!this.enabled()) return { metas: [] };
     const definition = getCatalogDefinition(args.id);
     if (!definition || args.type !== (definition.type || MOVIE_TYPE)) return { metas: [] };
@@ -180,10 +239,14 @@ class Tpb4kProvider {
         const loadTorrentPool = typeof resolverAdapter.catalogTorrents === 'function'
           ? resolverAdapter.catalogTorrents.bind(resolverAdapter)
           : resolverAdapter.catalog.bind(resolverAdapter);
-        const torrentFirstEnabled = shouldUseTorrentFirst(definition, 0) && typeof resolverAdapter.catalog === 'function';
+        const weakStudioKey = diagnosticStudioKey(definition.studio);
+        const torrentFirstEnabled = TORRENT_FIRST_STUDIOS.has(weakStudioKey)
+          && shouldUseTorrentFirst(definition, 0)
+          && typeof resolverAdapter.catalog === 'function';
+        const discoveryPoolLimit = weakStudioKey === 'onlyfans' ? 600 : (torrentFirstEnabled ? 400 : 300);
         const [metadataItems, torrentItems, enrichedTorrentItems] = await Promise.all([
-          adapter.catalog({ catalog: { ...definition, playbackBindingPool: true }, skip: 0, limit: 300, config }),
-          loadTorrentPool({ catalog: { ...definition, source: 'torrent-index', playbackBindingPool: true }, skip: 0, limit: 300, config }),
+          adapter.catalog({ catalog: { ...definition, playbackBindingPool: true }, skip: 0, limit: discoveryPoolLimit, config }),
+          loadTorrentPool({ catalog: { ...definition, source: 'torrent-index', playbackBindingPool: true }, skip: 0, limit: discoveryPoolLimit, config }),
           torrentFirstEnabled ? resolverAdapter.catalog({
             catalog: {
               ...definition,
@@ -192,7 +255,7 @@ class Tpb4kProvider {
               torrentFirstFallback: true,
             },
             skip: 0,
-            limit: 300,
+            limit: discoveryPoolLimit,
             config,
           }) : Promise.resolve([]),
         ]);
@@ -207,12 +270,13 @@ class Tpb4kProvider {
           let fallback = mergeTorrentFirstStudio({
             catalog: definition,
             existingItems: binding.items,
+            metadataItems,
             torrentItems: enrichedTorrentItems,
             limit: config.catalogLimit,
             config,
             env: this.env,
           });
-          if (shouldUseTorrentFirst(definition, fallback.items.length)) {
+          if (weakStudioKey === 'onlyfans' && shouldUseTorrentFirst(definition, fallback.items.length)) {
             binding = await recoverStudioPlayback({
               catalog: definition,
               metadataItems,
@@ -225,6 +289,7 @@ class Tpb4kProvider {
             fallback = mergeTorrentFirstStudio({
               catalog: definition,
               existingItems: binding.items,
+              metadataItems,
               torrentItems: enrichedTorrentItems,
               limit: config.catalogLimit,
               config,
@@ -275,6 +340,12 @@ class Tpb4kProvider {
         return normalizeDiscoveryItem(itemAdapter, { ...item, catalogId: definition.id });
       })
       .filter(Boolean)
+      .map(item => {
+        if (definition.id !== 'tpb4k.sukebei.rss') return item;
+        const poster = sukebeiRssPosterUrl(item, config, this.env);
+        return Object.freeze({ ...item, poster, background: poster, lookupSource: 'sukebei-rss-title-poster' });
+      })
+      .filter(item => definition.id !== 'tpb4k.sukebei.top' || Boolean(safePoster(item.poster)))
       .filter(item => !['studio-metadata', 'platform-hybrid'].includes(definition.source) || Boolean(safePoster(item.poster)));
     const contentFiltered = filterItems(normalizedItems, this.contentFilter);
     const metas = [...contentFiltered.items].slice(0, config.catalogLimit).map(item => toMetaPreview(item, definition.id, config));
@@ -328,7 +399,7 @@ class Tpb4kProvider {
     if (!item) return { meta: {} };
     const evaluation = evaluateContent(item, this.contentFilter);
     if (evaluation.excluded) return { meta: {} };
-    return { meta: toMetaResponse(item, args.id, config, catalogType(decoded.catalogId)) };
+    return { meta: toMetaResponse(item, args.id, config, catalogType(decoded.catalogId), decoded.catalogId) };
   }
 
   async handleStream(args) {
