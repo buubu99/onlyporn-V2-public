@@ -15,6 +15,7 @@ const { getAdapter, installBuiltInAdapters } = require('./tpb4k/index');
 const { normalizeDiscoveryItem } = require('./tpb4k/source-contract');
 const { fallbackPosterUrl } = require('./tpb4k/poster-enrichment');
 const { sukebeiRssPosterUrl } = require('./tpb4k/sukebei-rss-poster');
+const { studioReleasePosterUrl } = require('./tpb4k/studio-release-poster');
 const { bindStudioPlayback } = require('./tpb4k/studio-playback-binding');
 const { recoverStudioPlayback } = require('./tpb4k/studio-targeted-recovery');
 const { mergeTorrentFirstStudio, shouldUseTorrentFirst } = require('./tpb4k/torrent-first-studio');
@@ -30,6 +31,10 @@ const HENTAI_PREFIX = 'ophmm-';
 const TORRENT_FIRST_STUDIOS = new Set(['onlyfans', 'digitalplayground', 'xvideosred', 'sexmex']);
 const CATALOG_CACHE_TTL_MS = 15 * 60 * 1000;
 const CATALOG_STALE_TTL_MS = 24 * 60 * 60 * 1000;
+const METADATA_CATALOG_SPACING_MS = 900;
+const METADATA_RATE_LIMIT_RETRY_MS = 9_000;
+let metadataCatalogQueue = Promise.resolve();
+let metadataCatalogNotBefore = 0;
 let loggerInstance;
 
 function logger() {
@@ -37,6 +42,55 @@ function logger() {
   try { loggerInstance = require('../logger'); }
   catch { loggerInstance = { info() {}, warn() {}, error() {}, debug() {} }; }
   return loggerInstance;
+}
+function sleep(ms) { return new Promise(resolve => setTimeout(resolve, Math.max(Number(ms || 0), 0))); }
+async function scheduleMetadataCatalog(task) {
+  const previous = metadataCatalogQueue;
+  let release;
+  metadataCatalogQueue = new Promise(resolve => { release = resolve; });
+  await previous.catch(() => {});
+  const wait = Math.max(metadataCatalogNotBefore - Date.now(), 0);
+  if (wait) await sleep(wait);
+  try { return await task(); }
+  finally {
+    metadataCatalogNotBefore = Date.now() + METADATA_CATALOG_SPACING_MS;
+    release();
+  }
+}
+function adapterDiagnostics(adapter, catalog, limit) {
+  try { return adapter?.diagnostics?.({ catalog, skip: 0, limit }) || {}; }
+  catch { return {}; }
+}
+function metadataTransientFailure(diagnostics = {}) {
+  const data = diagnostics.metadataCatalog || {};
+  const reasons = Object.keys(data.providerErrorReasons || {});
+  const errors = Object.values(data.providerErrors || {}).reduce((sum, value) => sum + Math.max(Number(value || 0), 0), 0);
+  return errors > 0 && reasons.some(value => /rate-limit|network|timeout|temporar|circuit/i.test(value));
+}
+async function invalidateMetadataAdapter(adapter, catalog) {
+  for (const name of ['invalidateCatalogCache', 'invalidateCatalog', 'clearCatalogCache', 'clearCache']) {
+    if (typeof adapter?.[name] !== 'function') continue;
+    try { await adapter[name](catalog); return true; } catch { /* try the next supported invalidator */ }
+  }
+  return false;
+}
+function internalFallbackPoster(value) {
+  const text = String(value || '').trim();
+  if (!text) return false;
+  try {
+    const url = new URL(text);
+    return /\/onlyporn\/poster\/studio-release\//i.test(url.pathname)
+      || /\/onlyporn\/poster\/sukebei-rss\//i.test(url.pathname)
+      || /(?:^|\/)(?:fallback|placeholder|default|studio-catalog)(?:[._/-]|$)/i.test(url.pathname);
+  } catch { return false; }
+}
+function torrentFirstLookup(item = {}) {
+  return String(item.lookupSource || item.provenance?.lookupSource || '').toLowerCase() === 'torrent-first-studio';
+}
+function verifiedMetadataPoster(item = {}) {
+  const provider = String(item.metadataProvider || item.provenance?.metadataProvider || '').toLowerCase();
+  const poster = safePoster(item.poster);
+  return Boolean(poster && ['tpdb', 'stashdb'].includes(provider) && !internalFallbackPoster(poster));
 }
 function safePoster(value) {
   const text = String(value || '').trim();
@@ -74,6 +128,10 @@ function resolvedPoster(item, config = {}, catalogId = '') {
   const poster = safePoster(item?.poster);
   if (catalogId === 'tpb4k.sukebei.rss') return sukebeiRssPosterUrl(item, config);
   if (catalogId === 'tpb4k.sukebei.top') return poster;
+  if (torrentFirstLookup(item)) {
+    if (verifiedMetadataPoster(item)) return poster;
+    return studioReleasePosterUrl(item, { studio: item.studio }, config);
+  }
   if (item?.source === 'studio-metadata') return poster;
   return poster || safePoster(fallbackPosterUrl(fallbackKey(item), config.posterAssetBaseUrl));
 }
@@ -243,11 +301,36 @@ class Tpb4kProvider {
         const torrentFirstEnabled = TORRENT_FIRST_STUDIOS.has(weakStudioKey)
           && shouldUseTorrentFirst(definition, 0)
           && typeof resolverAdapter.catalog === 'function';
-        const discoveryPoolLimit = weakStudioKey === 'onlyfans' ? 600 : (torrentFirstEnabled ? 400 : 300);
-        const [metadataItems, torrentItems, enrichedTorrentItems] = await Promise.all([
-          adapter.catalog({ catalog: { ...definition, playbackBindingPool: true }, skip: 0, limit: discoveryPoolLimit, config }),
-          loadTorrentPool({ catalog: { ...definition, source: 'torrent-index', playbackBindingPool: true }, skip: 0, limit: discoveryPoolLimit, config }),
-          torrentFirstEnabled ? resolverAdapter.catalog({
+        const metadataPoolLimit = weakStudioKey === 'onlyfans' ? 400 : (torrentFirstEnabled ? 300 : 220);
+        const torrentPoolLimit = weakStudioKey === 'onlyfans' ? 600 : (torrentFirstEnabled ? 400 : 300);
+        const metadataTask = () => adapter.catalog({
+          catalog: { ...definition, playbackBindingPool: true },
+          skip: 0,
+          limit: metadataPoolLimit,
+          config,
+        });
+        const metadataPromise = scheduleMetadataCatalog(metadataTask);
+        const torrentPromise = loadTorrentPool({
+          catalog: { ...definition, source: 'torrent-index', playbackBindingPool: true },
+          skip: 0,
+          limit: torrentPoolLimit,
+          config,
+        });
+        let [metadataItems, torrentItems] = await Promise.all([metadataPromise, torrentPromise]);
+        let metadataDiagnostics = adapterDiagnostics(adapter, definition, metadataPoolLimit);
+        let metadataWasTransient = metadataTransientFailure(metadataDiagnostics);
+        if ((!Array.isArray(metadataItems) || !metadataItems.length) && metadataWasTransient) {
+          await invalidateMetadataAdapter(adapter, definition);
+          await sleep(METADATA_RATE_LIMIT_RETRY_MS);
+          metadataItems = await scheduleMetadataCatalog(metadataTask);
+          metadataDiagnostics = adapterDiagnostics(adapter, definition, metadataPoolLimit);
+          metadataWasTransient = metadataTransientFailure(metadataDiagnostics);
+        }
+        metadataItems = Array.isArray(metadataItems) ? metadataItems : [];
+        torrentItems = Array.isArray(torrentItems) ? torrentItems : [];
+        const needsTorrentFallback = torrentFirstEnabled || !metadataItems.length;
+        const enrichedTorrentItems = needsTorrentFallback && typeof resolverAdapter.catalog === 'function'
+          ? await resolverAdapter.catalog({
             catalog: {
               ...definition,
               source: 'torrent-index',
@@ -255,10 +338,10 @@ class Tpb4kProvider {
               torrentFirstFallback: true,
             },
             skip: 0,
-            limit: discoveryPoolLimit,
+            limit: torrentPoolLimit,
             config,
-          }) : Promise.resolve([]),
-        ]);
+          })
+          : [];
         let binding = bindStudioPlayback({
           catalog: definition,
           metadataItems,
@@ -266,7 +349,7 @@ class Tpb4kProvider {
           skip,
           limit: config.catalogLimit,
         });
-        if (torrentFirstEnabled) {
+        if (torrentFirstEnabled || !metadataItems.length) {
           let fallback = mergeTorrentFirstStudio({
             catalog: definition,
             existingItems: binding.items,
@@ -307,7 +390,11 @@ class Tpb4kProvider {
             });
           }
           rawItems = [...fallback.items];
-          torrentFirstStudioFallback = fallback.stats;
+          torrentFirstStudioFallback = Object.freeze({
+            ...fallback.stats,
+            metadataWasTransient,
+            metadataFallbackReason: metadataItems.length ? '' : (metadataWasTransient ? 'transient-metadata-failure' : 'metadata-empty'),
+          });
         } else {
           binding = await recoverStudioPlayback({
             catalog: definition,
@@ -443,11 +530,15 @@ class Tpb4kProvider {
         logger().warn({ provider: this.name, source: decoded.source, resolver: resolverAdapter.id, error: redactSecrets(error?.message || error, this.env) }, 'OnlyPorn stream adapter failed safely');
       }
     }
+    const catalogBoundHashes = new Set((Array.isArray(decoded.torrents) ? decoded.torrents : [])
+      .map(torrent => String(torrent?.infoHash || '').toLowerCase())
+      .filter(hash => /^[a-f0-9]{40}$/.test(hash)));
     const normalized = (Array.isArray(rawCandidates) ? rawCandidates : [])
       .map(candidate => normalizeCandidate({ ...candidate, source: candidate?.source || resolverAdapter.id || decoded.source }))
       .filter(candidate => {
         if (candidate.kind === 'invalid') return false;
         if (['p2p', 'uncached-torrent'].includes(candidate.kind)) {
+          if (catalogBoundHashes.has(String(candidate.infoHash || '').toLowerCase())) return true;
           if (candidate.source === 'pornrips' && candidate.seeders === 0 && candidate.provenance.includes('pornrips-authoritative-torrent')) return true;
           return candidate.seeders >= config.minimumSeeders;
         }

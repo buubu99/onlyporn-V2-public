@@ -1209,7 +1209,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     // identities. Fallback cards retain the real RSS hash and use the honest
     // Sukebei branded asset; they never invent scene art or a debrid claim.
     const needed = safeSkip + safeLimit;
-    if (catalog?.mode === 'rss' && allowed.length < needed) {
+    if (allowed.length < needed) {
       const existing = new Set(allowed.map(item => String(item.sourceId)));
       for (const source of normalized) {
         if (allowed.length >= needed || existing.has(String(source.sourceId))) continue;

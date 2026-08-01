@@ -155,28 +155,87 @@ function posterQuality(item = {}) {
 function tokenSet(value, studio = '') {
   return new Set(cleanReleaseTitle(value, studio).filter(token => token.length >= 3));
 }
+function dateKey(item = {}) {
+  const explicit = compact(item.releaseDate).slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(explicit)) return explicit;
+  const text = compact(`${item.title || ''} ${item.filename || ''}`);
+  const full = text.match(/\b((?:19|20)\d{2})[._ -](\d{2})[._ -](\d{2})\b/);
+  if (full) return `${full[1]}-${full[2]}-${full[3]}`;
+  const short = text.match(/\b(\d{2})[._ -](\d{2})[._ -](\d{2})\b/);
+  if (short) return `20${short[1]}-${short[2]}-${short[3]}`;
+  return '';
+}
+function creatorAliases(item = {}, catalog = {}) {
+  const values = [
+    item.creator, item.username, item.channel, item.account, item.model, item.performer,
+    ...(Array.isArray(item.performers) ? item.performers : []),
+  ];
+  const aliases = new Set(values.map(compactKey).filter(value => value.length >= 4));
+  if (studioKey(catalog) === 'onlyfans') {
+    const raw = compact(item.title || item.filename)
+      .replace(/\b(?:19|20)?\d{2}[._ -]\d{2}[._ -]\d{2}\b/g, ' ')
+      .replace(/\b(?:2160p|1080p|720p|4k|8k|xxx|porn|pack|collection)\b/gi, ' ');
+    const after = compact(raw.split(/only[\s._-]*fans/i).slice(1).join(' '));
+    const before = compact(raw.split(/only[\s._-]*fans/i)[0]);
+    for (const segment of [after, before]) {
+      const tokens = segment.split(/[^\p{L}\p{N}_]+/u)
+        .filter(token => token.length >= 3 && !RELEASE_NOISE.has(token.toLowerCase()) && !/^\d+$/.test(token));
+      for (const token of tokens.slice(0, 4)) {
+        const key = compactKey(token);
+        if (key.length >= 4) aliases.add(key);
+      }
+      if (tokens.length >= 2) aliases.add(compactKey(tokens.slice(0, 2).join('')));
+    }
+  }
+  return aliases;
+}
+function overlapEvidence(left = new Set(), right = new Set()) {
+  const common = [...left].filter(token => right.has(token));
+  const distinctive = common.filter(token => token.length >= 5);
+  const coverage = left.size ? common.length / left.size : 0;
+  return { common, distinctive, coverage };
+}
 function metadataPosterMatch(item = {}, catalog = {}, metadataItems = []) {
   const itemCode = sceneCode(`${item.sceneCode || ''} ${item.title || ''} ${item.filename || ''}`);
-  const itemCreator = creatorKey(item, catalog);
+  const itemCreators = creatorAliases(item, catalog);
   const itemTokens = tokenSet(item.title || item.filename, catalog.studio);
-  let best = null;
+  const itemDate = dateKey(item);
+  const itemCompactTitle = compactKey(cleanReleaseTitle(item.title || item.filename, catalog.studio).join(' '));
+  const ranked = [];
   for (const meta of Array.isArray(metadataItems) ? metadataItems : []) {
     if (!metadataPosterValid(meta)) continue;
     const metaCode = sceneCode(`${meta.sceneCode || ''} ${meta.title || ''}`);
-    const metaCreator = creatorKey(meta, catalog);
-    const metaTokens = tokenSet(meta.title, catalog.studio);
-    let common = 0;
-    for (const token of itemTokens) if (metaTokens.has(token)) common += 1;
-    const creatorExact = Boolean(itemCreator && metaCreator && itemCreator === metaCreator);
+    const metaCreators = creatorAliases(meta, catalog);
+    const metaTokens = tokenSet(`${meta.title || ''} ${(meta.performers || []).join(' ')}`, catalog.studio);
+    const metaDate = dateKey(meta);
+    const metaCompactTitle = compactKey(cleanReleaseTitle(meta.title, catalog.studio).join(' '));
+    const evidence = overlapEvidence(itemTokens, metaTokens);
+    const creatorExact = [...itemCreators].some(value => metaCreators.has(value));
     const codeExact = Boolean(itemCode && metaCode && itemCode === metaCode);
-    const score = (codeExact ? 1000 : 0) + (creatorExact ? 300 : 0) + common * 35
-      + (String(item.releaseDate || '').slice(0, 10)
-        && String(item.releaseDate || '').slice(0, 10) === String(meta.releaseDate || '').slice(0, 10) ? 40 : 0);
-    const eligible = codeExact || (creatorExact && common >= 1) || common >= 4;
-    if (!eligible || !score) continue;
-    if (!best || score > best.score) best = { score, meta };
+    const dateExact = Boolean(itemDate && metaDate && itemDate === metaDate);
+    const containment = Boolean(itemCompactTitle.length >= 8 && metaCompactTitle.length >= 8
+      && (itemCompactTitle.includes(metaCompactTitle) || metaCompactTitle.includes(itemCompactTitle)));
+    const platform = studioKey(catalog) === 'onlyfans';
+    const score = (codeExact ? 3000 : 0)
+      + (creatorExact ? (platform ? 1200 : 500) : 0)
+      + (dateExact ? 350 : 0)
+      + (containment ? 800 : 0)
+      + evidence.common.length * 90
+      + evidence.distinctive.length * 45
+      + Math.round(evidence.coverage * 220);
+    const eligible = codeExact
+      || (platform && creatorExact && (evidence.common.length >= 1 || dateExact || containment))
+      || (dateExact && evidence.distinctive.length >= 1)
+      || (containment && evidence.common.length >= 1)
+      || (evidence.distinctive.length >= 2 && evidence.coverage >= 0.4)
+      || (evidence.common.length >= 3 && evidence.coverage >= 0.5);
+    if (eligible) ranked.push({ score, strong: codeExact || creatorExact || dateExact || containment, meta });
   }
-  return best?.meta || null;
+  ranked.sort((left, right) => right.score - left.score);
+  if (!ranked.length) return null;
+  if (ranked[0].strong) return ranked[0].meta;
+  if (ranked[1] && ranked[0].score - ranked[1].score < 90) return null;
+  return ranked[0].meta;
 }
 function studioEvidence(item = {}, catalog = {}) {
   const aliases = normalizedAliasKeys(catalog.studio);
@@ -232,6 +291,7 @@ function mergeTorrentFirstStudio(options = {}) {
   let rejectedPoster = 0;
   let rejectedIdentity = 0;
   let acceptedTorrents = 0;
+  let matchedMetadataPosters = 0;
   for (const item of discovered) {
     const value = candidate(item);
     if (!value || usedHashes.has(value.infoHash)) continue;
@@ -241,6 +301,7 @@ function mergeTorrentFirstStudio(options = {}) {
     if (!key || key.endsWith(':')) continue;
     let group = groups.get(key);
     const discoveredBase = baseCard(item, catalog, { ...options, metadataItems });
+    if (externalPosterValid(discoveredBase)) matchedMetadataPosters += 1;
     if (!group) {
       group = { base: discoveredBase, values: [], existing: false };
       groups.set(key, group);
@@ -286,6 +347,7 @@ function mergeTorrentFirstStudio(options = {}) {
       existingCards: existing.length,
       discoveredRecords: discovered.length,
       acceptedTorrents,
+      matchedMetadataPosters,
       rejectedPoster,
       rejectedIdentity,
       returnedCards: selected.length,

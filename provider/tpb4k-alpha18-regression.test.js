@@ -103,7 +103,8 @@ test('Alpha.19 preserves broad pools, isolates Sukebei RSS, and owns its resourc
   const torrent = fs.readFileSync(path.join(__dirname, 'tpb4k', 'torrent-index.js'), 'utf8');
   const sukebei = fs.readFileSync(path.join(__dirname, 'tpb4k', 'sukebei-metadata.js'), 'utf8');
   const addon = fs.readFileSync(path.join(__dirname, '..', 'addon.js'), 'utf8');
-  assert.ok(provider.includes("const discoveryPoolLimit = weakStudioKey === 'onlyfans' ? 600 : (torrentFirstEnabled ? 400 : 300);"));
+  assert.ok(provider.includes("const metadataPoolLimit = weakStudioKey === 'onlyfans' ? 400 : (torrentFirstEnabled ? 300 : 220);"));
+  assert.ok(provider.includes("const torrentPoolLimit = weakStudioKey === 'onlyfans' ? 600 : (torrentFirstEnabled ? 400 : 300);"));
   assert.match(provider, /limit: discoveryPoolLimit/);
   assert.match(provider, /recoverStudioPlayback/);
   assert.match(torrent, /studioSearchQueries/);
