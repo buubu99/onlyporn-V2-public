@@ -10,10 +10,12 @@ const { SourceHttpClient } = require('./tpb4k/source-http');
 const { createDiscoveryAdapters } = require('./tpb4k/adapters/discovery');
 const {
   buildCatalogUrl,
+  dedupePornripsScenes,
   parseDetail,
   parseHentaiCatalog,
   parsePornripsCatalog,
   parseYespornCatalog,
+  pornripsSceneKey,
 } = require('./tpb4k/native-discovery');
 const { decodeStablePathId } = require('./tpb4k/native-html');
 const { clearAdapters, installBuiltInAdapters } = require('./tpb4k/index');
@@ -81,6 +83,19 @@ test('PornRips native parser returns opaque metadata records and no playable fie
   assert.equal(items[0].duration, 4923);
   assert.equal(decodeStablePathId('pornrips', items[0].sourceId), '/vixen-scene-one/');
   for (const key of ['magnet', 'infoHash', 'directUrl']) assert.equal(key in items[0], false);
+});
+
+test('PornRips catalog collapses resolution variants of one scene into one card', () => {
+  const variants = [
+    { sourceId: 'scene-720', title: 'ExampleStudio.26.08.01.Jane.Doe.XXX.720p.HEVC.x265.PRT' },
+    { sourceId: 'scene-1080', title: 'ExampleStudio.26.08.01.Jane.Doe.XXX.1080p.HEVC.x265.PRT' },
+    { sourceId: 'other', title: 'ExampleStudio.26.08.01.Other.Scene.XXX.1080p.HEVC.x265.PRT' },
+  ];
+  assert.equal(pornripsSceneKey(variants[0]), pornripsSceneKey(variants[1]));
+  assert.deepEqual(
+    dedupePornripsScenes(variants).map(item => item.sourceId),
+    ['scene-1080', 'other']
+  );
 });
 
 test('YesPorn native parser reads video cards, lazy posters, durations, and stable paths', () => {

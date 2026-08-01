@@ -104,7 +104,8 @@ test('Alpha.19 preserves broad pools, isolates Sukebei RSS, and owns its resourc
   const sukebei = fs.readFileSync(path.join(__dirname, 'tpb4k', 'sukebei-metadata.js'), 'utf8');
   const addon = fs.readFileSync(path.join(__dirname, '..', 'addon.js'), 'utf8');
   assert.match(provider, /\['xvideosred', 'digitalplayground'\]\.includes\(weakStudioKey\)/);
-  assert.match(provider, /\? 60/);
+  assert.match(provider, /const enrichmentPoolLimit/);
+  assert.match(provider, /limit: enrichmentPoolLimit/);
   assert.match(provider, /limit: discoveryPoolLimit/);
   assert.match(provider, /recoverStudioPlayback/);
   assert.match(torrent, /studioSearchQueries/);

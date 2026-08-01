@@ -509,6 +509,41 @@ function parsePornripsCatalog(html) {
   }).filter(Boolean), item => item.sourceId);
 }
 
+function pornripsSceneKey(item = {}) {
+  return cleanText(item.title || '')
+    .toLowerCase()
+    .replace(/\b(?:2160p|1080p|720p|480p|4k|8k|uhd|hevc|h26[45]|x26[45]|av1|xvid|xxx|prt)\b/gi, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, '');
+}
+
+function pornripsReleaseRank(item = {}) {
+  const title = cleanText(item.title);
+  const resolution = /\b(?:2160p|4k)\b/i.test(title) ? 4
+    : /\b1080p\b/i.test(title) ? 3
+      : /\b720p\b/i.test(title) ? 2
+        : /\b480p\b/i.test(title) ? 1 : 0;
+  const compatibility = /\b(?:h264|x264|avc)\b/i.test(title) ? 2
+    : /\b(?:hevc|h265|x265)\b/i.test(title) ? 0 : 1;
+  return resolution * 10 + compatibility;
+}
+
+function dedupePornripsScenes(items = []) {
+  const byScene = new Map();
+  const order = [];
+  for (const item of items) {
+    const key = pornripsSceneKey(item) || String(item?.sourceId || '');
+    if (!key) continue;
+    const previous = byScene.get(key);
+    if (!previous) {
+      order.push(key);
+      byScene.set(key, item);
+    } else if (pornripsReleaseRank(item) > pornripsReleaseRank(previous)) {
+      byScene.set(key, item);
+    }
+  }
+  return order.map(key => byScene.get(key)).filter(Boolean);
+}
+
 function parseYespornCatalog(html) {
   const base = SOURCES.yesporn.origin;
   const links = anchorRecords(html)
@@ -691,7 +726,7 @@ function createNativeAdapter(source, options = {}) {
       const catalogKey = String(catalog?.id || `${source}:${catalog?.mode || 'recent'}`);
       let state = catalogWindows.get(catalogKey);
       if (!state) {
-        state = { nextPage: 1, records: [], seen: new Set() };
+        state = { nextPage: 1, records: [], seen: new Set(), sceneSeen: new Set() };
         catalogWindows.set(catalogKey, state);
       }
 
@@ -713,12 +748,20 @@ function createNativeAdapter(source, options = {}) {
           source
         );
         if (!payload) break;
-        const pageRecords = parser(payload);
+        const parsedRecords = parser(payload);
+        const pageRecords = source === 'pornrips'
+          ? dedupePornripsScenes(parsedRecords)
+          : parsedRecords;
         if (!pageRecords.length) break;
         state.nextPage += 1;
         pagesFetched += 1;
         for (const record of pageRecords) {
           if (!record?.sourceId || state.seen.has(record.sourceId)) continue;
+          if (source === 'pornrips') {
+            const sceneKey = pornripsSceneKey(record);
+            if (sceneKey && state.sceneSeen.has(sceneKey)) continue;
+            if (sceneKey) state.sceneSeen.add(sceneKey);
+          }
           state.seen.add(record.sourceId);
           state.records.push(record);
         }
@@ -756,6 +799,7 @@ module.exports = {
   SOURCES,
   buildCatalogUrl,
   createNativeAdapter,
+  dedupePornripsScenes,
   decodeTorrent,
   firstHentaiEpisodePath,
   hentaiPostId,
@@ -764,6 +808,7 @@ module.exports = {
   parseDetail,
   parseHentaiCatalog,
   parsePornripsCatalog,
+  pornripsSceneKey,
   parseYespornCatalog,
   torrentUrlFromDetail,
 };

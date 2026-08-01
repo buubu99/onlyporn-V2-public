@@ -30,7 +30,7 @@ const {
 const MOVIE_TYPE = 'movie';
 const SERIES_TYPE = 'series';
 const RELEASE_VERSION = require('../package.json').version;
-const CATALOG_CACHE_REVISION = 'r4';
+const CATALOG_CACHE_REVISION = 'r5';
 const HENTAI_PREFIX = 'ophmm-';
 const HENTAI_TOP_PREFIX = 'ophtop-';
 const TORRENT_FIRST_STUDIOS = new Set(['onlyfans', 'digitalplayground', 'xvideosred', 'sexmex']);
@@ -303,9 +303,14 @@ class Tpb4kProvider {
           && shouldUseTorrentFirst(definition, 0)
           && typeof resolverAdapter.catalog === 'function';
         const discoveryPoolLimit = weakStudioKey === 'onlyfans' ? 600
-          : (['xvideosred', 'digitalplayground'].includes(weakStudioKey)
-              ? 60
-              : (torrentFirstEnabled ? 400 : 300));
+          : (torrentFirstEnabled ? 400 : 300);
+        // Keep the broad metadata/torrent identity pools needed to find exact
+        // release matches. Only the network-heavy poster-enrichment branch is
+        // narrowed for these two weak catalogues so it can finish its targeted
+        // lookups inside the fixed deadline.
+        const enrichmentPoolLimit = ['xvideosred', 'digitalplayground'].includes(weakStudioKey)
+          ? 60
+          : discoveryPoolLimit;
         const [metadataItems, torrentItems, enrichedTorrentItems] = await Promise.all([
           adapter.catalog({ catalog: { ...definition, playbackBindingPool: true }, skip: 0, limit: discoveryPoolLimit, config }),
           loadTorrentPool({ catalog: { ...definition, source: 'torrent-index', playbackBindingPool: true }, skip: 0, limit: discoveryPoolLimit, config }),
@@ -317,7 +322,7 @@ class Tpb4kProvider {
               torrentFirstFallback: true,
             },
             skip: 0,
-            limit: discoveryPoolLimit,
+            limit: enrichmentPoolLimit,
             config,
           }) : Promise.resolve([]),
         ]);
