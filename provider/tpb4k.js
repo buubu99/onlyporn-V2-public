@@ -30,6 +30,7 @@ const {
 const MOVIE_TYPE = 'movie';
 const SERIES_TYPE = 'series';
 const RELEASE_VERSION = require('../package.json').version;
+const CATALOG_CACHE_REVISION = 'r4';
 const HENTAI_PREFIX = 'ophmm-';
 const HENTAI_TOP_PREFIX = 'ophtop-';
 const TORRENT_FIRST_STUDIOS = new Set(['onlyfans', 'digitalplayground', 'xvideosred', 'sexmex']);
@@ -231,7 +232,7 @@ class Tpb4kProvider {
     // A deploy must never rehydrate a last-known-good catalogue produced by a
     // previous release. Keeping the version in the key prevents a stale disk
     // entry from undoing a new poster, identity, or failover policy.
-    const cacheKey = `${RELEASE_VERSION}:${String(args?.type || '')}:${String(args?.id || '')}:${String(args?.extra?.skip || 0)}`;
+    const cacheKey = `${RELEASE_VERSION}:${CATALOG_CACHE_REVISION}:${String(args?.type || '')}:${String(args?.id || '')}:${String(args?.extra?.skip || 0)}`;
     let cached = this.catalogResponseCache.get(cacheKey);
     if (!cached) {
       const persisted = this.catalogResponseStore.get(cacheKey);
@@ -301,7 +302,10 @@ class Tpb4kProvider {
         const torrentFirstEnabled = TORRENT_FIRST_STUDIOS.has(weakStudioKey)
           && shouldUseTorrentFirst(definition, 0)
           && typeof resolverAdapter.catalog === 'function';
-        const discoveryPoolLimit = weakStudioKey === 'onlyfans' ? 600 : (torrentFirstEnabled ? 400 : 300);
+        const discoveryPoolLimit = weakStudioKey === 'onlyfans' ? 600
+          : (['xvideosred', 'digitalplayground'].includes(weakStudioKey)
+              ? 60
+              : (torrentFirstEnabled ? 400 : 300));
         const [metadataItems, torrentItems, enrichedTorrentItems] = await Promise.all([
           adapter.catalog({ catalog: { ...definition, playbackBindingPool: true }, skip: 0, limit: discoveryPoolLimit, config }),
           loadTorrentPool({ catalog: { ...definition, source: 'torrent-index', playbackBindingPool: true }, skip: 0, limit: discoveryPoolLimit, config }),
@@ -541,6 +545,31 @@ class Tpb4kProvider {
         });
       } catch (error) {
         logger().warn({ provider: this.name, source: decoded.source, resolver: resolverAdapter.id, error: redactSecrets(error?.message || error, this.env) }, 'OnlyPorn stream adapter failed safely');
+      }
+    }
+    if (decoded.source === 'pornrips' && rawItem) {
+      const alternateResolver = getAdapter('torrent-index');
+      if (alternateResolver && alternateResolver !== resolverAdapter) {
+        try {
+          const alternates = await alternateResolver.resolve({
+            sourceId: decoded.sourceId,
+            catalogId: decoded.catalogId,
+            catalog: { ...definition, targetedPlaybackSearch: true },
+            item: rawItem,
+            config,
+          });
+          rawCandidates = [
+            ...(Array.isArray(rawCandidates) ? rawCandidates : []),
+            ...(Array.isArray(alternates) ? alternates : []),
+          ];
+        } catch (error) {
+          logger().warn({
+            provider: this.name,
+            source: decoded.source,
+            resolver: alternateResolver.id,
+            error: redactSecrets(error?.message || error, this.env),
+          }, 'OnlyPorn alternate stream discovery failed safely');
+        }
       }
     }
     const normalized = (Array.isArray(rawCandidates) ? rawCandidates : [])

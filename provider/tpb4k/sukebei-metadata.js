@@ -132,12 +132,76 @@ function decodeHtmlAttribute(value) {
       String.fromCodePoint(Number.parseInt(digits, 10)));
 }
 
+function htmlText(value) {
+  return compactText(decodeHtmlAttribute(
+    String(value || '')
+      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, ' ')
+      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, ' ')
+      .replace(/<[^>]+>/g, ' ')
+  ));
+}
+
 function htmlAttribute(tag, name) {
   const match = String(tag || '').match(new RegExp(
     `\\b${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`,
     'i'
   ));
   return decodeHtmlAttribute(match?.[1] ?? match?.[2] ?? match?.[3] ?? '');
+}
+
+function parseSukebeiTopHtml(html, origin = 'https://sukebei.nyaa.si/') {
+  const rows = String(html || '').match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi) || [];
+  const output = [];
+  for (const row of rows) {
+    const anchors = [...row.matchAll(/<a\b[^>]*>[\s\S]*?<\/a>/gi)].map(match => match[0]);
+    const detailAnchor = anchors.find(anchor => /\/view\/\d+/i.test(htmlAttribute(anchor, 'href')));
+    const magnetAnchor = anchors.find(anchor => /^magnet:\?/i.test(htmlAttribute(anchor, 'href')));
+    if (!detailAnchor || !magnetAnchor) continue;
+
+    let detailUrl = '';
+    try {
+      detailUrl = new URL(htmlAttribute(detailAnchor, 'href'), origin).toString();
+    } catch {
+      continue;
+    }
+    if (!safeHttpsUrl(detailUrl)) continue;
+
+    const magnetLink = decodeHtmlAttribute(htmlAttribute(magnetAnchor, 'href'));
+    const magnet = parseMagnet(magnetLink);
+    const infoHash = normalizeInfoHash(magnet?.infoHash);
+    if (!infoHash) continue;
+
+    const cells = [...row.matchAll(/<td\b([^>]*)>([\s\S]*?)<\/td>/gi)]
+      .map(match => ({ attributes: match[1], text: htmlText(match[2]) }));
+    const numericCells = cells
+      .map(cell => cell.text)
+      .filter(value => /^\d+$/.test(value));
+    const dateCell = cells.find(cell => /\bdata-timestamp\s*=/i.test(cell.attributes));
+    const timestamp = Number.parseInt(
+      String(dateCell?.attributes || '').match(/\bdata-timestamp\s*=\s*["']?(\d+)/i)?.[1] || '',
+      10
+    );
+    const title = htmlText(htmlAttribute(detailAnchor, 'title') || detailAnchor);
+    if (!title) continue;
+
+    output.push(Object.freeze({
+      id: detailUrl,
+      guid: detailUrl,
+      title,
+      link: detailUrl,
+      detailUrl,
+      magnetLink,
+      infoHash,
+      trackers: magnet?.trackers || [],
+      size: cells.length >= 5 ? cells[cells.length - 5].text : '',
+      published: Number.isFinite(timestamp)
+        ? new Date(timestamp * 1000).toISOString()
+        : (dateCell?.text || ''),
+      seeders: numericCells.length >= 3 ? numericCells[numericCells.length - 3] : '0',
+      tags: ['Real Life', 'Videos'],
+    }));
+  }
+  return output;
 }
 
 function landingPageImage(html, pageUrl) {
@@ -488,6 +552,24 @@ function createSukebeiMetadataAdapter(options = {}) {
   const detailOrigin = (() => {
     try { return `${new URL(options.endpoint).origin}/`; } catch { return ''; }
   })();
+  const officialTopMode = (() => {
+    try { return new URL(options.endpoint).hostname.toLowerCase() === 'sukebei.nyaa.si'; }
+    catch { return false; }
+  })();
+  const topClient = officialTopMode && detailOrigin ? new SourceHttpClient({
+    id: 'sukebei-top',
+    endpoint: detailOrigin,
+    timeoutMs: config.requestTimeoutMs,
+    maxResponseBytes: config.discoveryMaxResponseBytes,
+    cacheTtlMs: config.discoveryCacheTtlMs,
+    negativeTtlMs: config.discoveryNegativeTtlMs,
+    cacheMaxEntries: config.discoveryCacheMaxEntries,
+    fetchImpl: options.fetchImpl,
+    checkDns: options.checkDns,
+    allowHtml: true,
+    accept: 'text/html,application/xhtml+xml;q=0.9',
+    allowedContentTypes: ['text/html', 'application/xhtml+xml'],
+  }) : null;
   const detailClient = detailOrigin ? new SourceHttpClient({
     id: 'sukebei-detail',
     endpoint: detailOrigin,
@@ -861,6 +943,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     const safeSkip = Math.max(Number.parseInt(String(skip || 0), 10) || 0, 0);
     const safeLimit = Math.min(Math.max(Number.parseInt(String(limit || 40), 10) || 40, 1), 100);
     const feed = [];
+    const useOfficialTopPage = officialTopMode && catalogDefinition?.mode === 'top';
     const requestedRssPages = Math.min(Math.max(Number(config.sukebeiRssPages || 4), 1), 8);
     const rssPages = (() => {
       try {
@@ -876,35 +959,54 @@ function createSukebeiMetadataAdapter(options = {}) {
     let rssRecordsRead = 0;
     let rssDuplicateRecords = 0;
     let rssDuplicatePages = 0;
-    for (let page = 1; page <= rssPages; page += 1) {
-      if (Date.now() >= rssDeadlineAt) break;
-      const pageUrl = new URL(client.endpoint);
-      pageUrl.searchParams.set('p', String(page));
+    if (useOfficialTopPage) {
+      const topUrl = new URL(detailOrigin);
+      topUrl.searchParams.set('f', '0');
+      topUrl.searchParams.set('c', '2_2');
+      topUrl.searchParams.set('q', '');
+      topUrl.searchParams.set('s', 'seeders');
+      topUrl.searchParams.set('o', 'desc');
       const remaining = Math.max(rssDeadlineAt - Date.now(), 250);
-      const payload = await client.fetchText(pageUrl.toString(), {
-        cacheKey: `sukebei:rss:${page}`,
-        timeoutMs: Math.min(client.timeoutMs, remaining),
+      const payload = await topClient.fetchText(topUrl.toString(), {
+        cacheKey: 'sukebei:top:real-life-videos:seeders',
+        timeoutMs: Math.min(topClient.timeoutMs, remaining),
       });
-      const pageItems = parseRssFeed(payload);
-      if (!pageItems.length) break;
-      fetchedPages += 1;
-      rssRecordsRead += pageItems.length;
-      let newRecords = 0;
-      for (const item of pageItems) {
-        const key = compactText(item.id || item.guid || item.link || item.detailUrl);
-        if (!key || seenFeedRecords.has(key)) {
-          rssDuplicateRecords += 1;
-          continue;
+      const pageItems = parseSukebeiTopHtml(payload, detailOrigin);
+      if (!pageItems.length) throw new Error('Sukebei top page returned no playable video rows');
+      fetchedPages = 1;
+      rssRecordsRead = pageItems.length;
+      feed.push(...pageItems);
+    } else {
+      for (let page = 1; page <= rssPages; page += 1) {
+        if (Date.now() >= rssDeadlineAt) break;
+        const pageUrl = new URL(client.endpoint);
+        pageUrl.searchParams.set('p', String(page));
+        const remaining = Math.max(rssDeadlineAt - Date.now(), 250);
+        const payload = await client.fetchText(pageUrl.toString(), {
+          cacheKey: `sukebei:rss:${page}`,
+          timeoutMs: Math.min(client.timeoutMs, remaining),
+        });
+        const pageItems = parseRssFeed(payload);
+        if (!pageItems.length) break;
+        fetchedPages += 1;
+        rssRecordsRead += pageItems.length;
+        let newRecords = 0;
+        for (const item of pageItems) {
+          const key = compactText(item.id || item.guid || item.link || item.detailUrl);
+          if (!key || seenFeedRecords.has(key)) {
+            rssDuplicateRecords += 1;
+            continue;
+          }
+          seenFeedRecords.add(key);
+          feed.push(item);
+          newRecords += 1;
         }
-        seenFeedRecords.add(key);
-        feed.push(item);
-        newRecords += 1;
-      }
-      // The official RSS endpoint currently ignores `p` and returns the same
-      // rolling window. Stop once a later response is at least 90% duplicate.
-      if (page > 1 && newRecords <= Math.max(Math.floor(pageItems.length * 0.1), 1)) {
-        rssDuplicatePages += 1;
-        break;
+        // The official RSS endpoint currently ignores `p` and returns the same
+        // rolling window. Stop once a later response is at least 90% duplicate.
+        if (page > 1 && newRecords <= Math.max(Math.floor(pageItems.length * 0.1), 1)) {
+          rssDuplicatePages += 1;
+          break;
+        }
       }
     }
 
@@ -918,9 +1020,10 @@ function createSukebeiMetadataAdapter(options = {}) {
       rssPagesRequested: requestedRssPages,
       rssPagesEffective: rssPages,
       rssElapsedMs: Date.now() - requestStartedAt,
-      rssCategory: (() => {
+      rssCategory: useOfficialTopPage ? '2_2' : (() => {
         try { return new URL(client.endpoint).searchParams.get('c') || ''; } catch { return ''; }
       })(),
+      discoveryMode: useOfficialTopPage ? 'official-html-top' : 'rss',
       codeCandidates: 0,
       codeStageJobs: 0,
       codeStageCompleted: 0,
@@ -1210,7 +1313,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     // by the real RSS torrent identity. This avoids both an empty row and the
     // old ImageTwist hotlink-error images without inventing scene artwork.
     const needed = Math.min(safeSkip + safeLimit, 8);
-    if (catalogDefinition?.mode === 'top' && allowed.length < needed) {
+    if (!useOfficialTopPage && catalogDefinition?.mode === 'top' && allowed.length < needed) {
       const existing = new Set(allowed.map(item => String(item.sourceId)));
       for (const source of normalized) {
         if (allowed.length >= needed || existing.has(String(source.sourceId))) continue;
@@ -1319,6 +1422,7 @@ module.exports = {
   extractSceneCodes,
   landingPageImage,
   normalizedSceneCode,
+  parseSukebeiTopHtml,
   queryExactCodeProvider,
   resolveVerifiedPosterUrl,
   scoreCandidate,

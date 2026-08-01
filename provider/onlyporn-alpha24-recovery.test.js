@@ -122,6 +122,7 @@ test('runtime filters all known fake studio posters and avoids transient empty m
   assert.match(provider, /augmentStudioPlayback/);
   assert.match(provider, /prioritizeFailoverCandidates/);
   assert.match(provider, /RELEASE_VERSION/);
+  assert.match(provider, /CATALOG_CACHE_REVISION/);
   assert.match(metadata, /if \(window\.length \|\| !providerFailed\) cache\.set/);
   assert.match(sukebei, /catalog: catalogDefinition/);
   assert.match(sukebei, /catalogDefinition\?\.mode === 'top'/);

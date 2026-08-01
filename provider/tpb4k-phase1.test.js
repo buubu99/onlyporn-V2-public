@@ -37,6 +37,7 @@ const { Tpb4kProvider } = require('./tpb4k');
 
 const HASH_4K = '0123456789abcdef0123456789abcdef01234567';
 const HASH_1080 = '89abcdef0123456789abcdef0123456789abcdef';
+const HASH_ALT = 'fedcba9876543210fedcba9876543210fedcba98';
 
 function memoryAdapter() {
   return {
@@ -326,6 +327,106 @@ test('provider recovers metadata from the persisted catalog card when a transien
   assert.equal(result.meta.poster, 'https://images.example/durable-catalog.jpg');
   assert.equal(result.meta.extra.onlyporn.metadataProvider, 'catalog-response');
   assert.equal(result.meta.extra.onlyporn.playbackCandidates, 1);
+});
+
+test('ThePornDB recent resolves exact scene torrents instead of remaining metadata-only', async () => {
+  registerAdapter({
+    id: 'tpdb',
+    async catalog() {
+      return [{
+        sourceId: 'tpdb:playable-scene',
+        title: 'Playable TPDB Scene',
+        poster: 'https://images.example/tpdb-playable.jpg',
+        studio: 'Fixture Studio',
+      }];
+    },
+    async meta({ sourceId }) {
+      return {
+        sourceId,
+        title: 'Playable TPDB Scene',
+        poster: 'https://images.example/tpdb-playable.jpg',
+        studio: 'Fixture Studio',
+      };
+    },
+    async resolve() { return []; },
+  });
+  registerAdapter({
+    id: 'torrent-index',
+    async catalog() { return []; },
+    async meta() { return null; },
+    async resolve({ item, catalog }) {
+      assert.equal(item.title, 'Playable TPDB Scene');
+      assert.equal(catalog.targetedPlaybackSearch, true);
+      return [{
+        source: 'knaben-targeted',
+        title: 'Playable TPDB Scene 1080p H264',
+        filename: 'Playable.TPDB.Scene.1080p.H264.mp4',
+        infoHash: HASH_ALT,
+        seeders: 12,
+      }];
+    },
+  });
+  const provider = new Tpb4kProvider({
+    installBuiltIns: false,
+    env: { TPB4K_ENABLED: 'true', TPB4K_CATALOG_LIMIT: '1' },
+  });
+  const catalog = await provider.handleCatalog({
+    type: 'movie', id: 'tpb4k.tpdb.recent', extra: { skip: 0 },
+  });
+  const result = await provider.handleStream({ type: 'movie', id: catalog.metas[0].id });
+
+  assert.equal(result.streams.length, 1);
+  assert.equal(result.streams[0].infoHash, HASH_ALT);
+  assert.equal(result.streams[0].behaviorHints.filename, 'Playable.TPDB.Scene.1080p.H264.mp4');
+});
+
+test('PornRips preserves its authoritative torrent and adds index alternatives for failover', async () => {
+  registerAdapter({
+    id: 'pornrips',
+    async catalog() {
+      return [{ sourceId: 'pornrips:scene', title: 'PornRips Scene HEVC' }];
+    },
+    async meta({ sourceId }) {
+      return { sourceId, title: 'PornRips Scene HEVC' };
+    },
+    async resolve() {
+      return [{
+        source: 'pornrips',
+        title: 'PornRips Scene HEVC',
+        filename: 'PornRips.Scene.HEVC.mkv',
+        infoHash: HASH_4K,
+        seeders: 0,
+        provenance: ['pornrips-authoritative-torrent'],
+      }];
+    },
+  });
+  registerAdapter({
+    id: 'torrent-index',
+    async catalog() { return []; },
+    async meta() { return null; },
+    async resolve({ item, catalog }) {
+      assert.equal(item.title, 'PornRips Scene HEVC');
+      assert.equal(catalog.targetedPlaybackSearch, true);
+      return [{
+        source: 'knaben-targeted',
+        title: 'PornRips Scene H264',
+        filename: 'PornRips.Scene.H264.mp4',
+        infoHash: HASH_1080,
+        seeders: 8,
+      }];
+    },
+  });
+  const provider = new Tpb4kProvider({
+    installBuiltIns: false,
+    env: { TPB4K_ENABLED: 'true', TPB4K_CATALOG_LIMIT: '1' },
+  });
+  const catalog = await provider.handleCatalog({
+    type: 'movie', id: 'tpb4k.pornrips.recent', extra: { skip: 0 },
+  });
+  const result = await provider.handleStream({ type: 'movie', id: catalog.metas[0].id });
+
+  assert.deepEqual(new Set(result.streams.map(stream => stream.infoHash)), new Set([HASH_4K, HASH_1080]));
+  assert.equal(result.streams.some(stream => /H264\.mp4$/.test(stream.behaviorHints.filename)), true);
 });
 
 test('provider supplies a branded HTTPS fallback when an upstream catalog omits artwork', async () => {

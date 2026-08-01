@@ -8,6 +8,7 @@ const {
   detailPageImage,
   extractSceneCodes,
   landingPageImage,
+  parseSukebeiTopHtml,
   resolveVerifiedPosterUrl,
 } = require('./tpb4k/sukebei-metadata');
 const { createStudioMetadataAdapter, platformEvidence } = require('./tpb4k/studio-metadata');
@@ -80,6 +81,25 @@ test('Sukebei matches the working TPB4K all-category RSS contract and rewrites s
   assert.equal(repaired.searchParams.get('page'), 'rss');
   assert.equal(repaired.searchParams.get('c'), '0_0');
   assert.equal(repaired.searchParams.get('f'), '0');
+});
+
+test('Sukebei official top page parser keeps ranked playable video torrents', () => {
+  const hash = '0123456789abcdef0123456789abcdef01234567';
+  const html = `<table><tbody><tr class="success">
+    <td><a href="/?c=2_2">Videos</a></td>
+    <td colspan="2"><a href="/view/4668522" title="+++ [FHD] MIDA-727 Example">Example</a></td>
+    <td><a href="magnet:?xt=urn:btih:${hash}&amp;dn=MIDA-727&amp;tr=udp%3A%2F%2Ftracker.example%3A80">Magnet</a></td>
+    <td>4.8 GiB</td><td data-timestamp="1785427759">2026-07-30 16:09</td>
+    <td>637</td><td>461</td><td>9489</td>
+  </tr></tbody></table>`;
+  const items = parseSukebeiTopHtml(html, 'https://sukebei.nyaa.si/');
+  assert.equal(items.length, 1);
+  assert.equal(items[0].title, '+++ [FHD] MIDA-727 Example');
+  assert.equal(items[0].detailUrl, 'https://sukebei.nyaa.si/view/4668522');
+  assert.equal(items[0].infoHash, hash);
+  assert.equal(items[0].seeders, '637');
+  assert.equal(items[0].size, '4.8 GiB');
+  assert.deepEqual(items[0].tags, ['Real Life', 'Videos']);
 });
 
 test('StashDB JAV matching uses searchScene(term:) instead of SceneQueryInput.code', async () => {

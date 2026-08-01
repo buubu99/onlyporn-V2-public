@@ -46,6 +46,8 @@ const SELECTED_CATALOGS = [
     id: 'tpb4k.tpdb.recent',
     name: 'OnlyPorn: ThePornDB · Recent',
     source: 'tpdb',
+    lookupSource: 'torrent-index',
+    targetedPlaybackSearch: true,
     mode: 'recent',
   },
   {
