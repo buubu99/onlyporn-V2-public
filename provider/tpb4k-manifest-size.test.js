@@ -22,8 +22,8 @@ test('TPB4K-enabled manifest constructs successfully and remains below 8 KiB', (
           chars: serialized.length,
         };
         console.log(JSON.stringify(result));
-        if (result.catalogs !== 38) process.exit(31);
-        if (result.tpb4kCatalogs !== 29) process.exit(32);
+        if (result.catalogs !== 37) process.exit(31);
+        if (result.tpb4kCatalogs !== 28) process.exit(32);
         if (result.bytes >= 8192 || result.chars >= 8192) process.exit(33);
       `,
     ],

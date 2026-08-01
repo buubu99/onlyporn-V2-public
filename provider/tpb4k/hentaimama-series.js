@@ -21,7 +21,9 @@ const { SourceHttpClient } = require('./source-http');
 
 const ORIGIN = SOURCES.hentai.origin;
 const SERIES_PREFIX = 'ophmm-';
+const TOP_SERIES_PREFIX = 'ophtop-';
 const SERIES_RE = /^ophmm-([a-z0-9][a-z0-9-]{0,199})$/i;
+const TOP_SERIES_RE = /^ophtop-([a-z0-9][a-z0-9-]{0,199})$/i;
 const EPISODE_RE = /^ophmm-([a-z0-9][a-z0-9-]{0,199}):1:(\d{1,4})$/i;
 const SERIES_PATH_RE = /^\/(?:tvshows|hentai-series)\/([^/?#]+)\/?$/i;
 const EPISODE_PATH_RE = /^\/episodes\/([^/?#]+)\/?$/i;
@@ -50,6 +52,11 @@ function safeSlug(value) {
 function seriesId(slug) {
   const value = safeSlug(slug);
   return value ? `${SERIES_PREFIX}${value}` : '';
+}
+
+function topSeriesId(slug) {
+  const value = safeSlug(slug);
+  return value ? `${TOP_SERIES_PREFIX}${value}` : '';
 }
 
 function episodeId(slug, number) {
@@ -82,6 +89,8 @@ function parseRequestId(value) {
   }
   const series = id.match(SERIES_RE);
   if (series) return Object.freeze({ kind: 'series', slug: series[1].toLowerCase() });
+  const topSeries = id.match(TOP_SERIES_RE);
+  if (topSeries) return Object.freeze({ kind: 'series', slug: topSeries[1].toLowerCase(), top: true });
   const legacyPath = decodeStablePathId('hentai', id);
   const legacySlug = slugFromPath(legacyPath);
   return legacySlug ? Object.freeze({ kind: 'legacy-series', slug: legacySlug }) : null;
@@ -772,13 +781,19 @@ function createHentaiMamaSeriesAdapter(options = {}) {
           if (!slug || state.seen.has(slug)) continue;
           state.seen.add(slug);
           if (catalog?.mode === 'top' && topTaxonomyRecord(record, slug)) { state.rejectedTaxonomy += 1; continue; }
-          const transformed = Object.freeze({ ...record, sourceId: seriesId(slug), upstreamId: slug, detailUrl: safeSeriesPathUrl(upstreamPath) || safeSeriesUrl(slug), seriesPath: upstreamPath });
+          const catalogSourceId = catalog?.mode === 'top' ? topSeriesId(slug) : seriesId(slug);
+          const transformed = Object.freeze({ ...record, sourceId: catalogSourceId, upstreamId: slug, detailUrl: safeSeriesPathUrl(upstreamPath) || safeSeriesUrl(slug), seriesPath: upstreamPath });
           if (catalog?.mode === 'top') {
             if (Date.now() >= topDeadlineAt) break;
             const detailed = await loadSeries(slug, upstreamPath, { requireEpisodes: true });
             if (!detailed?.episodes?.length) { state.rejectedNoEpisodes += 1; continue; }
             seriesIndex.set(slug, detailed);
-            state.records.push(Object.freeze({ ...transformed, ...detailed, sourceId: seriesId(slug) }));
+            // Top owns a distinct series namespace. This forces Stremio and
+            // AIOStreams to fetch fresh episode metadata instead of reusing an
+            // older cached series shell that may contain no videos. Episode
+            // IDs remain the established ophmm-* IDs and use the same resolver
+            // as the already-working All and New catalogues.
+            state.records.push(Object.freeze({ ...transformed, ...detailed, sourceId: topSeriesId(slug) }));
           } else {
             seriesIndex.set(slug, transformed);
             state.records.push(transformed);
@@ -811,6 +826,7 @@ function createHentaiMamaSeriesAdapter(options = {}) {
           rememberedSeries: seriesIndex.size,
           rememberedEpisodes: episodeIndex.size,
           idPrefix: SERIES_PREFIX,
+          topIdPrefix: TOP_SERIES_PREFIX,
           episodeDiagnostics: Object.freeze([...episodeDiagnostics.entries()].slice(-20).map(([id, value]) => Object.freeze({ id, ...value }))),
           topWindows: Object.freeze([...catalogWindows.entries()].filter(([key]) => /hentai\.top|hentai:top/i.test(key)).map(([key, state]) => Object.freeze({ key, records: state.records.length, rejectedTaxonomy: state.rejectedTaxonomy || 0, rejectedNoEpisodes: state.rejectedNoEpisodes || 0 }))),
         }),
@@ -822,6 +838,7 @@ function createHentaiMamaSeriesAdapter(options = {}) {
 module.exports = {
   EPISODE_RE,
   SERIES_RE,
+  TOP_SERIES_RE,
   createHentaiMamaSeriesAdapter,
   dooplayAjaxEndpoint,
   dooplayPlayerOptions,
@@ -837,6 +854,7 @@ module.exports = {
   parseRequestId,
   parseSeriesDetail,
   seriesId,
+  topSeriesId,
   seriesPath,
   topTaxonomyRecord,
   validateMedia,

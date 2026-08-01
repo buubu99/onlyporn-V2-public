@@ -173,9 +173,10 @@ test('the Alpha.20 installer preserves the retained single-token Scene matching 
 test('catalog, manifest, stream labels, and runtime code are independent from the comparison addon', () => {
   const root = path.resolve(__dirname, '..');
   const catalogs = require('../catalog/tpb4k').catalogDefinitions;
-  assert.ok(catalogs.some(item => item.id === 'tpb4k.sukebei.rss'));
+  assert.equal(catalogs.filter(item => item.id.startsWith('tpb4k.sukebei.')).length, 1);
+  assert.ok(catalogs.some(item => item.id === 'tpb4k.sukebei.top'));
   const addon = fs.readFileSync(path.join(root, 'addon.js'), 'utf8');
-  assert.match(addon, /idPrefixes: \['onlyporn:', 'ophmm-'\]/);
+  assert.match(addon, /idPrefixes: \['onlyporn:', 'ophmm-', 'ophtop-'\]/);
   assert.doesNotMatch(addon, /(['"`])hmm-/);
   const candidate = fs.readFileSync(path.join(__dirname, 'tpb4k/candidate.js'), 'utf8');
   assert.match(candidate, /OnlyPorn ·/);

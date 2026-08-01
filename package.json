@@ -1,6 +1,6 @@
 {
   "name": "OnlyPorn",
-  "version": "2.7.0-alpha.22",
+  "version": "2.7.0-alpha.24",
   "description": "Use your TV remote to its full potential!",
   "license": "MIT",
   "scripts": {
@@ -9,11 +9,11 @@
     "postinstall": "npm run install:python",
     "web": "LOG_ENABLED=true LOG_LEVEL=info yarn start -- --launch",
     "app": "LOG_ENABLED=true LOG_LEVEL=info yarn start -- --install",
-    "test": "LOG_ENABLED=true LOG_LEVEL=info node --test",
+    "test": "ONLYPORN_DISABLE_PERSISTENT_CACHE=true LOG_ENABLED=true LOG_LEVEL=info node --test",
     "dev": "LOG_ENABLED=true LOG_LEVEL=info nodemon server.js",
     "test:phase1": "node --test provider/phase1.test.js",
     "test:phase2": "node --test provider/phase2.test.js",
-    "test:release": "node --test provider/phase1.test.js provider/phase2.test.js provider/catalog-hotfix.test.js provider/phase3.test.js provider/phase4.test.js provider/hotfix-2.4.1.test.js provider/hotfix-2.4.2.test.js provider/phase5.test.js provider/hotfix-2.5.1.test.js provider/hotfix-2.5.2.test.js provider/hotfix-2.5.3.test.js provider/hotfix-2.5.4.test.js provider/hotfix-2.5.5.test.js provider/phase6.test.js provider/hotfix-2.6.2.test.js provider/phase0-hardening.test.js provider/phase1-fail-closed.test.js provider/tpb4k-phase1.test.js provider/tpb4k-phase2a.test.js provider/tpb4k-phase2b.test.js provider/tpb4k-phase2c.test.js provider/tpb4k-torrent-index.test.js provider/tpb4k-manifest-size.test.js provider/tpb4k-poster-enrichment.test.js provider/content-filter.test.js provider/tpb4k-studio-metadata.test.js provider/tpb4k-phase2-final-cleanup.test.js provider/tpb4k-all-19-playable-binding.test.js provider/tpb4k-hentaimama-series.test.js provider/tpb4k-alpha18-regression.test.js provider/tpb4k-alpha19.test.js provider/onlyporn-alpha20-final.test.js provider/onlyporn-alpha21-livefix.test.js provider/onlyporn-alpha22-complete.test.js",
+    "test:release": "ONLYPORN_DISABLE_PERSISTENT_CACHE=true node --test provider/phase1.test.js provider/phase2.test.js provider/catalog-hotfix.test.js provider/phase3.test.js provider/phase4.test.js provider/hotfix-2.4.1.test.js provider/hotfix-2.4.2.test.js provider/phase5.test.js provider/hotfix-2.5.1.test.js provider/hotfix-2.5.2.test.js provider/hotfix-2.5.3.test.js provider/hotfix-2.5.4.test.js provider/hotfix-2.5.5.test.js provider/phase6.test.js provider/hotfix-2.6.2.test.js provider/phase0-hardening.test.js provider/phase1-fail-closed.test.js provider/tpb4k-phase1.test.js provider/tpb4k-phase2a.test.js provider/tpb4k-phase2b.test.js provider/tpb4k-phase2c.test.js provider/tpb4k-torrent-index.test.js provider/tpb4k-manifest-size.test.js provider/tpb4k-poster-enrichment.test.js provider/content-filter.test.js provider/tpb4k-studio-metadata.test.js provider/tpb4k-phase2-final-cleanup.test.js provider/tpb4k-all-19-playable-binding.test.js provider/tpb4k-hentaimama-series.test.js provider/tpb4k-alpha18-regression.test.js provider/tpb4k-alpha19.test.js provider/onlyporn-alpha20-final.test.js provider/onlyporn-alpha21-livefix.test.js provider/onlyporn-alpha22-complete.test.js provider/onlyporn-alpha24-recovery.test.js",
     "test:hotfix": "node --test provider/catalog-hotfix.test.js",
     "test:phase3": "node --test provider/phase3.test.js",
     "validate:release": "node scripts/validate-release.js && npm run test:release",
@@ -63,7 +63,9 @@
     "smoke:alpha20": "node scripts/onlyporn-alpha20-acceptance.js",
     "test:alpha21-livefix": "node --test provider/onlyporn-alpha21-livefix.test.js provider/onlyporn-alpha20-final.test.js provider/tpb4k-alpha19.test.js provider/tpb4k-alpha18-regression.test.js provider/tpb4k-hentaimama-series.test.js provider/tpb4k-all-19-playable-binding.test.js",
     "test:alpha22-complete": "node --test provider/onlyporn-alpha22-complete.test.js provider/onlyporn-alpha21-livefix.test.js provider/onlyporn-alpha20-final.test.js provider/tpb4k-alpha19.test.js provider/tpb4k-alpha18-regression.test.js provider/tpb4k-hentaimama-series.test.js provider/tpb4k-all-19-playable-binding.test.js provider/tpb4k-torrent-index.test.js",
-    "smoke:alpha22-complete": "node scripts/onlyporn-alpha22-complete-acceptance.js"
+    "smoke:alpha22-complete": "node scripts/onlyporn-alpha22-complete-acceptance.js",
+    "test:alpha24-recovery": "ONLYPORN_DISABLE_PERSISTENT_CACHE=true node --test provider/onlyporn-alpha24-recovery.test.js provider/onlyporn-alpha22-complete.test.js provider/onlyporn-alpha21-livefix.test.js provider/tpb4k-alpha19.test.js provider/tpb4k-alpha18-regression.test.js provider/tpb4k-hentaimama-series.test.js",
+    "smoke:alpha24-recovery": "node scripts/onlyporn-alpha24-live-acceptance.js"
   },
   "dependencies": {
     "axios": "^1.13.6",

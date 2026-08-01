@@ -225,7 +225,7 @@ test('TikTok PNG-wrapped segment behavior remains intact', async () => {
 test('OnlyPorn 2.6.2 wires the isolated vdcdn hotfix into release validation', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const relay = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
-  assert.equal(pkg.version, '2.7.0-alpha.22');
+  assert.equal(pkg.version, '2.7.0-alpha.24');
   assert.match(pkg.scripts['test:hotfix262'], /hotfix-2\.6\.2\.test\.js/);
   assert.match(pkg.scripts['test:release'], /hotfix-2\.6\.2\.test\.js/);
   assert.match(relay, /'vdcdn\.xyz'/);

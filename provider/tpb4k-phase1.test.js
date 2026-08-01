@@ -108,10 +108,10 @@ function memoryAdapter() {
 
 test.afterEach(() => clearAdapters());
 
-test('Phase 1 defines the exact 29 selected OnlyPorn board catalogs', () => {
-  assert.equal(catalogDefinitions.length, 29);
-  assert.equal(tpb4kCatalogs.length, 29);
-  assert.equal(new Set(catalogDefinitions.map(item => item.id)).size, 29);
+test('Phase 1 defines the exact 28 selected OnlyPorn board catalogs', () => {
+  assert.equal(catalogDefinitions.length, 28);
+  assert.equal(tpb4kCatalogs.length, 28);
+  assert.equal(new Set(catalogDefinitions.map(item => item.id)).size, 28);
   assert.ok(getCatalogDefinition('tpb4k.pornrips.recent'));
   assert.ok(getCatalogDefinition('tpb4k.hentai.top'));
   assert.ok(getCatalogDefinition('tpb4k.stripchat.couples'));
@@ -122,10 +122,10 @@ test('Phase 1 defines the exact 29 selected OnlyPorn board catalogs', () => {
   assert.equal(catalogDefinitions.some(item => /(?: 4K| 1080p) · Top/.test(item.name)), false);
 });
 
-test('OnlyPorn board catalogs stay disabled by default and expose 29 descriptors only behind the feature flag', () => {
+test('OnlyPorn board catalogs stay disabled by default and expose 28 descriptors only behind the feature flag', () => {
   assert.equal(isTpb4kEnabled({}), false);
   assert.equal(isTpb4kEnabled({ TPB4K_ENABLED: 'true' }), true);
-  assert.equal(tpb4kCatalogs.filter(item => item.id.startsWith('tpb4k.')).length, 29);
+  assert.equal(tpb4kCatalogs.filter(item => item.id.startsWith('tpb4k.')).length, 28);
 });
 
 test('magnet and info-hash normalization accepts valid hashes and rejects HTML placeholders', () => {
@@ -358,7 +358,7 @@ test('release wiring preserves v2.6.4 hardening and keeps TPB4K off production b
   const relay = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
   const catalogIndex = fs.readFileSync(path.join(ROOT, 'catalog/index.js'), 'utf8');
 
-  assert.equal(pkg.version, '2.7.0-alpha.22');
+  assert.equal(pkg.version, '2.7.0-alpha.24');
   assert.equal(pkg.scripts['test:tpb4k-phase1'], 'node --test provider/tpb4k-phase1.test.js');
   assert.match(pkg.scripts['test:release'], /tpb4k-phase1\.test\.js/);
   assert.match(relay, /const SESSION_TTL_MS = 8 \* 60 \* 60 \* 1000/);

@@ -452,7 +452,11 @@ function createStudioMetadataAdapter(options = {}) {
       items: Object.freeze(window),
       diagnostics: lastDiagnostics,
     });
-    cache.set(cacheKey, value, cacheTtlMs);
+    const providerFailed = Object.values(stats.providerErrors).some(amount => Number(amount || 0) > 0);
+    // A rate limit, timeout, or open provider circuit is not a legitimate
+    // empty catalogue. Do not turn a transient upstream failure into a cached
+    // zero-card response for every AIOStreams refresh.
+    if (window.length || !providerFailed) cache.set(cacheKey, value, cacheTtlMs);
     return remember(window);
   }
 

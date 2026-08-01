@@ -27,8 +27,8 @@ const manifest = {
 
   resources: [
     'catalog',
-    { name: 'stream', types: ['movie', 'series'], idPrefixes: ['onlyporn:', 'ophmm-'] },
-    { name: 'meta', types: ['movie', 'series'], idPrefixes: ['onlyporn:', 'ophmm-'] },
+    { name: 'stream', types: ['movie', 'series'], idPrefixes: ['onlyporn:', 'ophmm-', 'ophtop-'] },
+    { name: 'meta', types: ['movie', 'series'], idPrefixes: ['onlyporn:', 'ophmm-', 'ophtop-'] },
   ],
   types: ['movie', 'series'],
   catalogs: [...manifestFilter.catalogs],

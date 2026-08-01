@@ -151,9 +151,10 @@ test('HentaiMama AJAX response and nested player markup preserve direct media ca
   ]);
 });
 
-test('Sukebei RSS is forced to OnlyPorn title posters and Top rejects invalid final posters', () => {
+test('the single Sukebei Top catalogue rejects invalid final posters and owns its bounded fallback', () => {
   const provider = fs.readFileSync(require.resolve('./tpb4k'), 'utf8');
-  assert.match(provider, /catalogId === 'tpb4k\.sukebei\.rss'\) return sukebeiRssPosterUrl/);
-  assert.match(provider, /lookupSource: 'sukebei-rss-title-poster'/);
   assert.match(provider, /definition\.id !== 'tpb4k\.sukebei\.top' \|\| Boolean\(safePoster\(item\.poster\)\)/);
+  const source = fs.readFileSync(require.resolve('./tpb4k/sukebei-metadata'), 'utf8');
+  assert.match(source, /catalogDefinition\?\.mode === 'top'/);
+  assert.match(source, /Math\.min\(safeSkip \+ safeLimit, 8\)/);
 });

@@ -324,7 +324,7 @@ test('Sukebei cuts duplicate RSS pages and fetches plaintext detail artwork conc
 
   const items = await adapter.catalog({ skip: 0, limit: 40 });
   const diagnostics = adapter.diagnostics().sukebeiMetadata;
-  assert.ok(items.length >= 8 && items.length <= 9);
+  assert.equal(items.length, 8);
   assert.equal(items.every(item => /^https:\/\/covers\.example\/\d+\.jpg$/.test(item.poster)), true);
   assert.equal(rssCalls, 2);
   assert.equal(diagnostics.rssPages, 2);
@@ -333,8 +333,8 @@ test('Sukebei cuts duplicate RSS pages and fetches plaintext detail artwork conc
   assert.equal(diagnostics.rssDuplicateRecords, 20);
   assert.equal(diagnostics.rssDuplicatePages, 1);
   assert.equal(diagnostics.detailStageTarget, 8);
-  assert.equal(diagnostics.detailImages, items.length);
-  assert.equal(diagnostics.detailImagesVerified, items.length);
+  assert.ok(diagnostics.detailImages >= items.length && diagnostics.detailImages <= 10);
+  assert.equal(diagnostics.detailImagesVerified, diagnostics.detailImages);
   assert.equal(diagnostics.detailImageRejected, 0);
   assert.equal(diagnostics.deadlineExceededMs, 0);
   assert.ok(diagnostics.totalElapsedMs < 1_500, JSON.stringify(diagnostics));

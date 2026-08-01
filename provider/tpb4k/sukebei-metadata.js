@@ -846,7 +846,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     return nativeDetailMatch(source, stats, options);
   }
 
-  async function catalog({ skip = 0, limit = 40 }) {
+  async function catalog({ catalog: catalogDefinition, skip = 0, limit = 40 }) {
     if (!client.configured) return [];
     const requestStartedAt = Date.now();
     const budgetMs = Math.min(
@@ -1205,11 +1205,12 @@ function createSukebeiMetadataAdapter(options = {}) {
     }
 
     stats.persistentArtworkWrites += artworkStore.setMany(allowed);
-    // A transient metadata/poster outage must not erase valid RSS torrent
-    // identities. Fallback cards retain the real RSS hash and use the honest
-    // Sukebei branded asset; they never invent scene art or a debrid claim.
-    const needed = safeSkip + safeLimit;
-    if (catalog?.mode === 'rss' && allowed.length < needed) {
+    // Keep one Sukebei catalogue. It prefers verified scene artwork, then fills
+    // only the first eight positions with honest, title-specific cards backed
+    // by the real RSS torrent identity. This avoids both an empty row and the
+    // old ImageTwist hotlink-error images without inventing scene artwork.
+    const needed = Math.min(safeSkip + safeLimit, 8);
+    if (catalogDefinition?.mode === 'top' && allowed.length < needed) {
       const existing = new Set(allowed.map(item => String(item.sourceId)));
       for (const source of normalized) {
         if (allowed.length >= needed || existing.has(String(source.sourceId))) continue;
@@ -1237,7 +1238,10 @@ function createSukebeiMetadataAdapter(options = {}) {
       }
     }
 
-    const window = allowed.slice(safeSkip, safeSkip + safeLimit);
+    // The upstream RSS window is intentionally exposed as a single catalogue
+    // of at most eight cards. Do not manufacture a second row or imply a
+    // deeper catalogue than the source can currently sustain reliably.
+    const window = allowed.slice(safeSkip, Math.min(safeSkip + safeLimit, 8));
     stats.returned = window.length;
     stats.totalElapsedMs = Date.now() - requestStartedAt;
     stats.deadlineExceededMs = Math.max(Date.now() - deadlineAt, 0);

@@ -274,7 +274,7 @@ test('challenge HTML and lookalike links fail closed instead of becoming catalog
 test('alpha.14 release wiring keeps native sources while studio catalogs are metadata-first/hybrid', () => {
   const root = path.join(__dirname, '..');
   const pkg = require('../package.json');
-  assert.equal(pkg.version, '2.7.0-alpha.22');
+  assert.equal(pkg.version, '2.7.0-alpha.24');
   assert.match(pkg.scripts['test:release'], /tpb4k-phase2c\.test\.js/);
   assert.equal(pkg.scripts['smoke:tpb4k-native'], 'node scripts/tpb4k-native-smoke.js');
   assert.equal(pkg.scripts['smoke:tpb4k-hentai'], 'node scripts/tpb4k-hentai-live-smoke.js');

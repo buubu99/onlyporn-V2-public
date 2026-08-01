@@ -14,9 +14,8 @@ const { buildSceneIdentity } = require('./tpb4k/identity');
 const { getAdapter, installBuiltInAdapters } = require('./tpb4k/index');
 const { normalizeDiscoveryItem } = require('./tpb4k/source-contract');
 const { fallbackPosterUrl } = require('./tpb4k/poster-enrichment');
-const { sukebeiRssPosterUrl } = require('./tpb4k/sukebei-rss-poster');
 const { bindStudioPlayback } = require('./tpb4k/studio-playback-binding');
-const { recoverStudioPlayback } = require('./tpb4k/studio-targeted-recovery');
+const { augmentStudioPlayback, recoverStudioPlayback } = require('./tpb4k/studio-targeted-recovery');
 const { mergeTorrentFirstStudio, shouldUseTorrentFirst } = require('./tpb4k/torrent-first-studio');
 const {
   evaluateContent,
@@ -27,6 +26,7 @@ const {
 const MOVIE_TYPE = 'movie';
 const SERIES_TYPE = 'series';
 const HENTAI_PREFIX = 'ophmm-';
+const HENTAI_TOP_PREFIX = 'ophtop-';
 const TORRENT_FIRST_STUDIOS = new Set(['onlyfans', 'digitalplayground', 'xvideosred', 'sexmex']);
 const CATALOG_CACHE_TTL_MS = 15 * 60 * 1000;
 const CATALOG_STALE_TTL_MS = 24 * 60 * 60 * 1000;
@@ -52,14 +52,31 @@ function safePoster(value) {
     return parsed.toString();
   } catch { return undefined; }
 }
+function realStudioPoster(value) {
+  const poster = safePoster(value);
+  if (!poster) return undefined;
+  try {
+    const path = new URL(poster).pathname;
+    if (/\/assets\/tpb4k\/studios\//i.test(path)
+      || /\/onlyporn\/poster\/studio-release\//i.test(path)) return undefined;
+    return poster;
+  } catch { return undefined; }
+}
 function catalogType(catalogId) {
   const definition = getCatalogDefinition(catalogId);
   return definition?.type || (String(catalogId || '').startsWith('tpb4k.hentai.') ? SERIES_TYPE : MOVIE_TYPE);
 }
-function isHentaiResourceId(id) { return String(id || '').startsWith(HENTAI_PREFIX); }
+function isHentaiResourceId(id) {
+  const value = String(id || '');
+  return value.startsWith(HENTAI_PREFIX) || value.startsWith(HENTAI_TOP_PREFIX);
+}
 function requestIdentity(args = {}) {
   if (args.type === SERIES_TYPE && isHentaiResourceId(args.id)) {
-    return Object.freeze({ source: 'hentai', sourceId: String(args.id), catalogId: 'tpb4k.hentai.all' });
+    return Object.freeze({
+      source: 'hentai',
+      sourceId: String(args.id),
+      catalogId: String(args.id).startsWith(HENTAI_TOP_PREFIX) ? 'tpb4k.hentai.top' : 'tpb4k.hentai.all',
+    });
   }
   return decodeTpb4kId(args.id);
 }
@@ -71,8 +88,9 @@ function fallbackKey(item = {}) {
   return item.source || 'onlyporn';
 }
 function resolvedPoster(item, config = {}, catalogId = '') {
-  const poster = safePoster(item?.poster);
-  if (catalogId === 'tpb4k.sukebei.rss') return sukebeiRssPosterUrl(item, config);
+  const poster = catalogId.startsWith('tpb4k.studio.')
+    ? realStudioPoster(item?.poster)
+    : safePoster(item?.poster);
   if (catalogId === 'tpb4k.sukebei.top') return poster;
   if (item?.source === 'studio-metadata') return poster;
   return poster || safePoster(fallbackPosterUrl(fallbackKey(item), config.posterAssetBaseUrl));
@@ -167,7 +185,8 @@ class Tpb4kProvider {
   getName() { return this.name; }
   activate(id) {
     const value = String(id || '');
-    return value.startsWith('tpb4k.') || value.startsWith('onlyporn:tpb4k:') || value.startsWith(HENTAI_PREFIX);
+    return value.startsWith('tpb4k.') || value.startsWith('onlyporn:tpb4k:')
+      || value.startsWith(HENTAI_PREFIX) || value.startsWith(HENTAI_TOP_PREFIX);
   }
   enabled() { return isTpb4kEnabled(this.env); }
 
@@ -275,6 +294,7 @@ class Tpb4kProvider {
             limit: config.catalogLimit,
             config,
             env: this.env,
+            requireRealPoster: true,
           });
           if (weakStudioKey === 'onlyfans' && shouldUseTorrentFirst(definition, fallback.items.length)) {
             binding = await recoverStudioPlayback({
@@ -294,6 +314,7 @@ class Tpb4kProvider {
               limit: config.catalogLimit,
               config,
               env: this.env,
+              requireRealPoster: true,
             });
             studioTargetedRecovery = binding.recovery;
           } else {
@@ -304,6 +325,18 @@ class Tpb4kProvider {
               timedOut: 0,
               reason: 'torrent-first-minimum-satisfied',
               finalCards: fallback.items.length,
+            });
+          }
+          if (weakStudioKey === 'sexmex' && fallback.items.length) {
+            const augmented = await augmentStudioPlayback({
+              catalog: definition,
+              items: fallback.items,
+              resolverAdapter,
+              config,
+            });
+            fallback = Object.freeze({
+              items: augmented.items,
+              stats: Object.freeze({ ...fallback.stats, failoverAugmentation: augmented.stats }),
             });
           }
           rawItems = [...fallback.items];
@@ -340,13 +373,8 @@ class Tpb4kProvider {
         return normalizeDiscoveryItem(itemAdapter, { ...item, catalogId: definition.id });
       })
       .filter(Boolean)
-      .map(item => {
-        if (definition.id !== 'tpb4k.sukebei.rss') return item;
-        const poster = sukebeiRssPosterUrl(item, config, this.env);
-        return Object.freeze({ ...item, poster, background: poster, lookupSource: 'sukebei-rss-title-poster' });
-      })
       .filter(item => definition.id !== 'tpb4k.sukebei.top' || Boolean(safePoster(item.poster)))
-      .filter(item => !['studio-metadata', 'platform-hybrid'].includes(definition.source) || Boolean(safePoster(item.poster)));
+      .filter(item => !['studio-metadata', 'platform-hybrid'].includes(definition.source) || Boolean(realStudioPoster(item.poster)));
     const contentFiltered = filterItems(normalizedItems, this.contentFilter);
     const metas = [...contentFiltered.items].slice(0, config.catalogLimit).map(item => toMetaPreview(item, definition.id, config));
 

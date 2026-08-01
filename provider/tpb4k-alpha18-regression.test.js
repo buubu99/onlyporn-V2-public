@@ -57,7 +57,7 @@ test('Hentai Top rejects taxonomy cards while All/New remain unmodified fast cat
   };
   const top = createHentaiMamaSeriesAdapter({ config: config(), fetchImpl, checkDns: false, minRequestIntervalMs: 0, maxRetries: 0 });
   const topItems = await top.catalog({ catalog: { id: 'tpb4k.hentai.top', mode: 'top' }, limit: 40 });
-  assert.deepEqual(topItems.map(item => item.sourceId), ['ophmm-eroriman-2']);
+  assert.deepEqual(topItems.map(item => item.sourceId), ['ophtop-eroriman-2']);
   assert.equal(calls.includes('/tvshows/3d/'), false);
   assert.equal(calls.includes('/tvshows/eroriman-2/'), true);
 
@@ -108,8 +108,8 @@ test('Alpha.19 preserves broad pools, isolates Sukebei RSS, and owns its resourc
   assert.match(provider, /recoverStudioPlayback/);
   assert.match(torrent, /studioSearchQueries/);
   assert.match(torrent, /knaben-targeted/);
-  assert.match(sukebei, /catalog\?\.mode === 'rss'/);
+  assert.match(sukebei, /catalogDefinition\?\.mode === 'top'/);
   assert.match(sukebei, /sukebeiRssPosterUrl/);
-  assert.match(addon, /idPrefixes: \['onlyporn:', 'ophmm-'\]/);
+  assert.match(addon, /idPrefixes: \['onlyporn:', 'ophmm-', 'ophtop-'\]/);
   assert.doesNotMatch(addon, /(['"`])hmm-/);
 });

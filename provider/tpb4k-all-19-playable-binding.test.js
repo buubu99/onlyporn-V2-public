@@ -204,6 +204,6 @@ test('source wiring contains multi-candidate, targeted recovery, and no comparis
   assert.match(providerSource, /Array\.isArray\(decoded\.torrents\)/);
   assert.match(recoverySource, /targetedPlaybackSearch/);
   assert.match(codecSource, /const BUNDLE_VERSION = 3/);
-  assert.match(addonSource, /idPrefixes: \['onlyporn:', 'ophmm-'\]/);
+  assert.match(addonSource, /idPrefixes: \['onlyporn:', 'ophmm-', 'ophtop-'\]/);
   assert.doesNotMatch(addonSource, /tpb-adult-addon|TPB 4K IMPROVED|(['"`])hmm-/i);
 });

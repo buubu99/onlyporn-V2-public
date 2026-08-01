@@ -9,6 +9,7 @@ const {
   htmlUsable,
   parseSeriesDetail,
   seriesId,
+  topSeriesId,
 } = require('./tpb4k/hentaimama-series');
 
 function response(body = '', status = 200, contentType = 'text/html', extraHeaders = {}) {
@@ -165,6 +166,23 @@ test('HentaiMama adapter keeps catalog, meta, and exact episode resolution separ
   assert.ok(diagnostics.playerDepth >= 2, JSON.stringify(diagnostics));
   assert.ok(diagnostics.nestedPlayers >= 1, JSON.stringify(diagnostics));
   assert.ok(diagnostics.playerFetched >= 3, JSON.stringify(diagnostics));
+});
+
+test('Hentai Top uses a fresh series identity but the same proven episode and playback resolver', async () => {
+  const adapter = createHentaiMamaSeriesAdapter({
+    config: config(), fetchImpl: fixtureFetch, checkDns: false, minRequestIntervalMs: 0, maxRetries: 0,
+  });
+  const catalog = await adapter.catalog({ catalog: { id: 'tpb4k.hentai.top', mode: 'top' }, skip: 0, limit: 40 });
+  assert.equal(catalog.length, 1);
+  assert.equal(catalog[0].sourceId, topSeriesId('eroriman-2'));
+
+  const meta = await adapter.meta({ sourceId: catalog[0].sourceId });
+  assert.equal(meta.videos.length, 2);
+  assert.equal(meta.videos[1].id, episodeId('eroriman-2', 2));
+
+  const streams = await adapter.resolve({ sourceId: meta.videos[1].id });
+  assert.equal(streams.length, 2);
+  assert.equal(streams.every(item => item.validated && /eroriman-e2-/.test(item.url)), true);
 });
 
 test('legacy Hentai series IDs remain compatible but resolve only the selected exact episode for new IDs', async () => {

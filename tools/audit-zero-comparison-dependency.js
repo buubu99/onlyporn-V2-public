@@ -42,7 +42,7 @@ function audit(root) {
   const addon = path.join(root, 'addon.js');
   if (fs.existsSync(addon)) {
     const source = fs.readFileSync(addon, 'utf8');
-    if (!source.includes("idPrefixes: ['onlyporn:', 'ophmm-']")) failures.push('addon.js: missing exclusive OnlyPorn idPrefixes');
+    if (!source.includes("idPrefixes: ['onlyporn:', 'ophmm-', 'ophtop-']")) failures.push('addon.js: missing exclusive OnlyPorn idPrefixes');
   }
   if (failures.length) throw new Error(`Zero-dependency audit failed:\n- ${failures.join('\n- ')}`);
   return { files: files(root).length };

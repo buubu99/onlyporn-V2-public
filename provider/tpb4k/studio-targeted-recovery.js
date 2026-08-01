@@ -106,4 +106,100 @@ async function recoverStudioPlayback(options = {}) {
     recovery: Object.freeze({ attempted, completed, recoveredCandidates, timedOut, profile: settings, finalCards: final.items.length, finalCandidates: final.stats.boundCandidates }),
   });
 }
-module.exports = { existingCandidateCounts, profile, recoverStudioPlayback };
+
+function bundleCandidate(value = {}) {
+  const infoHash = validInfoHash(value.infoHash);
+  if (!infoHash) return null;
+  return Object.freeze({
+    infoHash,
+    title: compact(value.title || value.filename),
+    filename: compact(value.filename || value.title),
+    resolution: compact(value.resolution || value.quality),
+    indexer: compact(value.indexer || value.source || 'torrent-index').toLowerCase(),
+    seeders: Math.max(Number.parseInt(String(value.seeders ?? 0), 10) || 0, 0),
+    size: value.size ?? 0,
+    fileIdx: Number.isInteger(value.fileIdx) && value.fileIdx >= 0 ? value.fileIdx : null,
+    playbackBinding: compact(value.playbackBinding || 'targeted-failover-candidate'),
+    playbackScore: Number(value.playbackScore || 0),
+    playbackSourceId: compact(value.playbackSourceId || value.sourceId),
+  });
+}
+function mergeBundle(item = {}, recovered = [], desiredCandidates = 3) {
+  const rows = Array.isArray(item.playbackCandidates) && item.playbackCandidates.length
+    ? item.playbackCandidates : [item];
+  const merged = [];
+  const seen = new Set();
+  for (const value of [...rows, ...recovered]) {
+    const normalized = bundleCandidate(value);
+    const key = normalized ? `${normalized.infoHash}:${normalized.fileIdx ?? ''}` : '';
+    if (!normalized || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(normalized);
+  }
+  const candidates = Object.freeze(merged.slice(0, Math.max(desiredCandidates, rows.length, 1)));
+  const primary = candidates[0];
+  return primary ? Object.freeze({
+    ...item,
+    infoHash: primary.infoHash,
+    filename: primary.filename || item.filename || item.title,
+    resolution: primary.resolution || item.resolution,
+    indexer: primary.indexer || item.indexer,
+    seeders: primary.seeders,
+    size: primary.size,
+    fileIdx: primary.fileIdx,
+    playbackCandidates: candidates,
+  }) : item;
+}
+async function augmentStudioPlayback(options = {}) {
+  const catalog = options.catalog || {};
+  const items = Array.isArray(options.items) ? options.items : [];
+  const resolver = options.resolverAdapter;
+  const settings = profile(catalog);
+  if (!items.length || !resolver || typeof resolver.resolve !== 'function') {
+    return Object.freeze({ items: Object.freeze([...items]), stats: Object.freeze({ attempted: 0, completed: 0, recoveredCandidates: 0, timedOut: 0, multiCandidateScenes: items.filter(item => item.playbackCandidates?.length > 1).length }) });
+  }
+  const targets = items
+    .map((item, index) => ({ item, index }))
+    .filter(({ item }) => (item.playbackCandidates?.length || (item.infoHash ? 1 : 0)) < settings.desiredCandidates)
+    .slice(0, settings.maxTargets);
+  const deadlineAt = Date.now() + settings.totalBudgetMs;
+  let completed = 0;
+  let timedOut = 0;
+  let recoveredCandidates = 0;
+  const recoveredByIndex = new Map();
+  await mapLimited(targets, settings.concurrency, async ({ item, index }) => {
+    const remaining = deadlineAt - Date.now();
+    if (remaining <= 100) { timedOut += 1; return []; }
+    const duration = Math.min(settings.targetTimeoutMs, remaining);
+    const started = Date.now();
+    const values = await timeout(resolver.resolve({
+      // Avoid the resolver's remembered single-hash fast path. Candidate
+      // augmentation must run the title through Knaben, TPB and 1337x so
+      // AIOStreams receives genuine alternatives when one RD hash is queued.
+      sourceId: `catalog-failover:${String(item.sourceId || index)}`,
+      catalogId: String(catalog.id || ''),
+      catalog: { ...catalog, targetedPlaybackSearch: true },
+      item,
+      config: options.config,
+    }), duration);
+    if (Date.now() - started >= duration - 20 && !(Array.isArray(values) && values.length)) timedOut += 1;
+    completed += 1;
+    const recovered = normalizeRecovered(values, item, Math.max(Number(options.config?.minimumSeeders || 0), 0));
+    recoveredCandidates += recovered.length;
+    recoveredByIndex.set(index, recovered);
+    return recovered;
+  });
+  const augmented = items.map((item, index) => mergeBundle(item, recoveredByIndex.get(index) || [], settings.desiredCandidates));
+  return Object.freeze({
+    items: Object.freeze(augmented),
+    stats: Object.freeze({
+      attempted: targets.length,
+      completed,
+      recoveredCandidates,
+      timedOut,
+      desiredCandidates: settings.desiredCandidates,
+      multiCandidateScenes: augmented.filter(item => item.playbackCandidates?.length > 1).length,
+    }),
+  });
+}
+module.exports = { augmentStudioPlayback, existingCandidateCounts, profile, recoverStudioPlayback };

@@ -61,12 +61,6 @@ const SELECTED_CATALOGS = [
     mode: 'top',
   },
   {
-    id: 'tpb4k.sukebei.rss',
-    name: 'OnlyPorn: Sukebei · RSS Playable',
-    source: 'sukebei',
-    mode: 'rss',
-  },
-  {
     id: 'tpb4k.studio.brazzersexxtra.top',
     name: 'OnlyPorn: BrazzersExxtra · Top',
     source: 'studio-metadata',
