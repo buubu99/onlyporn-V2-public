@@ -30,8 +30,13 @@ const {
 
 const MOVIE_TYPE = 'movie';
 const SERIES_TYPE = 'series';
-const RELEASE_VERSION = require('../package.json').version;
 const CATALOG_CACHE_REVISION = 'r7';
+function catalogCacheKey(args = {}) {
+  return `${CATALOG_CACHE_REVISION}:${String(args?.type || '')}:${String(args?.id || '')}:${String(args?.extra?.skip || 0)}`;
+}
+function legacyCatalogCacheSuffix(args = {}) {
+  return `:${catalogCacheKey(args)}`;
+}
 const HENTAI_PREFIX = 'ophmm-';
 const HENTAI_TOP_PREFIX = 'ophtop-';
 const TORRENT_FIRST_STUDIOS = new Set(['onlyfans', 'digitalplayground', 'xvideosred', 'sexmex']);
@@ -244,7 +249,7 @@ class Tpb4kProvider {
     this.contentFilter = readContentFilterConfig(this.env);
     this.catalogResponseCache = new Map();
     this.catalogInFlight = new Map();
-    this.catalogResponseStore = createCatalogResponseStore({ env: this.env });
+    this.catalogResponseStore = options.catalogResponseStore || createCatalogResponseStore({ env: this.env });
     if (options.installBuiltIns !== false) installBuiltInAdapters({ env: this.env, fetchImpl: this.fetchImpl });
   }
   static create(options) { return new Tpb4kProvider(options); }
@@ -258,16 +263,30 @@ class Tpb4kProvider {
 
   async handleCatalog(args) {
     if (!this.enabled()) return { metas: [] };
-    // A deploy must never rehydrate a last-known-good catalogue produced by a
-    // previous release. Keeping the version in the key prevents a stale disk
-    // entry from undoing a new poster, identity, or failover policy.
-    const cacheKey = `${RELEASE_VERSION}:${CATALOG_CACHE_REVISION}:${String(args?.type || '')}:${String(args?.id || '')}:${String(args?.extra?.skip || 0)}`;
+    // The explicit cache revision invalidates incompatible catalogue formats.
+    // Package releases using the same revision reuse last-known-good rows so a
+    // deploy does not force every Home catalogue through a cold provider burst.
+    const cacheKey = catalogCacheKey(args);
     let cached = this.catalogResponseCache.get(cacheKey);
     if (!cached) {
-      const persisted = this.catalogResponseStore.get(cacheKey);
+      let persisted = this.catalogResponseStore.get(cacheKey);
+      let migratedFromLegacy = false;
+      if (!persisted) {
+        persisted = this.catalogResponseStore.findByKeySuffix?.(legacyCatalogCacheSuffix(args));
+        migratedFromLegacy = Boolean(persisted?.value?.metas?.length);
+      }
       if (persisted?.value?.metas?.length) {
         cached = Object.freeze({ savedAt: persisted.savedAt, value: persisted.value });
         this.catalogResponseCache.set(cacheKey, cached);
+        if (migratedFromLegacy) {
+          this.catalogResponseStore.set(cacheKey, persisted.value);
+          logger().info({
+            provider: this.name,
+            catalogId: String(args?.id || ''),
+            fromKey: persisted.key,
+            toKey: cacheKey,
+          }, 'OnlyPorn migrated prior-release catalog cache');
+        }
       }
     }
     const age = cached ? Date.now() - cached.savedAt : Infinity;
@@ -734,3 +753,5 @@ class Tpb4kProvider {
 
 module.exports = options => Tpb4kProvider.create(options);
 module.exports.Tpb4kProvider = Tpb4kProvider;
+module.exports.catalogCacheKey = catalogCacheKey;
+module.exports.legacyCatalogCacheSuffix = legacyCatalogCacheSuffix;

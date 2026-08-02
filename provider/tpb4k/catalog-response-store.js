@@ -99,6 +99,25 @@ function createCatalogResponseStore(options = {}) {
       }
       return record;
     },
+    findByKeySuffix(suffix) {
+      load();
+      const normalizedSuffix = clean(suffix).slice(0, 500);
+      if (!normalizedSuffix) return null;
+      const current = now();
+      let selected = null;
+      let changed = false;
+      for (const [key, record] of records) {
+        if (current - record.savedAt > ttlMs) {
+          records.delete(key);
+          changed = true;
+          continue;
+        }
+        if (key.endsWith(normalizedSuffix)
+          && (!selected || record.savedAt > selected.savedAt)) selected = record;
+      }
+      if (changed) persist();
+      return selected;
+    },
     findMeta(id) {
       load();
       const normalizedId = clean(id);
