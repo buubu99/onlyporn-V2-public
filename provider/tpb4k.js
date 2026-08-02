@@ -41,6 +41,10 @@ const HENTAI_PREFIX = 'ophmm-';
 const HENTAI_TOP_PREFIX = 'ophtop-';
 const TORRENT_FIRST_STUDIOS = new Set(['onlyfans', 'digitalplayground', 'xvideosred', 'sexmex']);
 const PLAYABILITY_GATED_CATALOGS = new Set(['tpb4k.pornrips.recent', 'tpb4k.tpdb.recent']);
+const PLAYBACK_RECOVERY_CATALOGS = new Set([
+  'tpb4k.tpdb.recent',
+  'tpb4k.studio.xvideosred.top',
+]);
 const CATALOG_CACHE_TTL_MS = 15 * 60 * 1000;
 const CATALOG_STALE_TTL_MS = 24 * 60 * 60 * 1000;
 let loggerInstance;
@@ -212,6 +216,23 @@ function catalogPreviewMeta(preview, id, decoded) {
     },
   };
 }
+function catalogPreviewDiscoveryItem(preview, decoded, definition = {}) {
+  if (!preview || !preview.name) return null;
+  const genres = Array.isArray(preview.genres) ? preview.genres.map(String).filter(Boolean) : [];
+  const tags = Array.isArray(preview.tags) ? preview.tags.map(String).filter(Boolean) : [];
+  return Object.freeze({
+    source: decoded.source,
+    sourceId: decoded.sourceId,
+    title: String(preview.name),
+    studio: String(definition.studio || genres[0] || ''),
+    poster: safePoster(preview.poster) || '',
+    background: safePoster(preview.background) || safePoster(preview.poster) || '',
+    description: String(preview.description || ''),
+    tags,
+    releaseDate: '',
+    lookupQuery: String(preview.name),
+  });
+}
 function diagnosticStudioKey(value) { return String(value || '').normalize('NFKC').toLowerCase().replace(/[^a-z0-9]+/g, ''); }
 function torrentHashes(identity = {}) {
   return new Set((Array.isArray(identity.torrents) ? identity.torrents : [])
@@ -249,6 +270,7 @@ class Tpb4kProvider {
     this.contentFilter = readContentFilterConfig(this.env);
     this.catalogResponseCache = new Map();
     this.catalogInFlight = new Map();
+    this.playbackRecoveryCache = new Map();
     this.catalogResponseStore = options.catalogResponseStore || createCatalogResponseStore({ env: this.env });
     if (options.installBuiltIns !== false) installBuiltInAdapters({ env: this.env, fetchImpl: this.fetchImpl });
   }
@@ -652,6 +674,8 @@ class Tpb4kProvider {
     const resolverAdapter = decoded.source === 'hentai' ? sourceAdapter : getAdapter(definition?.lookupSource || decoded.source);
     if (!resolverAdapter) return { streams: [] };
     const config = readTpb4kConfig(this.env);
+    const playbackRecovery = PLAYBACK_RECOVERY_CATALOGS.has(decoded.catalogId)
+      && (!Array.isArray(decoded.torrents) || decoded.torrents.length === 0);
     let rawItem = null;
     try {
       rawItem = await sourceAdapter.meta({ sourceId: decoded.sourceId, catalogId: decoded.catalogId, config });
@@ -660,6 +684,26 @@ class Tpb4kProvider {
       if (evaluation?.excluded) return { streams: [] };
     } catch {
       // Metadata is a best-effort preflight; returned candidates are filtered below.
+    }
+    if (!rawItem && playbackRecovery) {
+      let preview = null;
+      for (const record of this.catalogResponseCache.values()) {
+        preview = record?.value?.metas?.find(meta =>
+          String(meta?.id || '') === String(args.id || '') || sameCatalogIdentity(meta, decoded)
+        ) || null;
+        if (preview) break;
+      }
+      if (!preview) preview = this.catalogResponseStore.findMeta(args.id);
+      if (!preview) preview = this.catalogResponseStore.findMetaByIdentity(decoded);
+      rawItem = catalogPreviewDiscoveryItem(preview, decoded, definition);
+      if (rawItem) {
+        logger().info({
+          provider: this.name,
+          catalogId: decoded.catalogId,
+          source: decoded.source,
+          sourceId: decoded.sourceId,
+        }, 'OnlyPorn recovered playback search identity from the existing catalog card');
+      }
     }
 
     const sukebeiNeedsFileSelection = decoded.source === 'sukebei'
@@ -673,12 +717,17 @@ class Tpb4kProvider {
         provenance: ['catalog-bound-torrent', 'multi-candidate-bundle'],
       }))
       : [];
+    if (!rawCandidates.length && playbackRecovery) {
+      rawCandidates = this.playbackRecoveryCache.get(String(args.id || '')) || [];
+    }
     if (!rawCandidates.length) {
       try {
         rawCandidates = await resolverAdapter.resolve({
           sourceId: decoded.sourceId,
           catalogId: decoded.catalogId,
-          catalog: definition,
+          catalog: playbackRecovery
+            ? { ...definition, targetedPlaybackSearch: true, fastPlaybackSearch: true }
+            : definition,
           item: rawItem,
           config,
         });
@@ -721,6 +770,14 @@ class Tpb4kProvider {
         }
         return true;
       });
+    if (playbackRecovery && normalized.length) {
+      const cacheKey = String(args.id || '');
+      this.playbackRecoveryCache.delete(cacheKey);
+      this.playbackRecoveryCache.set(cacheKey, Object.freeze(normalized.map(candidate => Object.freeze({ ...candidate }))));
+      while (this.playbackRecoveryCache.size > 256) {
+        this.playbackRecoveryCache.delete(this.playbackRecoveryCache.keys().next().value);
+      }
+    }
     const episode = decoded.source === 'hentai' ? Number(String(decoded.sourceId).match(/:1:(\d+)$/)?.[1] || 1) : 0;
     const streams = sortCandidates(dedupeCandidates(normalized)).map(candidate => {
       const stream = toStremioStream(candidate);
