@@ -71,6 +71,32 @@ class SpankbangProvider extends Provider {
     return this.baseUrl + pathMappings.trending;
   }
 
+  getCatalogFallbackUrls(url, args = {}) {
+    const extra = args.extra || {};
+    if (
+      extra.search
+      || extra.genre
+      || Number(extra.skip || 0) > 0
+    ) {
+      return [];
+    }
+
+    let pathname = '';
+    try {
+      pathname = new URL(url).pathname;
+    } catch {
+      return [];
+    }
+
+    const paths = [
+      pathMappings.trending,
+      pathMappings.new,
+      pathMappings.popular,
+    ].filter(pathnameValue => pathnameValue !== pathname);
+
+    return paths.map(pathnameValue => this.baseUrl + pathnameValue);
+  }
+
   handleSearch({ extra: { search: keyword } }) {
     return `${this.baseUrl}/s/${encodeURIComponent(keyword)}/`;
   }
