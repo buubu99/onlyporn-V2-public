@@ -34,6 +34,15 @@ const NATIVE_MAX_CATALOG_PAGES_PER_REQUEST = 12;
 const NATIVE_MAX_TORRENT_BYTES = 2_000_000;
 const NATIVE_MAX_AJAX_BYTES = 1_000_000;
 const HENTAI_MEDIA_HOST = /^(?:gdvid\.info|(?:[a-z0-9-]+\.)*javprovider\.com)$/i;
+const YESPORN_BROWSER_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/131 Safari/537.36';
+const YESPORN_STREAM_VALUE_RE =
+  /\b(video(?:_alt)?_url\d*)\b\s*["']?\s*[:=]\s*(["'])([\s\S]*?)\2/gi;
+const YESPORN_STREAM_LABEL_RE =
+  /\b(video(?:_alt)?_url\d*)_text\b\s*["']?\s*[:=]\s*(["'])([\s\S]*?)\2/gi;
+const YESPORN_COMMON_MEDIA_RE =
+  /\b(?:file|src|hls|contentUrl|videoUrl)\b\s*["']?\s*[:=]\s*(["'])([\s\S]*?)\1/gi;
+const YESPORN_MAX_PLAYER_PAGES = 4;
 
 function createNativeClient(id, config, options = {}) {
   const source = SOURCES[id];
@@ -271,6 +280,384 @@ function decodeTorrent(buffer) {
     size,
     files: Object.freeze(files),
   };
+}
+
+function decodeYespornPlayerValue(value) {
+  return String(value || '')
+    .replace(/\\u([0-9a-f]{4})/gi, (_, hex) =>
+      String.fromCharCode(Number.parseInt(hex, 16))
+    )
+    .replace(/\\x([0-9a-f]{2})/gi, (_, hex) =>
+      String.fromCharCode(Number.parseInt(hex, 16))
+    )
+    .replace(/\\\//g, '/')
+    .replace(/\\"/g, '"')
+    .replace(/\\'/g, "'")
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;|&apos;/gi, "'")
+    .replace(/&#x0*2f;|&#0*47;/gi, '/')
+    .replace(/&#x0*3a;|&#0*58;/gi, ':')
+    .replace(/&#x0*26;|&#0*38;/gi, '&')
+    .trim();
+}
+
+function yespornQualityRank(value) {
+  const text = cleanText(value).toLowerCase();
+  if (/\b(?:4320p|8k)\b/.test(text)) return 4320;
+  if (/\b(?:2160p|4k)\b/.test(text)) return 2160;
+  return Number(
+    text.match(
+      /\b(1440|1080|720|576|480|360|240|144)p?\b/
+    )?.[1] || 0
+  );
+}
+
+function yespornInferredLabel(url, fallback = '') {
+  const value = cleanText(fallback);
+  if (value) return value;
+
+  const text = String(url || '');
+  const quality = text.match(
+    /(?:^|[^0-9])(4320|2160|1440|1080|720|576|480|360|240|144)p?(?:[^0-9]|$)/i
+  )?.[1];
+
+  return quality ? `${quality}p` : 'Direct';
+}
+
+function yespornMediaKind(url) {
+  return /\.m3u8(?:$|[?#])/i.test(String(url || ''))
+    ? 'hls'
+    : 'mp4';
+}
+
+function yespornLooksLikeMediaUrl(url) {
+  try {
+    const parsed = new URL(String(url));
+    const target = `${parsed.pathname}${parsed.search}`.toLowerCase();
+
+    return (
+      /\/get_file\//.test(target) ||
+      /\.(?:mp4|m4v|webm|m3u8)(?:$|[?#])/.test(target) ||
+      /\/(?:media|stream|video_file|download)\//.test(target)
+    );
+  } catch {
+    return false;
+  }
+}
+
+function yespornStreamPairs(
+  html,
+  pageUrl = SOURCES.yesporn.origin
+) {
+  const body = String(html || '');
+  const labels = new Map();
+  const output = [];
+  const seen = new Set();
+
+  const append = (rawValue, rawLabel = '', authoritative = false) => {
+    let value = decodeYespornPlayerValue(rawValue);
+    value = value.replace(/^function\/0\//i, '');
+
+    const url = absoluteHttps(pageUrl, value);
+    if (
+      !url ||
+      seen.has(url) ||
+      (!authoritative && !yespornLooksLikeMediaUrl(url))
+    ) {
+      return;
+    }
+
+    seen.add(url);
+    output.push(Object.freeze({
+      label: yespornInferredLabel(url, rawLabel),
+      url,
+      mediaKind: yespornMediaKind(url),
+    }));
+  };
+
+  for (const match of body.matchAll(YESPORN_STREAM_LABEL_RE)) {
+    const label = cleanText(
+      decodeYespornPlayerValue(match[3])
+    );
+    if (label) labels.set(match[1].toLowerCase(), label);
+  }
+
+  for (const match of body.matchAll(YESPORN_STREAM_VALUE_RE)) {
+    const key = match[1].toLowerCase();
+    append(match[3], labels.get(key), true);
+  }
+
+  for (
+    const match of body.matchAll(
+      /<(?:video|source)\b[^>]*>/gi
+    )
+  ) {
+    const tag = match[0];
+    const src =
+      attribute(tag, 'src') ||
+      attribute(tag, 'data-src') ||
+      attribute(tag, 'data-file');
+
+    append(
+      src,
+      attribute(tag, 'label') ||
+      attribute(tag, 'title') ||
+      attribute(tag, 'data-res') ||
+      attribute(tag, 'res')
+    );
+  }
+
+  for (const match of body.matchAll(YESPORN_COMMON_MEDIA_RE)) {
+    append(match[2]);
+  }
+
+  for (
+    const match of body.matchAll(
+      /https:(?:\\\/|\/){2}[^"'<>\\\s]+/gi
+    )
+  ) {
+    append(match[0]);
+  }
+
+  return Object.freeze(
+    output.sort(
+      (left, right) =>
+        yespornQualityRank(right.label) -
+        yespornQualityRank(left.label)
+    )
+  );
+}
+
+function yespornIframeUrls(html, pageUrl) {
+  const output = [];
+  const seen = new Set();
+
+  for (const match of String(html || '').matchAll(/<iframe\b[^>]*>/gi)) {
+    const tag = match[0];
+    const raw =
+      attribute(tag, 'src') ||
+      attribute(tag, 'data-src') ||
+      attribute(tag, 'data-lazy-src');
+
+    const url = absoluteHttps(
+      pageUrl,
+      decodeYespornPlayerValue(raw)
+    );
+
+    if (!url || seen.has(url)) continue;
+    seen.add(url);
+    output.push(url);
+
+    if (output.length >= YESPORN_MAX_PLAYER_PAGES - 1) break;
+  }
+
+  return Object.freeze(output);
+}
+
+async function readYespornPlayerPage(
+  url,
+  referer,
+  options
+) {
+  const safeUrl = await assertSafeHttpsUrl(url, {
+    checkDns: options.checkDns !== false,
+  });
+  const parsed = new URL(safeUrl);
+  const safeReferer = absoluteHttps(
+    referer || SOURCES.yesporn.origin,
+    referer || `${SOURCES.yesporn.origin}/`
+  ) || `${SOURCES.yesporn.origin}/`;
+
+  const request = await safeNativeRequest(safeUrl, {
+    fetchImpl: options.fetchImpl,
+    checkDns: options.checkDns,
+    timeoutMs: options.config.requestTimeoutMs,
+    origin: parsed.origin,
+    allowedHosts: new Set([parsed.hostname.toLowerCase()]),
+    headers: {
+      Accept:
+        'text/html, application/xhtml+xml;q=0.9, application/json;q=0.8, text/plain;q=0.7, */*;q=0.3',
+      'Accept-Language': 'en-US,en;q=0.8',
+      Referer: safeReferer,
+      Origin: new URL(safeReferer).origin,
+      'User-Agent': YESPORN_BROWSER_USER_AGENT,
+    },
+  });
+
+  try {
+    const status = Number(request.response?.status || 0);
+    if (status < 200 || status >= 300) return null;
+
+    const contentType = responseHeader(
+      request.response,
+      'content-type'
+    ).split(';')[0].trim().toLowerCase();
+
+    if (
+      contentType &&
+      ![
+        'text/html',
+        'application/xhtml+xml',
+        'application/json',
+        'text/plain',
+        'application/javascript',
+        'text/javascript',
+      ].includes(contentType)
+    ) {
+      return null;
+    }
+
+    const maxBytes = Math.max(
+      Number(
+        options.config.discoveryMaxResponseBytes || 0
+      ),
+      NATIVE_MAX_AJAX_BYTES
+    );
+
+    const html = await readBoundedText(
+      request.response,
+      maxBytes
+    );
+
+    if (
+      hasStrongChallengeMarker(html) &&
+      !/\bvideo(?:_alt)?_url\d*\b|<video\b|<source\b|<iframe\b|\/get_file\//i.test(html)
+    ) {
+      return null;
+    }
+
+    return Object.freeze({
+      url: safeUrl,
+      html,
+    });
+  } finally {
+    request.clearTimeout();
+  }
+}
+
+async function resolveYesporn({
+  sourceId,
+  item,
+  options,
+}) {
+  const path = decodeStablePathId('yesporn', sourceId);
+  if (!path) return [];
+
+  const detailUrl = absoluteHttps(
+    SOURCES.yesporn.origin,
+    path
+  );
+  if (!detailUrl) return [];
+
+  const queue = [{
+    url: detailUrl,
+    referer: `${SOURCES.yesporn.origin}/`,
+    depth: 0,
+  }];
+  const visited = new Set();
+  const discovered = [];
+
+  while (
+    queue.length &&
+    visited.size < YESPORN_MAX_PLAYER_PAGES
+  ) {
+    const current = queue.shift();
+    if (!current || visited.has(current.url)) continue;
+    visited.add(current.url);
+
+    let page;
+    try {
+      page = await readYespornPlayerPage(
+        current.url,
+        current.referer,
+        options
+      );
+    } catch {
+      continue;
+    }
+
+    if (!page) continue;
+
+    for (
+      const value of yespornStreamPairs(
+        page.html,
+        page.url
+      )
+    ) {
+      discovered.push({
+        ...value,
+        referer: page.url,
+      });
+    }
+
+    if (current.depth >= 1) continue;
+
+    for (
+      const iframeUrl of yespornIframeUrls(
+        page.html,
+        page.url
+      )
+    ) {
+      queue.push({
+        url: iframeUrl,
+        referer: page.url,
+        depth: current.depth + 1,
+      });
+    }
+  }
+
+  const candidates = [];
+  const seen = new Set();
+
+  for (const value of discovered) {
+    let safeUrl = '';
+
+    try {
+      safeUrl = await assertSafeHttpsUrl(value.url, {
+        checkDns: options.checkDns !== false,
+      });
+    } catch {
+      continue;
+    }
+
+    if (!safeUrl || seen.has(safeUrl)) continue;
+    seen.add(safeUrl);
+
+    const referer = await assertSafeHttpsUrl(
+      value.referer || detailUrl,
+      {
+        checkDns: options.checkDns !== false,
+      }
+    );
+
+    candidates.push(Object.freeze({
+      source: 'yesporn',
+      sourceId,
+      title:
+        item?.title ||
+        slugTitle(path) ||
+        'YesPorn',
+      filename:
+        `${item?.title || slugTitle(path) || 'YesPorn'}.mp4`,
+      resolution: value.label,
+      quality: value.label,
+      mediaKind: value.mediaKind,
+      url: safeUrl,
+      validated: true,
+      requestHeaders: Object.freeze({
+        'User-Agent': YESPORN_BROWSER_USER_AGENT,
+        Referer: referer,
+        Origin: new URL(referer).origin,
+      }),
+      provenance: Object.freeze([
+        'yesporn-authoritative-player-page',
+        'yesporn-fresh-rotating-media',
+      ]),
+    }));
+  }
+
+  return Object.freeze(candidates);
 }
 
 async function resolvePornrips({ client, sourceId, item, options }) {
@@ -803,6 +1190,9 @@ function createNativeAdapter(source, options = {}) {
       if (source === 'hentai') {
         return resolveHentai({ client, ...args, options });
       }
+      if (source === 'yesporn') {
+        return resolveYesporn({ ...args, options });
+      }
       return [];
     },
   });
@@ -826,7 +1216,9 @@ module.exports = {
   parsePornripsCatalog,
   pornripsSceneKey,
   readBoundedBuffer,
+  resolveYesporn,
   safeNativeRequest,
   parseYespornCatalog,
   torrentUrlFromDetail,
+  yespornStreamPairs,
 };

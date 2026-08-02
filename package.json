@@ -1,6 +1,6 @@
 {
   "name": "OnlyPorn",
-  "version": "2.7.0-alpha.29",
+  "version": "2.7.0-alpha.30",
   "description": "Use your TV remote to its full potential!",
   "license": "MIT",
   "scripts": {
@@ -68,7 +68,9 @@
     "smoke:alpha24-recovery": "node scripts/onlyporn-alpha24-live-acceptance.js",
     "test:position33-javhd": "ONLYPORN_DISABLE_PERSISTENT_CACHE=true node --test provider/onlyporn-position33-javhd.test.js provider/hotfix-2.5.5.test.js provider/hotfix-2.6.2.test.js",
     "smoke:position33-javhd": "ONLYPORN_DISABLE_PERSISTENT_CACHE=true node scripts/onlyporn-position33-javhd-live-smoke.js",
-    "prewarm:catalogs": "node scripts/catalog-prewarm.js"
+    "prewarm:catalogs": "node scripts/catalog-prewarm.js",
+    "test:yesporn-alpha30": "node --test provider/onlyporn-yesporn-alpha30.test.js",
+    "verify:yesporn-all": "node scripts/verify-yesporn-all.js local"
   },
   "dependencies": {
     "axios": "^1.13.6",

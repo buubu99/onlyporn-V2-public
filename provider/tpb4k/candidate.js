@@ -121,15 +121,77 @@ function normalizeHttpsUrl(value) {
   }
 }
 
-function classifyDirectUrl(value) {
+function classifyDirectUrl(value, hint = '') {
   const url = normalizeHttpsUrl(value);
   if (!url) return { url: '', kind: '' };
+
   const parsed = new URL(url);
   const pathname = parsed.pathname.toLowerCase();
+  const normalizedHint = cleanText(hint).toLowerCase();
 
-  if (/\.m3u8$/.test(pathname)) return { url, kind: 'direct-hls' };
-  if (/\.(?:mp4|m4v|webm|mkv)$/.test(pathname)) return { url, kind: 'direct-file' };
+  if (
+    /\.m3u8$/.test(pathname) ||
+    ['hls', 'direct-hls'].includes(normalizedHint)
+  ) {
+    return { url, kind: 'direct-hls' };
+  }
+
+  if (
+    /\.(?:mp4|m4v|webm|mkv)$/.test(pathname) ||
+    ['mp4', 'file', 'direct-file'].includes(normalizedHint)
+  ) {
+    return { url, kind: 'direct-file' };
+  }
+
   return { url, kind: '' };
+}
+
+function safeRequestHeaderValue(
+  value,
+  maximum = 1_024
+) {
+  return String(value || '')
+    .replace(/[\r\n]+/g, ' ')
+    .trim()
+    .slice(0, maximum);
+}
+
+function normalizeHttpsOrigin(value) {
+  const url = normalizeHttpsUrl(value);
+  if (!url) return '';
+
+  try {
+    return new URL(url).origin;
+  } catch {
+    return '';
+  }
+}
+
+function normalizeProxyRequestHeaders(value = {}) {
+  const input =
+    value && typeof value === 'object'
+      ? value
+      : {};
+
+  const userAgent = safeRequestHeaderValue(
+    input['User-Agent'] ||
+    input['user-agent']
+  );
+  const referer = normalizeHttpsUrl(
+    input.Referer ||
+    input.referer
+  );
+  const origin = normalizeHttpsOrigin(
+    input.Origin ||
+    input.origin
+  );
+
+  const output = {};
+  if (userAgent) output['User-Agent'] = userAgent;
+  if (referer) output.Referer = referer;
+  if (origin) output.Origin = origin;
+
+  return Object.freeze(output);
 }
 
 function resolutionHeight(...values) {
@@ -208,7 +270,14 @@ function candidateFingerprint(candidate) {
 function normalizeCandidate(input = {}) {
   const magnet = parseMagnet(input.magnet || input.magnetUrl || input.uri);
   const infoHash = normalizeInfoHash(input.infoHash || input.hash || magnet?.infoHash);
-  const direct = classifyDirectUrl(input.url || input.streamUrl || input.mediaUrl);
+  const direct = classifyDirectUrl(
+    input.url ||
+    input.streamUrl ||
+    input.mediaUrl,
+    input.mediaKind ||
+    input.directKind ||
+    input.kind
+  );
   const debridUrl = normalizeHttpsUrl(input.debridUrl || input.unrestrictedUrl);
   const state = cacheState(input.cached ?? input.cacheStatus);
   const validated = input.validated === true;
@@ -263,6 +332,10 @@ function normalizeCandidate(input = {}) {
     infoHash,
     fileIdx: Number.isInteger(input.fileIdx) && input.fileIdx >= 0 ? input.fileIdx : null,
     trackers,
+    requestHeaders: normalizeProxyRequestHeaders(
+      input.requestHeaders ||
+      input.proxyHeaders?.request
+    ),
     url: playableUrl,
     detailUrl: normalizeHttpsUrl(input.detailUrl || (direct.kind ? '' : input.url)),
     cached: state,
@@ -388,7 +461,22 @@ function toStremioStream(candidate) {
 
   if (candidate.url) {
     stream.url = candidate.url;
-    stream.behaviorHints.notWebReady = candidate.kind === 'direct-hls';
+
+    const hasProxyHeaders =
+      Object.keys(
+        candidate.requestHeaders || {}
+      ).length > 0;
+
+    stream.behaviorHints.notWebReady =
+      candidate.kind === 'direct-hls' ||
+      hasProxyHeaders;
+
+    if (hasProxyHeaders) {
+      stream.behaviorHints.proxyHeaders = {
+        request: candidate.requestHeaders,
+      };
+    }
+
     return stream;
   }
 
@@ -412,6 +500,7 @@ module.exports = {
   indexerReliability,
   normalizeCandidate,
   normalizeInfoHash,
+  normalizeProxyRequestHeaders,
   normalizeResolution,
   parseMagnet,
   resolutionHeight,
