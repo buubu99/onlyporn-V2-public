@@ -10,9 +10,6 @@ const {
 const { readTpb4kConfig, publicConfigStatus, redactSecrets } = require('./tpb4k/config');
 const { fillCatalogWithMetadata } = require('./tpb4k/catalog-metadata-fill');
 const { createCatalogResponseStore } = require('./tpb4k/catalog-response-store');
-const {
-  getSharedPlaybackBindingStore,
-} = require('./tpb4k/playback-binding-store');
 const { decodeTpb4kId, encodeTpb4kId } = require('./tpb4k/id-codec');
 const { buildSceneIdentity } = require('./tpb4k/identity');
 const { getAdapter, installBuiltInAdapters } = require('./tpb4k/index');
@@ -44,10 +41,6 @@ const HENTAI_PREFIX = 'ophmm-';
 const HENTAI_TOP_PREFIX = 'ophtop-';
 const TORRENT_FIRST_STUDIOS = new Set(['onlyfans', 'digitalplayground', 'xvideosred', 'sexmex']);
 const PLAYABILITY_GATED_CATALOGS = new Set(['tpb4k.pornrips.recent', 'tpb4k.tpdb.recent']);
-const PERSISTENT_PLAYBACK_CATALOGS = new Set([
-  'tpb4k.tpdb.recent',
-  'tpb4k.studio.xvideosred.top',
-]);
 const CATALOG_CACHE_TTL_MS = 15 * 60 * 1000;
 const CATALOG_STALE_TTL_MS = 24 * 60 * 60 * 1000;
 let loggerInstance;
@@ -257,8 +250,6 @@ class Tpb4kProvider {
     this.catalogResponseCache = new Map();
     this.catalogInFlight = new Map();
     this.catalogResponseStore = options.catalogResponseStore || createCatalogResponseStore({ env: this.env });
-    this.playbackBindingStore = options.playbackBindingStore
-      || getSharedPlaybackBindingStore({ env: this.env });
     if (options.installBuiltIns !== false) installBuiltInAdapters({ env: this.env, fetchImpl: this.fetchImpl });
   }
   static create(options) { return new Tpb4kProvider(options); }
@@ -674,8 +665,6 @@ class Tpb4kProvider {
     const sukebeiNeedsFileSelection = decoded.source === 'sukebei'
       && Array.isArray(decoded.torrents)
       && decoded.torrents.some(torrent => !Number.isInteger(torrent?.fileIdx));
-    const persistentPlayback = PERSISTENT_PLAYBACK_CATALOGS.has(decoded.catalogId)
-      && (!Array.isArray(decoded.torrents) || decoded.torrents.length === 0);
     let rawCandidates = Array.isArray(decoded.torrents) && !sukebeiNeedsFileSelection
       ? decoded.torrents.map(torrent => ({
         ...torrent,
@@ -684,28 +673,12 @@ class Tpb4kProvider {
         provenance: ['catalog-bound-torrent', 'multi-candidate-bundle'],
       }))
       : [];
-
-    if (!rawCandidates.length && persistentPlayback) {
-      rawCandidates = this.playbackBindingStore.get(decoded).map(torrent => ({
-        ...torrent,
-        source: torrent.indexer || 'torrent-index',
-        sourceId: decoded.sourceId,
-        provenance: ['persistent-playback-binding'],
-      }));
-    }
-
     if (!rawCandidates.length) {
       try {
         rawCandidates = await resolverAdapter.resolve({
           sourceId: decoded.sourceId,
           catalogId: decoded.catalogId,
-          catalog: persistentPlayback
-            ? {
-              ...definition,
-              targetedPlaybackSearch: true,
-              fastPlaybackSearch: true,
-            }
-            : definition,
+          catalog: definition,
           item: rawItem,
           config,
         });
@@ -748,9 +721,6 @@ class Tpb4kProvider {
         }
         return true;
       });
-    if (persistentPlayback && normalized.length) {
-      this.playbackBindingStore.set(decoded, normalized);
-    }
     const episode = decoded.source === 'hentai' ? Number(String(decoded.sourceId).match(/:1:(\d+)$/)?.[1] || 1) : 0;
     const streams = sortCandidates(dedupeCandidates(normalized)).map(candidate => {
       const stream = toStremioStream(candidate);

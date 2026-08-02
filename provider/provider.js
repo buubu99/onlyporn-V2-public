@@ -5,10 +5,6 @@ const m3u8 = require('m3u8-parser');
 const { extractResolution, isLikelyFullVideoMp4 } = require('./media-utils');
 const BoundedTtlCache = require('./cache');
 const {
-  getSharedLegacyCatalogStore,
-  legacyCatalogKey,
-} = require('./catalog-last-known-good');
-const {
   assertSafeHttpsUrl,
   decodeResourceId,
   encodeResourceId,
@@ -52,15 +48,6 @@ class Provider {
       ttlMs: options.jsonCacheTtlMs || 5_000,
     });
     this.pendingRequests = new Map();
-    this.catalogResponseCache = new Map();
-    this.catalogInFlight = new Map();
-    this.catalogResponseStore = options.catalogResponseStore
-      || getSharedLegacyCatalogStore({ env: options.env || process.env });
-    this.catalogCacheTtlMs = Math.max(
-      Number(options.catalogCacheTtlMs || 15 * 60 * 1000),
-      1_000
-    );
-    this.now = typeof options.now === 'function' ? options.now : Date.now;
   }
 
   getName() {
@@ -393,153 +380,38 @@ class Provider {
     return `${event}-${this.getName()}`;
   }
 
-  getCatalogFallbackUrls() {
-    return [];
-  }
+  async handleCatalog(args) {
+    if (args.type !== Provider.TYPE || !this.activate(args.id)) return { metas: [] };
 
-  isRegressedCatalogRefresh(args = {}, cachedValue, freshValue) {
-    const extra = args.extra || {};
-    const rootRequest = !extra.search
-      && !extra.genre
-      && Math.max(Number.parseInt(String(extra.skip || 0), 10) || 0, 0) === 0;
-    const cachedCount = Array.isArray(cachedValue?.metas)
-      ? cachedValue.metas.length
-      : 0;
-    const freshCount = Array.isArray(freshValue?.metas)
-      ? freshValue.metas.length
-      : 0;
-
-    return rootRequest
-      && cachedCount >= 6
-      && freshCount < Math.max(2, Math.floor(cachedCount * 0.35));
-  }
-
-  async _handleCatalogFresh(args) {
     logger.info({ provider: this.name, catalogId: args.id }, 'handleCatalog');
 
-    let url = this.getInitialUrl(args.id);
-    const extra = args.extra || {};
-    if (extra.search) url = this.handleSearch(args);
-    if (extra.genre) url = this.handleGenre(args);
+    try {
+      let url = this.getInitialUrl(args.id);
+      const extra = args.extra || {};
 
-    if (Number(extra.skip || 0) > 0) {
-      const paginated = this.handlePagination(url, args);
-      url = paginated.startsWith('http') ? paginated : url + paginated;
-    }
+      if (extra.search) url = this.handleSearch(args);
+      if (extra.genre) url = this.handleGenre(args);
 
-    const fallbacks = this.getCatalogFallbackUrls(url, args);
-    const urls = [...new Set([
-      url,
-      ...(Array.isArray(fallbacks) ? fallbacks : []),
-    ].filter(Boolean))];
-    let lastError;
-
-    for (const candidateUrl of urls) {
-      try {
-        const html = await this.fetchHtml(candidateUrl);
-        const parsed = this.getCatalogMetas.length >= 2
-          ? this.getCatalogMetas(html, candidateUrl)
-          : this.getCatalogMetas(html);
-        const metas = (Array.isArray(parsed) ? parsed : []).map(item => ({
-          ...item,
-          id: this.toStremioId(item.id),
-        }));
-        logger.debug({
-          provider: this.name,
-          metasSize: metas.length,
-          fallbackRoute: candidateUrl !== url,
-        }, 'catalog');
-        return { metas };
-      } catch (error) {
-        lastError = error;
-        if (candidateUrl !== urls[urls.length - 1]) {
-          logger.warn({
-            provider: this.name,
-            error: error.message,
-          }, 'Catalog route failed; trying approved fallback');
-        }
+      if (Number(extra.skip || 0) > 0) {
+        const paginated = this.handlePagination(url, args);
+        url = paginated.startsWith('http') ? paginated : url + paginated;
       }
-    }
 
-    throw lastError || new Error('Catalog request failed');
-  }
+      const html = await this.fetchHtml(url);
+      const parsed = this.getCatalogMetas.length >= 2
+        ? this.getCatalogMetas(html, url)
+        : this.getCatalogMetas(html);
+      const metas = (Array.isArray(parsed) ? parsed : []).map(item => ({
+        ...item,
+        id: this.toStremioId(item.id),
+      }));
 
-  async handleCatalog(args) {
-    if (args.type !== Provider.TYPE || !this.activate(args.id)) {
+      logger.debug({ provider: this.name, metasSize: metas.length }, 'catalog');
+      return { metas };
+    } catch (error) {
+      logger.warn({ provider: this.name, error: error.message }, 'Catalog request failed');
       return { metas: [] };
     }
-
-    const cacheKey = legacyCatalogKey(this.name, args);
-    let cached = this.catalogResponseCache.get(cacheKey);
-
-    if (!cached) {
-      const persisted = this.catalogResponseStore.get(cacheKey);
-      if (persisted?.value?.metas?.length) {
-        cached = Object.freeze({
-          savedAt: persisted.savedAt,
-          value: persisted.value,
-        });
-        this.catalogResponseCache.set(cacheKey, cached);
-      }
-    }
-
-    const age = cached ? this.now() - cached.savedAt : Infinity;
-    if (cached && age < this.catalogCacheTtlMs) return cached.value;
-
-    if (this.catalogInFlight.has(cacheKey)) {
-      return cached?.value?.metas?.length
-        ? cached.value
-        : this.catalogInFlight.get(cacheKey);
-    }
-
-    const operation = this._handleCatalogFresh(args)
-      .then(value => {
-        if (!Array.isArray(value?.metas) || !value.metas.length) {
-          return cached?.value?.metas?.length ? cached.value : { metas: [] };
-        }
-
-        if (
-          cached?.value?.metas?.length
-          && this.isRegressedCatalogRefresh(args, cached.value, value)
-        ) {
-          logger.warn({
-            provider: this.name,
-            catalogId: args.id,
-            cachedMetas: cached.value.metas.length,
-            freshMetas: value.metas.length,
-          }, 'Catalog refresh regressed; preserving last-known-good');
-          return cached.value;
-        }
-
-        const record = Object.freeze({
-          savedAt: this.now(),
-          value: Object.freeze({
-            metas: Object.freeze([...value.metas]),
-          }),
-        });
-        this.catalogResponseCache.set(cacheKey, record);
-        this.catalogResponseStore.set(cacheKey, record.value);
-        return record.value;
-      })
-      .catch(error => {
-        logger.warn({
-          provider: this.name,
-          error: error.message,
-        }, 'Catalog request failed; preserving last-known-good');
-        return cached?.value?.metas?.length ? cached.value : { metas: [] };
-      })
-      .finally(() => {
-        this.catalogInFlight.delete(cacheKey);
-      });
-
-    this.catalogInFlight.set(cacheKey, operation);
-
-    if (cached?.value?.metas?.length) {
-      void operation;
-      return cached.value;
-    }
-
-    return operation;
   }
 
   async handleMeta(args) {
