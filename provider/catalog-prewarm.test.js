@@ -92,11 +92,11 @@ test('catalog prewarm retries only missing rows and verifies the complete state'
   assert.equal(calls.get('catalog.c'), 4);
 });
 
-test('scheduler defaults are enabled, bounded, and run every six hours', () => {
+test('scheduler defaults are enabled, bounded, and run every 23 hours', () => {
   const config = readSchedulerConfig({});
   assert.equal(config.enabled, true);
   assert.equal(config.concurrency, 3);
-  assert.equal(config.intervalMs, 6 * 60 * 60 * 1000);
+  assert.equal(config.intervalMs, 23 * 60 * 60 * 1000);
   assert.equal(config.expectedActiveCatalogs, 35);
   assert.equal(config.maxPasses, 6);
 });

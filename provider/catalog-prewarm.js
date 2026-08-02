@@ -11,7 +11,7 @@ const DEFERRED_CATALOG_IDS = new Set([
 const DEFAULTS = Object.freeze({
   enabled: true,
   startDelayMs: 90_000,
-  intervalMs: 6 * 60 * 60 * 1000,
+  intervalMs: 23 * 60 * 60 * 1000,
   concurrency: 3,
   maxPasses: 6,
   retryDelayMs: 20_000,
