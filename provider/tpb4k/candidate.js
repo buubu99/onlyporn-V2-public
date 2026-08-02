@@ -1,6 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const mediaRelay = require('../../media-relay');
 
 const RESOLUTION_HEIGHTS = Object.freeze({
   '8k': 4320,
@@ -121,15 +122,65 @@ function normalizeHttpsUrl(value) {
   }
 }
 
-function classifyDirectUrl(value) {
+function classifyDirectUrl(value, mediaKind = '') {
   const url = normalizeHttpsUrl(value);
   if (!url) return { url: '', kind: '' };
+
   const parsed = new URL(url);
   const pathname = parsed.pathname.toLowerCase();
+  const hint = cleanText(mediaKind).toLowerCase();
 
-  if (/\.m3u8$/.test(pathname)) return { url, kind: 'direct-hls' };
-  if (/\.(?:mp4|m4v|webm|mkv)$/.test(pathname)) return { url, kind: 'direct-file' };
+  if (
+    /\.m3u8\/?$/.test(pathname) ||
+    ['hls', 'direct-hls'].includes(hint)
+  ) {
+    return { url, kind: 'direct-hls' };
+  }
+
+  if (
+    /\.(?:mp4|m4v|webm|mkv)\/?$/.test(pathname) ||
+    ['mp4', 'file', 'direct-file'].includes(hint)
+  ) {
+    return { url, kind: 'direct-file' };
+  }
+
   return { url, kind: '' };
+}
+
+function safeHeaderValue(value, maximum = 2_048) {
+  return String(value || '')
+    .replace(/[\r\n]+/g, ' ')
+    .trim()
+    .slice(0, maximum);
+}
+
+function normalizeRelayHeaders(value = {}) {
+  const input =
+    value && typeof value === 'object'
+      ? value
+      : {};
+
+  const output = {};
+
+  for (
+    const [canonical, aliases] of [
+      ['User-Agent', ['User-Agent', 'user-agent']],
+      ['Referer', ['Referer', 'referer']],
+      ['Origin', ['Origin', 'origin']],
+      ['Cookie', ['Cookie', 'cookie']],
+      ['Accept', ['Accept', 'accept']],
+      ['Accept-Language', ['Accept-Language', 'accept-language']],
+    ]
+  ) {
+    const raw = aliases
+      .map(alias => input[alias])
+      .find(item => item != null);
+
+    const sanitized = safeHeaderValue(raw);
+    if (sanitized) output[canonical] = sanitized;
+  }
+
+  return Object.freeze(output);
 }
 
 function resolutionHeight(...values) {
@@ -208,7 +259,13 @@ function candidateFingerprint(candidate) {
 function normalizeCandidate(input = {}) {
   const magnet = parseMagnet(input.magnet || input.magnetUrl || input.uri);
   const infoHash = normalizeInfoHash(input.infoHash || input.hash || magnet?.infoHash);
-  const direct = classifyDirectUrl(input.url || input.streamUrl || input.mediaUrl);
+  const direct = classifyDirectUrl(
+    input.url ||
+    input.streamUrl ||
+    input.mediaUrl,
+    input.mediaKind ||
+    input.directKind
+  );
   const debridUrl = normalizeHttpsUrl(input.debridUrl || input.unrestrictedUrl);
   const state = cacheState(input.cached ?? input.cacheStatus);
   const validated = input.validated === true;
@@ -263,6 +320,13 @@ function normalizeCandidate(input = {}) {
     infoHash,
     fileIdx: Number.isInteger(input.fileIdx) && input.fileIdx >= 0 ? input.fileIdx : null,
     trackers,
+    requestHeaders:
+      normalizeRelayHeaders(
+        input.requestHeaders
+      ),
+    relayProvider:
+      cleanText(input.relayProvider)
+        .toLowerCase(),
     url: playableUrl,
     detailUrl: normalizeHttpsUrl(input.detailUrl || (direct.kind ? '' : input.url)),
     cached: state,
@@ -387,8 +451,32 @@ function toStremioStream(candidate) {
   };
 
   if (candidate.url) {
+    if (candidate.relayProvider) {
+      try {
+        stream.url = mediaRelay.register({
+          url: candidate.url,
+          headers: candidate.requestHeaders,
+          provider: candidate.relayProvider,
+          kind:
+            candidate.kind === 'direct-hls'
+              ? 'hls'
+              : 'mp4',
+          ttlMs: 30 * 60 * 1000,
+        });
+      } catch {
+        return null;
+      }
+
+      stream.behaviorHints.notWebReady =
+        candidate.kind === 'direct-hls';
+
+      return stream;
+    }
+
     stream.url = candidate.url;
-    stream.behaviorHints.notWebReady = candidate.kind === 'direct-hls';
+    stream.behaviorHints.notWebReady =
+      candidate.kind === 'direct-hls';
+
     return stream;
   }
 

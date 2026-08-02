@@ -1,4 +1,5 @@
 const crypto = require('node:crypto');
+const { Readable } = require('node:stream');
 const axios = require('axios');
 const BoundedTtlCache = require('./provider/cache');
 const logger = require('./logger');
@@ -19,6 +20,7 @@ const PROVIDER_SUFFIXES = {
   xvideos: ['xvideos.com', 'xvideos-cdn.com'],
   xnxx: ['xnxx.com', 'xnxx-cdn.com'],
   pornhub: ['phncdn.com'],
+  yesporn: ['yesporn.vip'],
   javhdporn: [
     'javhdporn.net',
     'pornfhd.com',
@@ -398,6 +400,186 @@ function normalizeJavTransportSegment(buffer) {
   return { payload, wrapperBytes: input.length - payload.length };
 }
 
+async function yespornFetchRequest(
+  entry,
+  {
+    method = 'GET',
+    range,
+  } = {}
+) {
+  let currentUrl = entry.url;
+
+  for (
+    let redirects = 0;
+    redirects <= MAX_REDIRECTS;
+    redirects += 1
+  ) {
+    currentUrl = validateTargetUrl(
+      currentUrl,
+      entry.provider
+    );
+
+    const controller = new AbortController();
+    const timer = setTimeout(
+      () => controller.abort(),
+      30_000
+    );
+
+    let response;
+
+    try {
+      const headers = {
+        ...entry.headers,
+        Accept:
+          entry.headers.Accept ||
+          'video/mp4,video/*;q=0.9,application/octet-stream;q=0.8,*/*;q=0.2',
+      };
+
+      if (range) headers.Range = range;
+
+      response = await fetch(currentUrl, {
+        method,
+        headers,
+        redirect: 'manual',
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (
+      [301, 302, 303, 307, 308].includes(
+        response.status
+      )
+    ) {
+      if (redirects >= MAX_REDIRECTS) {
+        try {
+          await response.body?.cancel?.();
+        } catch {
+          // Best effort.
+        }
+
+        throw new Error(
+          'Media relay exceeded redirect limit'
+        );
+      }
+
+      const location =
+        response.headers.get('location');
+
+      try {
+        await response.body?.cancel?.();
+      } catch {
+        // Best effort.
+      }
+
+      if (!location) {
+        throw new Error(
+          'Media redirect did not include a Location header'
+        );
+      }
+
+      currentUrl = new URL(
+        location,
+        currentUrl
+      ).toString();
+
+      continue;
+    }
+
+    return {
+      response,
+      finalUrl: currentUrl,
+    };
+  }
+
+  throw new Error(
+    'YesPorn media relay request failed'
+  );
+}
+
+async function pipeYespornResponse(
+  entry,
+  req,
+  res
+) {
+  const {
+    response,
+  } = await yespornFetchRequest(entry, {
+    method:
+      req.method === 'HEAD'
+        ? 'HEAD'
+        : 'GET',
+    range: req.headers.range,
+  });
+
+  res.status(response.status);
+
+  for (
+    const name of [
+      'content-type',
+      'content-length',
+      'content-range',
+      'accept-ranges',
+      'last-modified',
+    ]
+  ) {
+    const value = response.headers.get(name);
+    if (value != null) {
+      res.setHeader(name, value);
+    }
+  }
+
+  res.setHeader(
+    'Cache-Control',
+    'no-store, max-age=0'
+  );
+
+  if (req.method === 'HEAD') {
+    try {
+      await response.body?.cancel?.();
+    } catch {
+      // Best effort.
+    }
+
+    res.end();
+    return;
+  }
+
+  if (!response.body) {
+    res.end();
+    return;
+  }
+
+  const stream = Readable.fromWeb(
+    response.body
+  );
+
+  stream.on('error', error => {
+    logger.warn(
+      {
+        provider: entry.provider,
+        error: error.message,
+      },
+      'YesPorn media relay upstream stream failed'
+    );
+
+    if (!res.headersSent) {
+      res.status(502).end();
+    } else {
+      res.destroy(error);
+    }
+  });
+
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      stream.destroy();
+    }
+  });
+
+  stream.pipe(res);
+}
+
 async function upstreamRequest(entry, { method = 'GET', range, text = false, buffer = false } = {}) {
   let currentUrl = entry.url;
 
@@ -461,6 +643,18 @@ async function handleRequest(req, res) {
   }
 
   try {
+    if (
+      entry.provider === 'yesporn' &&
+      entry.kind === 'mp4'
+    ) {
+      await pipeYespornResponse(
+        entry,
+        req,
+        res
+      );
+      return;
+    }
+
     if (entry.kind === 'hls') {
       const { response, finalUrl } = await upstreamRequest(entry, {
         method: 'GET',

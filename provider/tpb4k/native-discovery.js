@@ -34,6 +34,14 @@ const NATIVE_MAX_CATALOG_PAGES_PER_REQUEST = 12;
 const NATIVE_MAX_TORRENT_BYTES = 2_000_000;
 const NATIVE_MAX_AJAX_BYTES = 1_000_000;
 const HENTAI_MEDIA_HOST = /^(?:gdvid\.info|(?:[a-z0-9-]+\.)*javprovider\.com)$/i;
+const YESPORN_BROWSER_USER_AGENT =
+  'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 Chrome/131 Safari/537.36';
+const YESPORN_MEDIA_FIELD_RE =
+  /\b(video(?:_alt)?_url\d*)\b\s*:\s*(["'])([\s\S]*?)\2/gi;
+const YESPORN_MEDIA_LABEL_RE =
+  /\b(video(?:_alt)?_url\d*)_text\b\s*:\s*(["'])([\s\S]*?)\2/gi;
+const YESPORN_LICENSE_CODE_RE =
+  /\blicense_code\b\s*:\s*(["'])([\s\S]*?)\1/i;
 
 function createNativeClient(id, config, options = {}) {
   const source = SOURCES[id];
@@ -271,6 +279,599 @@ function decodeTorrent(buffer) {
     size,
     files: Object.freeze(files),
   };
+}
+
+function decodeYespornValue(value) {
+  return String(value || '')
+    .replace(/\\u([0-9a-f]{4})/gi, (_, hex) =>
+      String.fromCharCode(Number.parseInt(hex, 16))
+    )
+    .replace(/\\x([0-9a-f]{2})/gi, (_, hex) =>
+      String.fromCharCode(Number.parseInt(hex, 16))
+    )
+    .replace(/\\\//g, '/')
+    .replace(/\\"/g, '"')
+    .replace(/\\'/g, "'")
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#0*39;|&apos;/gi, "'")
+    .trim();
+}
+
+function yespornQualityRank(value) {
+  const text = cleanText(value).toLowerCase();
+  if (/\b(?:4320p|8k)\b/.test(text)) return 4320;
+  if (/\b(?:2160p|4k)\b/.test(text)) return 2160;
+
+  return Number(
+    text.match(
+      /\b(1440|1080|720|576|480|360|240|144)p?\b/
+    )?.[1] || 0
+  );
+}
+
+function yespornKvsSeed(
+  licenseCode,
+  hashRange = 16
+) {
+  const licenseDigits = [
+    ...decodeYespornValue(licenseCode),
+  ];
+
+  const normalized = licenseDigits
+    .filter(character =>
+      character !== '$'
+    )
+    .map(character =>
+      character === '0'
+        ? '1'
+        : character
+    )
+    .join('');
+
+  if (
+    !/^\d+$/.test(normalized) ||
+    normalized.length < 8
+  ) {
+    return '';
+  }
+
+  const midpoint = Math.floor(
+    normalized.length / 2
+  );
+
+  let left;
+  let right;
+
+  try {
+    left = BigInt(
+      normalized.slice(
+        0,
+        midpoint + 1
+      )
+    );
+    right = BigInt(
+      normalized.slice(midpoint)
+    );
+  } catch {
+    return '';
+  }
+
+  const absoluteDifference =
+    left >= right
+      ? left - right
+      : right - left;
+
+  // KVS reference behavior:
+  // (abs(right-left) + abs(left-right)) * 2.
+  const differenceDigits = String(
+    absoluteDifference * 4n
+  );
+
+  const modulus =
+    Math.floor(hashRange / 2) + 2;
+
+  const seed = [];
+
+  for (
+    let index = 0;
+    index <= midpoint;
+    index += 1
+  ) {
+    if (
+      index >=
+      differenceDigits.length
+    ) {
+      return '';
+    }
+
+    for (
+      let offset = 1;
+      offset <= 4;
+      offset += 1
+    ) {
+      const sourceIndex =
+        index + offset;
+
+      const digit =
+        Number.parseInt(
+          licenseDigits[sourceIndex],
+          10
+        );
+
+      const differenceDigit =
+        Number.parseInt(
+          differenceDigits[index],
+          10
+        );
+
+      if (
+        !Number.isInteger(digit) ||
+        !Number.isInteger(
+          differenceDigit
+        )
+      ) {
+        return '';
+      }
+
+      let value =
+        digit + differenceDigit;
+
+      if (value >= modulus) {
+        value -= modulus;
+      }
+
+      seed.push(String(value));
+    }
+  }
+
+  return seed.join('');
+}
+
+function yespornKvsDecryptUrl(
+  rawValue,
+  licenseCode,
+  hashRange = 16
+) {
+  const decoded =
+    decodeYespornValue(rawValue);
+
+  if (
+    !/^function\/0\/https?:\/\//i.test(
+      decoded
+    )
+  ) {
+    return decoded;
+  }
+
+  const parts = decoded.split('/');
+
+  if (
+    parts.length < 11 ||
+    parts[0] !== 'function' ||
+    parts[1] !== '0' ||
+    !/^https?:$/i.test(parts[2]) ||
+    parts[5] !== 'get_file'
+  ) {
+    return '';
+  }
+
+  const encryptedHash = parts[7];
+  const encryptedLength =
+    hashRange * 2;
+
+  if (
+    !/^[a-f0-9]+$/i.test(
+      encryptedHash
+    ) ||
+    encryptedHash.length <
+      encryptedLength
+  ) {
+    return '';
+  }
+
+  let converted =
+    encryptedHash.slice(
+      0,
+      encryptedLength
+    );
+
+  const untouched =
+    encryptedHash.slice(
+      encryptedLength
+    );
+
+  const seed =
+    yespornKvsSeed(
+      licenseCode,
+      hashRange
+    );
+
+  if (
+    !seed ||
+    seed.length < converted.length
+  ) {
+    return '';
+  }
+
+  const seedDigits =
+    [...seed].map(character =>
+      Number.parseInt(character, 10)
+    );
+
+  for (
+    let index =
+      converted.length - 1;
+    index >= 0;
+    index -= 1
+  ) {
+    const characters =
+      [...converted];
+
+    let swapIndex = index;
+
+    for (
+      let seedIndex = index;
+      seedIndex <
+        seedDigits.length;
+      seedIndex += 1
+    ) {
+      swapIndex +=
+        seedDigits[seedIndex];
+    }
+
+    while (
+      swapIndex >=
+      characters.length
+    ) {
+      swapIndex -=
+        characters.length;
+    }
+
+    [
+      characters[index],
+      characters[swapIndex],
+    ] = [
+      characters[swapIndex],
+      characters[index],
+    ];
+
+    converted =
+      characters.join('');
+  }
+
+  parts[7] =
+    converted + untouched;
+
+  return parts
+    .slice(2)
+    .join('/');
+}
+
+function yespornMediaUrl(
+  pageUrl,
+  rawValue,
+  licenseCode
+) {
+  const decrypted =
+    yespornKvsDecryptUrl(
+      rawValue,
+      licenseCode
+    );
+
+  const absolute =
+    absoluteHttps(
+      pageUrl,
+      decrypted
+    );
+
+  if (!absolute) return '';
+
+  try {
+    const parsed =
+      new URL(absolute);
+
+    const hostname =
+      parsed.hostname
+        .toLowerCase()
+        .replace(/\.$/, '');
+
+    if (
+      hostname !== 'yesporn.vip' &&
+      !hostname.endsWith(
+        '.yesporn.vip'
+      )
+    ) {
+      return '';
+    }
+
+    if (
+      !/^\/get_file\/[1-9]\d*\/[a-f0-9]{20,}\/\d+\/\d+\/[^/?#]+\.mp4\/?$/i.test(
+        parsed.pathname
+      )
+    ) {
+      return '';
+    }
+
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
+function yespornFlashvarStreams(
+  html,
+  pageUrl
+) {
+  const body = String(html || '');
+  const labels = new Map();
+  const output = [];
+  const seen = new Set();
+
+  const licenseCode = cleanText(
+    decodeYespornValue(
+      body.match(
+        YESPORN_LICENSE_CODE_RE
+      )?.[2]
+    )
+  );
+
+  for (
+    const match of body.matchAll(
+      YESPORN_MEDIA_LABEL_RE
+    )
+  ) {
+    const label = cleanText(
+      decodeYespornValue(
+        match[3]
+      )
+    );
+
+    if (label) {
+      labels.set(
+        match[1].toLowerCase(),
+        label
+      );
+    }
+  }
+
+  for (
+    const match of body.matchAll(
+      YESPORN_MEDIA_FIELD_RE
+    )
+  ) {
+    const key =
+      match[1].toLowerCase();
+
+    const rawValue =
+      decodeYespornValue(
+        match[3]
+      );
+
+    if (
+      /^function\/0\//i.test(
+        rawValue
+      ) &&
+      !licenseCode
+    ) {
+      continue;
+    }
+
+    const url = yespornMediaUrl(
+      pageUrl,
+      rawValue,
+      licenseCode
+    );
+
+    if (
+      !url ||
+      seen.has(url)
+    ) {
+      continue;
+    }
+
+    seen.add(url);
+
+    const inferred =
+      url.match(
+        /(?:^|[^0-9])(4320|2160|1440|1080|720|576|480|360|240|144)p?(?:[^0-9]|$)/i
+      )?.[1];
+
+    output.push(
+      Object.freeze({
+        key,
+        label:
+          labels.get(key) ||
+          (
+            inferred
+              ? `${inferred}p`
+              : 'Direct'
+          ),
+        mediaKind: 'mp4',
+        url,
+      })
+    );
+  }
+
+  return Object.freeze(
+    output.sort(
+      (left, right) =>
+        yespornQualityRank(
+          right.label
+        ) -
+        yespornQualityRank(
+          left.label
+        )
+    )
+  );
+}
+
+function yespornCookieHeader(response) {
+  let values = [];
+
+  try {
+    if (
+      typeof response?.headers?.getSetCookie ===
+      'function'
+    ) {
+      values = response.headers.getSetCookie();
+    }
+  } catch {
+    values = [];
+  }
+
+  if (!values.length) {
+    const combined = responseHeader(
+      response,
+      'set-cookie'
+    );
+
+    if (combined) values = [combined];
+  }
+
+  return values
+    .map(value =>
+      String(value || '')
+        .split(';', 1)[0]
+        .trim()
+    )
+    .filter(value =>
+      /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+=[^;\r\n]*$/.test(
+        value
+      )
+    )
+    .join('; ');
+}
+
+async function resolveYesporn({
+  sourceId,
+  item,
+  options,
+}) {
+  const path = decodeStablePathId(
+    'yesporn',
+    sourceId
+  );
+
+  if (
+    !path ||
+    !/^\/video\/\d+\/[^/?#]+\/?$/i.test(path)
+  ) {
+    return [];
+  }
+
+  const detailUrl = absoluteHttps(
+    SOURCES.yesporn.origin,
+    path
+  );
+
+  if (!detailUrl) return [];
+
+  const request = await safeNativeRequest(detailUrl, {
+    fetchImpl: options.fetchImpl,
+    checkDns: options.checkDns,
+    timeoutMs: options.config.requestTimeoutMs,
+    origin: SOURCES.yesporn.origin,
+    allowedHosts: new Set(['yesporn.vip']),
+    headers: {
+      Accept:
+        'text/html,application/xhtml+xml;q=0.9,*/*;q=0.3',
+      'Accept-Language': 'en-US,en;q=0.8',
+      Referer: `${SOURCES.yesporn.origin}/`,
+      'User-Agent': YESPORN_BROWSER_USER_AGENT,
+    },
+  });
+
+  try {
+    const status = Number(
+      request.response?.status || 0
+    );
+
+    if (status < 200 || status >= 300) {
+      return [];
+    }
+
+    const contentType = responseHeader(
+      request.response,
+      'content-type'
+    ).split(';')[0].trim().toLowerCase();
+
+    if (
+      contentType &&
+      ![
+        'text/html',
+        'application/xhtml+xml',
+      ].includes(contentType)
+    ) {
+      return [];
+    }
+
+    const html = await readBoundedText(
+      request.response,
+      Math.max(
+        Number(
+          options.config
+            .discoveryMaxResponseBytes || 0
+        ),
+        NATIVE_MAX_AJAX_BYTES
+      )
+    );
+
+    if (
+      hasStrongChallengeMarker(html) &&
+      !/\bvideo(?:_alt)?_url\d*\b\s*:/i.test(html)
+    ) {
+      return [];
+    }
+
+    const streams = yespornFlashvarStreams(
+      html,
+      detailUrl
+    );
+
+    if (!streams.length) return [];
+
+    const cookie = yespornCookieHeader(
+      request.response
+    );
+
+    const requestHeaders = {
+      'User-Agent': YESPORN_BROWSER_USER_AGENT,
+      Referer: detailUrl,
+      Origin: SOURCES.yesporn.origin,
+      ...(cookie ? { Cookie: cookie } : {}),
+    };
+
+    return Object.freeze(
+      streams.map(stream =>
+        Object.freeze({
+          source: 'yesporn',
+          sourceId,
+          title:
+            item?.title ||
+            slugTitle(path) ||
+            'YesPorn',
+          filename:
+            `${item?.title || slugTitle(path) || 'YesPorn'}.mp4`,
+          resolution: stream.label,
+          quality: stream.label,
+          mediaKind: stream.mediaKind,
+          url: stream.url,
+          validated: true,
+          relayProvider: 'yesporn',
+          requestHeaders:
+            Object.freeze({ ...requestHeaders }),
+          provenance: Object.freeze([
+            'yesporn-authoritative-flashvars',
+            'yesporn-kvs-license-decryption',
+            'onlyporn-server-media-relay',
+          ]),
+        })
+      )
+    );
+  } finally {
+    request.clearTimeout();
+  }
 }
 
 async function resolvePornrips({ client, sourceId, item, options }) {
@@ -803,6 +1404,12 @@ function createNativeAdapter(source, options = {}) {
       if (source === 'hentai') {
         return resolveHentai({ client, ...args, options });
       }
+      if (source === 'yesporn') {
+        return resolveYesporn({
+          ...args,
+          options,
+        });
+      }
       return [];
     },
   });
@@ -826,7 +1433,10 @@ module.exports = {
   parsePornripsCatalog,
   pornripsSceneKey,
   readBoundedBuffer,
+  resolveYesporn,
   safeNativeRequest,
   parseYespornCatalog,
   torrentUrlFromDetail,
+  yespornFlashvarStreams,
+  yespornKvsDecryptUrl,
 };
