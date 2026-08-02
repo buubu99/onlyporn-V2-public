@@ -732,11 +732,6 @@ function createTorrentIndexAdapter(options = {}) {
       const rightReadable = /[\s.]/.test(right) ? 1 : 0;
       return rightReadable - leftReadable;
     });
-    const genericTitleSearch = !studioKey
-      || catalog?.id === 'tpb4k.tpdb.recent';
-    const xvideosRedSearch = catalog?.id === 'tpb4k.studio.xvideosred.top';
-    const studioTitleQueries = readableAliases.slice(0, 2)
-      .map(alias => [alias, title].map(compactText).filter(Boolean).join(' '));
     const values = platform
       ? [
         identity.sceneCode,
@@ -746,13 +741,7 @@ function createTorrentIndexAdapter(options = {}) {
       ]
       : [
         identity.sceneCode,
-        ...(genericTitleSearch ? [
-          title,
-          [title, item.releaseDate].map(compactText).filter(Boolean).join(' '),
-        ] : []),
-        ...(xvideosRedSearch
-          ? [studioTitleQueries[0], title, ...studioTitleQueries.slice(1)]
-          : studioTitleQueries),
+        ...readableAliases.slice(0, 2).map(alias => [alias, title].map(compactText).filter(Boolean).join(' ')),
         compactText(item.lookupQuery),
       ];
     const output = [];
@@ -796,7 +785,7 @@ function createTorrentIndexAdapter(options = {}) {
     if (expectedTokens.length === 1) return expectedTokens[0].length >= 3 && overlap === 1 && (studioEvidence || targeted);
     return coverage >= 0.75 && (studioEvidence || targeted || coverage === 1);
   }
-  async function searchIndexers(query, catalogId, deadlineAt, options = {}) {
+  async function searchIndexers(query, catalogId, deadlineAt) {
     const key = crypto.createHash('sha256').update(query).digest('hex').slice(0, 16);
     const searches = [
       {
@@ -826,11 +815,8 @@ function createTorrentIndexAdapter(options = {}) {
         ),
       },
     ];
-    if (options.fast === true) searches.splice(1);
     const remainingMs = Math.max(deadlineAt - Date.now(), 0);
-    const sourceBudgetMs = options.fast === true
-      ? Math.min(8_500, Math.max(remainingMs - 250, 750))
-      : Math.min(2_800, Math.max(remainingMs - 250, 250));
+    const sourceBudgetMs = Math.min(2_800, Math.max(remainingMs - 250, 250));
     const settleWithin = promise => {
       let timer;
       return Promise.race([
@@ -893,14 +879,7 @@ function createTorrentIndexAdapter(options = {}) {
 
   async function resolveRecord(record, deadlineAt = Infinity) {
     if (!record || Date.now() >= deadlineAt) return null;
-    const directHash = normalizeInfoHash(record.infoHash);
-    let parsed = directHash
-      ? {
-        infoHash: directHash,
-        filename: record.title,
-        trackers: [],
-      }
-      : parseMagnet(record.magnetLink);
+    let parsed = parseMagnet(record.magnetLink);
     if (!parsed) {
       try {
         parsed = await fetchDetail(record, deadlineAt);
@@ -957,13 +936,10 @@ function createTorrentIndexAdapter(options = {}) {
 
   async function resolveScene({ sourceId, catalogId, catalog, item }) {
     const remembered = privateIndex.get(sourceId);
-    const fastPlaybackSearch = Boolean(catalog?.fastPlaybackSearch);
-    const deadlineAt = Date.now() + (fastPlaybackSearch
-      ? 9_000
-      : Math.min(
-        Math.max(Number(config.requestTimeoutMs || 15_000) + 5_000, 5_000),
-        25_000
-      ));
+    const deadlineAt = Date.now() + Math.min(
+      Math.max(Number(config.requestTimeoutMs || 15_000) + 5_000, 5_000),
+      25_000
+    );
     if (remembered) {
       const direct = await resolveRecord(remembered, deadlineAt);
       return direct ? [direct] : [];
@@ -971,28 +947,12 @@ function createTorrentIndexAdapter(options = {}) {
     if (!item?.title) return [];
 
     const queries = sceneQueries(item, catalog);
-    const queriesToRun = fastPlaybackSearch ? queries.slice(0, 2) : queries;
     const records = [];
     const searchDiagnostics = [];
     const seenRecords = new Set();
-    const searchResults = fastPlaybackSearch
-      ? await Promise.all(queriesToRun.map(async query => ({
-        query,
-        result: await searchIndexers(query, catalogId, deadlineAt, { fast: true }),
-      })))
-      : null;
-    const iterations = searchResults || [];
-    if (!fastPlaybackSearch) {
-      for (const query of queriesToRun) {
-        if (Date.now() >= deadlineAt) break;
-        iterations.push({
-          query,
-          result: await searchIndexers(query, catalogId, deadlineAt),
-        });
-        if (Date.now() >= deadlineAt) break;
-      }
-    }
-    for (const { query, result } of iterations) {
+    for (const query of queries) {
+      if (Date.now() >= deadlineAt) break;
+      const result = await searchIndexers(query, catalogId, deadlineAt);
       searchDiagnostics.push({ query, indexers: result.diagnostics });
       for (const record of result.records) {
         if (!recordMatchesScene(record, item, catalog)) continue;
@@ -1020,7 +980,6 @@ function createTorrentIndexAdapter(options = {}) {
         sourceId,
         catalogId,
         queries: Object.freeze(queries),
-        queriesRun: Object.freeze(queriesToRun),
         searches: Object.freeze(searchDiagnostics),
         matchedRecords: records.length,
         detailRecords: selected.length,
@@ -1056,9 +1015,6 @@ function createTorrentIndexAdapter(options = {}) {
     },
     async resolve(args = {}) {
       return resolveScene(args);
-    },
-    debugSceneQueries(item = {}, catalog = {}) {
-      return sceneQueries(item, catalog);
     },
     async enrichMetadata(items = [], behavior = {}) {
       return posterEnricher.enrichItems(items, behavior);
