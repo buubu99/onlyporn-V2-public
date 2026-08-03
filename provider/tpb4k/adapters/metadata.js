@@ -95,7 +95,9 @@ function createMetadataAdapters(options = {}) {
     const client = clients[parsed.provider];
     if (!client?.configured) return null;
     try {
-      return normalizeScene(parsed.provider, await client.findScene(parsed.upstreamId));
+      const rawScene = await client.findScene(parsed.upstreamId);
+      const normalized = normalizeScene(parsed.provider, rawScene);
+      return normalized ? Object.freeze({ ...normalized, _rawScene: rawScene }) : null;
     } catch {
       return null;
     }

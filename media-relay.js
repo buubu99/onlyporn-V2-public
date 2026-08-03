@@ -21,6 +21,7 @@ const PROVIDER_SUFFIXES = {
   xnxx: ['xnxx.com', 'xnxx-cdn.com'],
   pornhub: ['phncdn.com'],
   yesporn: ['yesporn.vip'],
+  manyvids: ['manyvids.com'],
   javhdporn: [
     'javhdporn.net',
     'pornfhd.com',

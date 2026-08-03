@@ -9,6 +9,7 @@ const {
 } = require('./tpb4k/candidate');
 const { readTpb4kConfig, publicConfigStatus, redactSecrets } = require('./tpb4k/config');
 const { fillCatalogWithMetadata } = require('./tpb4k/catalog-metadata-fill');
+const { resolveAuthoritativeManyVids } = require('./tpb4k/manyvids-authoritative');
 const { createCatalogResponseStore } = require('./tpb4k/catalog-response-store');
 const { decodeTpb4kId, encodeTpb4kId } = require('./tpb4k/id-codec');
 const { buildSceneIdentity } = require('./tpb4k/identity');
@@ -41,6 +42,10 @@ const HENTAI_PREFIX = 'ophmm-';
 const HENTAI_TOP_PREFIX = 'ophtop-';
 const TORRENT_FIRST_STUDIOS = new Set(['onlyfans', 'digitalplayground', 'xvideosred', 'sexmex']);
 const PLAYABILITY_GATED_CATALOGS = new Set(['tpb4k.pornrips.recent', 'tpb4k.tpdb.recent']);
+const AUTHORITATIVE_MANYVIDS_CATALOGS = new Set([
+  'tpb4k.tpdb.recent',
+  'tpb4k.studio.xvideosred.top',
+]);
 const CATALOG_CACHE_TTL_MS = 15 * 60 * 1000;
 const CATALOG_STALE_TTL_MS = 24 * 60 * 60 * 1000;
 let loggerInstance;
@@ -665,7 +670,25 @@ class Tpb4kProvider {
     const sukebeiNeedsFileSelection = decoded.source === 'sukebei'
       && Array.isArray(decoded.torrents)
       && decoded.torrents.some(torrent => !Number.isInteger(torrent?.fileIdx));
-    let rawCandidates = Array.isArray(decoded.torrents) && !sukebeiNeedsFileSelection
+    let authoritativeManyvidsCandidates = [];
+    if (AUTHORITATIVE_MANYVIDS_CATALOGS.has(decoded.catalogId) && rawItem) {
+      try {
+        authoritativeManyvidsCandidates = await resolveAuthoritativeManyVids({
+          item: rawItem,
+          fetchImpl: this.fetchImpl,
+          timeoutMs: config.requestTimeoutMs,
+        });
+      } catch (error) {
+        logger().warn({
+          provider: this.name,
+          catalogId: decoded.catalogId,
+          source: decoded.source,
+          sourceId: decoded.sourceId,
+          error: redactSecrets(error?.message || error, this.env),
+        }, 'OnlyPorn authoritative ManyVids resolution failed safely');
+      }
+    }
+    const bundledCandidates = Array.isArray(decoded.torrents) && !sukebeiNeedsFileSelection
       ? decoded.torrents.map(torrent => ({
         ...torrent,
         source: torrent.indexer || 'torrent-index',
@@ -673,6 +696,10 @@ class Tpb4kProvider {
         provenance: ['catalog-bound-torrent', 'multi-candidate-bundle'],
       }))
       : [];
+    let rawCandidates = [
+      ...authoritativeManyvidsCandidates,
+      ...bundledCandidates,
+    ];
     if (!rawCandidates.length) {
       try {
         rawCandidates = await resolverAdapter.resolve({
@@ -744,6 +771,7 @@ class Tpb4kProvider {
       resolver: resolverAdapter.id,
       sourceId: decoded.sourceId,
       bundledCandidates: Array.isArray(decoded.torrents) ? decoded.torrents.length : 0,
+      authoritativeManyvidsCandidates: authoritativeManyvidsCandidates.length,
       candidates: normalized.length,
       streams: streams.length,
     }, 'OnlyPorn stream candidates normalized');
