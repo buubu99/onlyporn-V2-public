@@ -26,6 +26,19 @@ const pathMappings = {
   upcoming: '/upcoming/',
 };
 
+
+const DEFAULT_CATALOG_FALLBACK_GENRES = Object.freeze(['New', 'Popular', 'Upcoming']);
+const PROVEN_SAFARI_HEADERS = Object.freeze({
+  Accept:
+    'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+  'Cache-Control': 'no-cache',
+  Pragma: 'no-cache',
+  Referer: 'https://spankbang.com/',
+  Cookie: 'sb=1; age_verified=1; hasVisited=1;',
+  'Upgrade-Insecure-Requests': '1',
+});
+
 function markFourKUrl(url) {
   const parsed = new URL(url);
   parsed.searchParams.set(FOUR_K_MARKER, '1');
@@ -84,6 +97,8 @@ class SpankbangProvider extends Provider {
       const response = await safariImpersonation.fetchText(safeUrl, {
         timeoutMs: 30_000,
         maxBytes: 6 * 1024 * 1024,
+        attempts: 2,
+        headers: PROVEN_SAFARI_HEADERS,
       });
 
       const html = response.data;
@@ -112,6 +127,35 @@ class SpankbangProvider extends Provider {
       );
       throw error;
     }
+  }
+
+  async handleCatalog(args) {
+    const extra = args.extra || {};
+    const defaultFirstPage =
+      !extra.search && !extra.genre && Number(extra.skip || 0) <= 0;
+
+    const primary = await super.handleCatalog(args);
+    if (!defaultFirstPage || primary.metas.length) return primary;
+
+    for (const genre of DEFAULT_CATALOG_FALLBACK_GENRES) {
+      const fallback = await super.handleCatalog({
+        ...args,
+        extra: { ...extra, genre, skip: 0 },
+      });
+      if (!fallback.metas.length) continue;
+
+      logger.warn(
+        {
+          provider: this.name,
+          fallbackGenre: genre,
+          metasSize: fallback.metas.length,
+        },
+        'SpankBang default catalog recovered from a fresh alternate route'
+      );
+      return fallback;
+    }
+
+    return primary;
   }
 
   handleGenre({ extra }) {

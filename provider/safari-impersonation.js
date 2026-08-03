@@ -100,6 +100,7 @@ class SafariImpersonationClient {
       url,
       timeoutMs,
       maxBytes: options.maxBytes || 5 * 1024 * 1024,
+      attempts: Math.max(1, Math.min(Number(options.attempts || 1), 3)),
       headers: options.headers || {},
     };
 
