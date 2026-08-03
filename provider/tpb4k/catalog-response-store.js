@@ -5,7 +5,7 @@ const path = require('node:path');
 const { decodeTpb4kId } = require('./id-codec');
 
 const STORE_VERSION = 1;
-const DEFAULT_TTL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const DEFAULT_MAX_ENTRIES = 64;
 
 function clean(value) { return String(value || '').trim(); }

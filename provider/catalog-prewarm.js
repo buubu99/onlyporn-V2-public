@@ -437,14 +437,17 @@ function startCatalogPrewarmScheduler(options = {}) {
   const log = options.logger || logger;
   const config = { ...readSchedulerConfig(options.env), ...(options.config || {}) };
   const baseUrl = normalizeBaseUrl(options.baseUrl);
+  const setTimeoutImpl = options.setTimeoutImpl || setTimeout;
+  const clearTimeoutImpl = options.clearTimeoutImpl || clearTimeout;
   let timer = null;
   let running = null;
   let stopped = false;
 
   function schedule(delayMs, reason) {
     if (stopped || !config.enabled) return;
-    clearTimeout(timer);
-    timer = setTimeout(() => {
+    clearTimeoutImpl(timer);
+    timer = setTimeoutImpl(() => {
+      timer = null;
       void execute(reason);
     }, delayMs);
     timer.unref?.();
@@ -452,6 +455,10 @@ function startCatalogPrewarmScheduler(options = {}) {
 
   async function execute(reason = 'scheduled') {
     if (stopped || !config.enabled) return null;
+    if (reason === 'manual' && timer) {
+      clearTimeoutImpl(timer);
+      timer = null;
+    }
     if (running) {
       log.info({ reason }, 'OnlyPorn catalog prewarm skipped because a run is already active');
       return running;
@@ -482,7 +489,6 @@ function startCatalogPrewarmScheduler(options = {}) {
       })
       .finally(() => {
         running = null;
-        if (!stopped) schedule(config.intervalMs, 'interval');
       });
 
     return running;
@@ -497,18 +503,18 @@ function startCatalogPrewarmScheduler(options = {}) {
       {
         baseUrl,
         startDelayMs: config.startDelayMs,
-        intervalMs: config.intervalMs,
+        startupOnly: true,
         concurrency: config.concurrency,
         maxPasses: config.maxPasses,
       },
-      'OnlyPorn catalog prewarm scheduler started'
+      'OnlyPorn startup-only catalog prewarm scheduled'
     );
     schedule(config.startDelayMs, 'startup');
   }
 
   function stop() {
     stopped = true;
-    clearTimeout(timer);
+    clearTimeoutImpl(timer);
     timer = null;
     log.info('OnlyPorn catalog prewarm scheduler stopped');
   }

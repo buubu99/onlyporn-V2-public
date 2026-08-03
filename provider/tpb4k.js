@@ -47,7 +47,7 @@ const AUTHORITATIVE_MANYVIDS_CATALOGS = new Set([
   'tpb4k.studio.xvideosred.top',
 ]);
 const CATALOG_CACHE_TTL_MS = 15 * 60 * 1000;
-const CATALOG_STALE_TTL_MS = 24 * 60 * 60 * 1000;
+const CATALOG_STALE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 let loggerInstance;
 
 function logger() {
