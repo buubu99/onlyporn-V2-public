@@ -297,7 +297,7 @@ test('Sukebei detail pages provide honest native artwork without accepting site 
   assert.equal(adapter.diagnostics().sukebeiMetadata.detailImagesVerified, 1);
 });
 
-test('Sukebei cuts duplicate RSS pages and fetches plaintext detail artwork concurrently', async () => {
+test('Sukebei cuts duplicate RSS pages and fills configured detail-artwork capacity concurrently', async () => {
   const rows = Array.from({ length: 20 }, (_, index) => {
     const number = String(index + 1).padStart(3, '0');
     return `<item><guid>https://sukebei.example/view/${number}</guid><title>TST-${number}</title><link>https://sukebei.example/download/${number}.torrent</link><nyaa:seeders>${100 - index}</nyaa:seeders></item>`;
@@ -359,7 +359,7 @@ test('Sukebei cuts duplicate RSS pages and fetches plaintext detail artwork conc
 
   const items = await adapter.catalog({ skip: 0, limit: 40 });
   const diagnostics = adapter.diagnostics().sukebeiMetadata;
-  assert.equal(items.length, 8);
+  assert.equal(items.length, 20);
   assert.equal(items.every(item => /^https:\/\/covers\.example\/\d+\.jpg$/.test(item.poster)), true);
   assert.equal(rssCalls, 2);
   assert.equal(diagnostics.rssPages, 2);
@@ -367,8 +367,8 @@ test('Sukebei cuts duplicate RSS pages and fetches plaintext detail artwork conc
   assert.equal(diagnostics.rssRecordsRead, 40);
   assert.equal(diagnostics.rssDuplicateRecords, 20);
   assert.equal(diagnostics.rssDuplicatePages, 1);
-  assert.equal(diagnostics.detailStageTarget, 8);
-  assert.ok(diagnostics.detailImages >= items.length && diagnostics.detailImages <= 10);
+  assert.equal(diagnostics.detailStageTarget, 20);
+  assert.equal(diagnostics.detailImages, 20);
   assert.equal(diagnostics.detailImagesVerified, diagnostics.detailImages);
   assert.equal(diagnostics.detailImageRejected, 0);
   assert.equal(diagnostics.deadlineExceededMs, 0);

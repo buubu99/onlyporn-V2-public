@@ -146,7 +146,11 @@ test('runtime filters all known fake studio posters and avoids transient empty m
   assert.match(metadata, /if \(window\.length \|\| !providerFailed\) cache\.set/);
   assert.match(sukebei, /catalog: catalogDefinition/);
   assert.match(sukebei, /catalogDefinition\?\.mode === 'top'/);
-  assert.match(sukebei, /Math\.min\(safeSkip \+ safeLimit, 8\)/);
+  assert.match(sukebei, /const detailTargetLimit = detailLimit/);
+  assert.match(sukebei, /const needed = safeSkip \+ safeLimit/);
+  assert.match(sukebei, /allowed\.slice\(safeSkip, safeSkip \+ safeLimit\)/);
+  assert.doesNotMatch(sukebei, /Math\.min\(detailLimit, 8\)/);
+  assert.doesNotMatch(sukebei, /Math\.min\(safeSkip \+ safeLimit, 8\)/);
   assert.match(hentai, /TOP_SERIES_PREFIX = 'ophtop-'/);
   assert.match(addon, /'ophtop-'/);
 });

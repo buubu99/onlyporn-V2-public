@@ -151,10 +151,14 @@ test('HentaiMama AJAX response and nested player markup preserve direct media ca
   ]);
 });
 
-test('the single Sukebei Top catalogue rejects invalid final posters and owns its bounded fallback', () => {
+test('the single Sukebei catalogue rejects invalid final posters and honors the requested window', () => {
   const provider = fs.readFileSync(require.resolve('./tpb4k'), 'utf8');
   assert.match(provider, /definition\.id !== 'tpb4k\.sukebei\.top' \|\| Boolean\(safePoster\(item\.poster\)\)/);
   const source = fs.readFileSync(require.resolve('./tpb4k/sukebei-metadata'), 'utf8');
   assert.match(source, /catalogDefinition\?\.mode === 'top'/);
-  assert.match(source, /Math\.min\(safeSkip \+ safeLimit, 8\)/);
+  assert.match(source, /const detailTargetLimit = detailLimit/);
+  assert.match(source, /const needed = safeSkip \+ safeLimit/);
+  assert.match(source, /allowed\.slice\(safeSkip, safeSkip \+ safeLimit\)/);
+  assert.doesNotMatch(source, /Math\.min\(detailLimit, 8\)/);
+  assert.doesNotMatch(source, /Math\.min\(safeSkip \+ safeLimit, 8\)/);
 });

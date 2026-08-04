@@ -1013,6 +1013,24 @@ function createSukebeiMetadataAdapter(options = {}) {
     let rssRecordsRead = 0;
     let rssDuplicateRecords = 0;
     let rssDuplicatePages = 0;
+    const appendFeedItems = items => {
+      let newRecords = 0;
+      for (const item of items) {
+        const key = compactText(item.id || item.guid || item.link || item.detailUrl);
+        if (!key || seenFeedRecords.has(key)) {
+          rssDuplicateRecords += 1;
+          continue;
+        }
+        seenFeedRecords.add(key);
+        feed.push(item);
+        newRecords += 1;
+      }
+      return newRecords;
+    };
+    // The single Sukebei catalogue combines two honest upstream windows:
+    // seed-ranked Real Life Videos from the official HTML table, followed by
+    // the all-category rolling RSS feed. Identity-based dedupe prevents the
+    // same torrent appearing twice.
     if (useOfficialTopPage) {
       const topUrl = new URL(detailOrigin);
       topUrl.searchParams.set('f', '0');
@@ -1027,43 +1045,31 @@ function createSukebeiMetadataAdapter(options = {}) {
       });
       const pageItems = parseSukebeiTopHtml(payload, detailOrigin);
       if (!pageItems.length) throw new Error('Sukebei top page returned no playable video rows');
-      fetchedPages = 1;
-      rssRecordsRead = pageItems.length;
-      feed.push(...pageItems);
-    } else {
-      for (let page = 1; page <= rssPages; page += 1) {
-        if (Date.now() >= rssDeadlineAt) break;
-        const pageUrl = new URL(client.endpoint);
-        pageUrl.searchParams.set('p', String(page));
-        const remaining = Math.max(rssDeadlineAt - Date.now(), 250);
-        const payload = await client.fetchText(pageUrl.toString(), {
-          cacheKey: `sukebei:rss:${page}`,
-          timeoutMs: Math.min(client.timeoutMs, remaining),
-        });
-        const pageItems = parseRssFeed(payload);
-        if (!pageItems.length) break;
-        fetchedPages += 1;
-        rssRecordsRead += pageItems.length;
-        let newRecords = 0;
-        for (const item of pageItems) {
-          const key = compactText(item.id || item.guid || item.link || item.detailUrl);
-          if (!key || seenFeedRecords.has(key)) {
-            rssDuplicateRecords += 1;
-            continue;
-          }
-          seenFeedRecords.add(key);
-          feed.push(item);
-          newRecords += 1;
-        }
-        // The official RSS endpoint currently ignores `p` and returns the same
-        // rolling window. Stop once a later response is at least 90% duplicate.
-        if (page > 1 && newRecords <= Math.max(Math.floor(pageItems.length * 0.1), 1)) {
-          rssDuplicatePages += 1;
-          break;
-        }
+      fetchedPages += 1;
+      rssRecordsRead += pageItems.length;
+      appendFeedItems(pageItems);
+    }
+    for (let page = 1; page <= rssPages; page += 1) {
+      if (Date.now() >= rssDeadlineAt) break;
+      const pageUrl = new URL(client.endpoint);
+      pageUrl.searchParams.set('p', String(page));
+      const remaining = Math.max(rssDeadlineAt - Date.now(), 250);
+      const payload = await client.fetchText(pageUrl.toString(), {
+        cacheKey: `sukebei:rss:${page}`,
+        timeoutMs: Math.min(client.timeoutMs, remaining),
+      });
+      const pageItems = parseRssFeed(payload);
+      if (!pageItems.length) break;
+      fetchedPages += 1;
+      rssRecordsRead += pageItems.length;
+      const newRecords = appendFeedItems(pageItems);
+      // The official RSS endpoint currently ignores `p` and returns the same
+      // rolling window. Stop once a later response is at least 90% duplicate.
+      if (page > 1 && newRecords <= Math.max(Math.floor(pageItems.length * 0.1), 1)) {
+        rssDuplicatePages += 1;
+        break;
       }
     }
-
     const stats = {
       budgetMs,
       rssRecords: feed.length,
@@ -1077,7 +1083,7 @@ function createSukebeiMetadataAdapter(options = {}) {
       rssCategory: useOfficialTopPage ? '2_2' : (() => {
         try { return new URL(client.endpoint).searchParams.get('c') || ''; } catch { return ''; }
       })(),
-      discoveryMode: useOfficialTopPage ? 'official-html-top' : 'rss',
+      discoveryMode: useOfficialTopPage ? 'official-html-top+rss' : 'rss',
       codeCandidates: 0,
       codeStageJobs: 0,
       codeStageCompleted: 0,
@@ -1137,7 +1143,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     const codeLimit = Math.min(Math.max(Number(config.sukebeiCodeLookupLimit || 40), 1), 60);
     const titleLimit = Math.min(Math.max(Number(config.sukebeiTitleLookupLimit || 4), 0), 20);
     const detailLimit = Math.min(Math.max(Number(config.sukebeiDetailImageLimit || 20), 0), 40);
-    const detailTargetLimit = Math.min(detailLimit, 8);
+    const detailTargetLimit = detailLimit;
     const detailLookupTimeoutMs = Math.min(
       Math.max(Number(config.metadataLookupTimeoutMs || 2_500), 750),
       6_000
@@ -1362,12 +1368,12 @@ function createSukebeiMetadataAdapter(options = {}) {
     }
 
     stats.persistentArtworkWrites += artworkStore.setMany(allowed);
-    // Keep one Sukebei catalogue. It prefers verified scene artwork, then fills
-    // only the first eight positions with honest, title-specific cards backed
-    // by the real RSS torrent identity. This avoids both an empty row and the
-    // old ImageTwist hotlink-error images without inventing scene artwork.
-    const needed = Math.min(safeSkip + safeLimit, 8);
-    if (!useOfficialTopPage && catalogDefinition?.mode === 'top' && allowed.length < needed) {
+    // Keep one Sukebei catalogue. Prefer verified scene artwork, then fill the
+    // complete requested Stremio window with honest title-specific cards backed
+    // by each real upstream torrent identity. Artwork failure must not discard
+    // a valid playable info hash.
+    const needed = safeSkip + safeLimit;
+    if (catalogDefinition?.mode === 'top' && allowed.length < needed) {
       const existing = new Set(allowed.map(item => String(item.sourceId)));
       for (const source of normalized) {
         if (allowed.length >= needed || existing.has(String(source.sourceId))) continue;
@@ -1395,10 +1401,8 @@ function createSukebeiMetadataAdapter(options = {}) {
       }
     }
 
-    // The upstream RSS window is intentionally exposed as a single catalogue
-    // of at most eight cards. Do not manufacture a second row or imply a
-    // deeper catalogue than the source can currently sustain reliably.
-    const window = allowed.slice(safeSkip, Math.min(safeSkip + safeLimit, 8));
+    // Honor Stremio pagination over the combined, deduplicated upstream pool.
+    const window = allowed.slice(safeSkip, safeSkip + safeLimit);
     stats.returned = window.length;
     stats.totalElapsedMs = Date.now() - requestStartedAt;
     stats.deadlineExceededMs = Math.max(Date.now() - deadlineAt, 0);

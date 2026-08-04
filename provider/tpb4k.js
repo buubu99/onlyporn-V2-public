@@ -31,8 +31,14 @@ const {
 const MOVIE_TYPE = 'movie';
 const SERIES_TYPE = 'series';
 const CATALOG_CACHE_REVISION = 'r7';
+const SUKEBEI_CATALOG_CACHE_REVISION = 's2';
+function catalogCacheRevision(args = {}) {
+  return String(args?.id || '') === 'tpb4k.sukebei.top'
+    ? `${CATALOG_CACHE_REVISION}-${SUKEBEI_CATALOG_CACHE_REVISION}`
+    : CATALOG_CACHE_REVISION;
+}
 function catalogCacheKey(args = {}) {
-  return `${CATALOG_CACHE_REVISION}:${String(args?.type || '')}:${String(args?.id || '')}:${String(args?.extra?.skip || 0)}`;
+  return `${catalogCacheRevision(args)}:${String(args?.type || '')}:${String(args?.id || '')}:${String(args?.extra?.skip || 0)}`;
 }
 function legacyCatalogCacheSuffix(args = {}) {
   return `:${catalogCacheKey(args)}`;
