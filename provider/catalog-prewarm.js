@@ -16,7 +16,7 @@ const DEFAULTS = Object.freeze({
   maxPasses: 6,
   retryDelayMs: 20_000,
   requestTimeoutMs: 45_000,
-  expectedActiveCatalogs: 35,
+  expectedActiveCatalogs: 33,
   verificationPasses: 1,
 });
 
