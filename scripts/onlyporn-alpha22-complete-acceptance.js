@@ -12,7 +12,7 @@ const STUDIOS = [
   'brazzersexxtra', 'cum4k', 'devilsfilm', 'digitalplayground', 'dorcelclub',
   'metart', 'metartx', 'milfty', 'milfy', 'newsensations', 'pornmegaload',
   'onlyfans', 'playboyplus', 'sexmex', 'thelifeerotic', 'vixen', 'wowgirls',
-  'sexart', 'xvideosred',
+  'sexart',
 ].map(name => `tpb4k.studio.${name}.top`);
 const MINIMUMS = Object.freeze({
   'tpb4k.studio.brazzersexxtra.top': 30,
@@ -33,7 +33,6 @@ const MINIMUMS = Object.freeze({
   'tpb4k.studio.vixen.top': 30,
   'tpb4k.studio.wowgirls.top': 30,
   'tpb4k.studio.sexart.top': 30,
-  'tpb4k.studio.xvideosred.top': 20,
 });
 const issues = [];
 

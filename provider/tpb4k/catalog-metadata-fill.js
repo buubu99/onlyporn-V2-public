@@ -3,11 +3,9 @@
 const { buildSceneIdentity } = require('./identity');
 
 const METADATA_FILL_CATALOGS = new Set([
-  'tpb4k.tpdb.recent',
   'tpb4k.studio.digitalplayground.top',
   'tpb4k.studio.dorcelclub.top',
   'tpb4k.studio.onlyfans.top',
-  'tpb4k.studio.xvideosred.top',
 ]);
 
 function compact(value) {

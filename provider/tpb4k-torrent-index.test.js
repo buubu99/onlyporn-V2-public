@@ -572,11 +572,11 @@ test('catalog-time version-2 binding avoids a second title search', async () => 
 });
 test('18 studio rows are metadata-first and OnlyFans uses a metadata-first/torrent hybrid with retained TPB provenance', () => {
   const studios = catalogDefinitions.filter(item => item.mode === 'studio-top');
-  assert.equal(studios.length, 19);
+  assert.equal(studios.length, 18);
   assert.equal(studios.filter(item => item.studio !== 'OnlyFans').every(item => item.source === 'studio-metadata'), true);
   assert.equal(studios.find(item => item.studio === 'OnlyFans')?.source, 'platform-hybrid');
   assert.equal(studios.every(item => item.lookupSource === 'torrent-index'), true);
-  assert.equal(new Set(studios.map(item => item.studio)).size, 19);
+  assert.equal(new Set(studios.map(item => item.studio)).size, 18);
 });
 
 test('built-in provider exposes only playable metadata-first version-2 studio cards', async () => {

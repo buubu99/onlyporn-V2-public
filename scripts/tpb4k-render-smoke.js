@@ -9,7 +9,7 @@ if (!/^https:\/\//i.test(BASE)) {
 
 const IDS = [
   'tpb4k.pornrips.recent', 'tpb4k.hentai.all', 'tpb4k.hentai.new', 'tpb4k.hentai.top',
-  'tpb4k.stripchat.girls', 'tpb4k.stripchat.couples', 'tpb4k.tpdb.recent',
+  'tpb4k.stripchat.girls', 'tpb4k.stripchat.couples',
   'tpb4k.yesporn.recent', 'tpb4k.sukebei.top',
   'tpb4k.studio.brazzersexxtra.top', 'tpb4k.studio.cum4k.top',
   'tpb4k.studio.devilsfilm.top', 'tpb4k.studio.digitalplayground.top',
@@ -18,19 +18,18 @@ const IDS = [
   'tpb4k.studio.pornmegaload.top', 'tpb4k.studio.onlyfans.top',
   'tpb4k.studio.playboyplus.top', 'tpb4k.studio.sexmex.top',
   'tpb4k.studio.thelifeerotic.top', 'tpb4k.studio.vixen.top',
-  'tpb4k.studio.wowgirls.top', 'tpb4k.studio.sexart.top', 'tpb4k.studio.xvideosred.top',
+  'tpb4k.studio.wowgirls.top', 'tpb4k.studio.sexart.top',
 ];
 
 const STUDIO_IDS = new Set(IDS.filter(id => id.startsWith('tpb4k.studio.')));
 const REQUIRED_NONEMPTY = new Set([
-  'tpb4k.tpdb.recent', 'tpb4k.sukebei.top', 'tpb4k.studio.onlyfans.top',
+  'tpb4k.sukebei.top', 'tpb4k.studio.onlyfans.top',
   'tpb4k.studio.brazzersexxtra.top', 'tpb4k.studio.cum4k.top',
   'tpb4k.studio.digitalplayground.top', 'tpb4k.studio.dorcelclub.top',
   'tpb4k.studio.metart.top', 'tpb4k.studio.metartx.top',
   'tpb4k.studio.milfy.top', 'tpb4k.studio.playboyplus.top',
   'tpb4k.studio.sexart.top', 'tpb4k.studio.thelifeerotic.top',
   'tpb4k.studio.vixen.top', 'tpb4k.studio.wowgirls.top',
-  'tpb4k.studio.xvideosred.top',
 ]);
 const FALLBACK_PATH = '/assets/tpb4k/studios/';
 const REQUEST_TIMEOUT_MS = 30_000;
@@ -80,7 +79,7 @@ function isFallbackPoster(value) {
 (async () => {
   const manifest = await getJson('/manifest.json');
   const tpbCatalogs = (manifest.catalogs || []).filter(item => String(item.id).startsWith('tpb4k.'));
-  if (tpbCatalogs.length !== 28) throw new Error(`Expected 28 TPB4K catalogs, found ${tpbCatalogs.length}`);
+  if (tpbCatalogs.length !== 26) throw new Error(`Expected 26 TPB4K catalogs, found ${tpbCatalogs.length}`);
   const results = [];
   for (const id of IDS) {
     const started = Date.now();
@@ -120,7 +119,7 @@ function isFallbackPoster(value) {
   const onlyFansFallbackPosters = studioResults.find(result => result.id === 'tpb4k.studio.onlyfans.top')?.fallbackPosters || 0;
   const nonEmptyStudioCatalogs = studioResults.filter(result => result.metas > 0).length;
   if (nonEmptyStudioCatalogs < 13) {
-    throw new Error(`Only ${nonEmptyStudioCatalogs}/19 studio catalogs were non-empty`);
+    throw new Error(`Only ${nonEmptyStudioCatalogs}/18 studio catalogs were non-empty`);
   }
   if (totalFallbackPosters !== 0) {
     throw new Error(`${totalFallbackPosters} generic fallback poster(s) leaked into strict metadata-first studio catalogs`);

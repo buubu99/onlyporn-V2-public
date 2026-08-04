@@ -49,9 +49,9 @@ function torrent(hash, title, poster, extra = {}) {
   };
 }
 
-test('normal studios keep the stable binder while only four weak catalogues can use torrent-first recovery', () => {
+test('normal studios keep the stable binder while only three weak catalogues can use torrent-first recovery', () => {
   const provider = fs.readFileSync(require.resolve('./tpb4k'), 'utf8');
-  assert.match(provider, /TORRENT_FIRST_STUDIOS = new Set\(\['onlyfans', 'digitalplayground', 'xvideosred', 'sexmex'\]\)/);
+  assert.match(provider, /TORRENT_FIRST_STUDIOS = new Set\(\['onlyfans', 'digitalplayground', 'sexmex'\]\)/);
   assert.match(provider, /this\.catalogResponseCache = new Map\(\)/);
   assert.match(provider, /this\.catalogInFlight = new Map\(\)/);
   assert.doesNotMatch(provider, /const catalogResponseCache = new Map\(\)/);

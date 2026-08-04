@@ -284,67 +284,8 @@ test('missing metadata keys degrade to empty catalogs and never create fake stre
   assert.deepEqual(await bundle.adapters[0].resolve({}), []);
 });
 
-test('TPDB recent catalog and meta handlers expose only torrent-bound playable scenes', async () => {
-  const { calls, fetchImpl } = createMetadataFetch();
-  const provider = new Tpb4kProvider({
-    fetchImpl,
-    env: {
-      TPB4K_ENABLED: 'true',
-      TPB4K_CATALOG_LIMIT: '1',
-      TPDB_API_KEY: 'tpdb-fixture',
-      TPDB_REST_API_URL: 'https://api.theporndb.example',
-    },
-  });
-  const playableHash = '1357913579135791357913579135791357913579';
-  registerAdapter({
-    id: 'torrent-index',
-    async catalog() { return []; },
-    async meta() { return null; },
-    async resolve({ item }) {
-      return [{
-        source: 'knaben',
-        sourceId: `knaben:${item.sourceId}`,
-        title: item.title,
-        filename: `${item.title}.mkv`,
-        infoHash: playableHash,
-        seeders: 10,
-      }];
-    },
-  });
-  assert.deepEqual(listAdapters(), ['hentai', 'platform-hybrid', 'pornrips', 'stripchat', 'studio-metadata', 'sukebei', 'torrent-index', 'tpdb', 'yesporn']);
 
-  const catalog = await provider.handleCatalog({
-    type: 'movie',
-    id: 'tpb4k.tpdb.recent',
-    extra: { skip: 0 },
-  });
-  assert.equal(catalog.metas.length, 1);
-  const decoded = decodeTpb4kId(catalog.metas[0].id);
-  assert.equal(decoded.source, 'tpdb');
-  assert.match(decoded.sourceId, /^tpdb:/);
-
-  const meta = await provider.handleMeta({ type: 'movie', id: catalog.metas[0].id });
-  assert.equal(meta.meta.extra.onlyporn.source, 'tpdb');
-  assert.match(meta.meta.poster, /^https:\/\/images\.example\//);
-
-  const streams = await provider.handleStream({ type: 'movie', id: catalog.metas[0].id });
-  assert.equal(streams.streams.length, 1);
-  assert.equal(streams.streams[0].infoHash, playableHash);
-  const restCalls = calls.filter(call => call.method === 'GET');
-  assert.equal(restCalls.length, 2);
-  assert.equal(
-    restCalls.every(call => call.request.headers.Authorization === 'Bearer tpdb-fixture'),
-    true
-  );
-  assert.equal(
-    restCalls.every(call => !Object.hasOwn(call.request.headers, 'ApiKey')),
-    true
-  );
-  assert.equal(calls.some(call => call.method === 'POST'), false);
-  assert.equal(calls.every(call => !call.url.includes('tpdb-fixture')), true);
-});
-
-test('nineteen studio definitions are metadata-first catalogs with torrent lookup provenance', async () => {
+test('eighteen studio definitions are metadata-first catalogs with torrent lookup provenance', async () => {
   const { calls, fetchImpl } = createMetadataFetch({ sameIdentity: true });
   const bundle = createMetadataAdapters({
     config: readTpb4kConfig({
@@ -357,7 +298,7 @@ test('nineteen studio definitions are metadata-first catalogs with torrent looku
     fetchImpl,
   });
   const studioDefinitions = catalogDefinitions.filter(item => item.mode === 'studio-top');
-  assert.equal(studioDefinitions.length, 19);
+  assert.equal(studioDefinitions.length, 18);
   assert.equal(studioDefinitions.filter(item => item.studio !== 'OnlyFans').every(item => item.source === 'studio-metadata'), true);
   assert.equal(studioDefinitions.find(item => item.studio === 'OnlyFans')?.source, 'platform-hybrid');
   assert.equal(studioDefinitions.every(item => item.lookupSource === 'torrent-index'), true);
@@ -365,11 +306,11 @@ test('nineteen studio definitions are metadata-first catalogs with torrent looku
   assert.equal(calls.length, 0);
 });
 
-test('Phase 2A release wiring preserves 28 internal catalogs, 37 feature catalogs, and prior hardening', () => {
+test('Phase 2A release wiring preserves 26 internal catalogs, 35 feature catalogs, and prior hardening', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const relay = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
   assert.match(pkg.version, /^2\.7\.0-alpha\.(?:2[5-9]|[3-9]\d|\d{3,})$/);
-  assert.equal(catalogDefinitions.length, 28);
+  assert.equal(catalogDefinitions.length, 26);
   assert.match(pkg.scripts['test:release'], /tpb4k-phase2a\.test\.js/);
   assert.match(relay, /const SESSION_TTL_MS = 8 \* 60 \* 60 \* 1000/);
   assert.match(relay, /PLAYLIST_CHILD_ERROR_CODE = 'HLS_CHILD_REJECTED'/);
@@ -377,6 +318,6 @@ test('Phase 2A release wiring preserves 28 internal catalogs, 37 feature catalog
 
   const catalogIndex = fs.readFileSync(path.join(ROOT, 'catalog/index.js'), 'utf8');
   assert.match(catalogIndex, /\.\.\.\(isTpb4kEnabled\(\) \? tpb4kCatalogs : \[\]\)/);
-  assert.equal(9 + catalogDefinitions.length, 37);
+  assert.equal(9 + catalogDefinitions.length, 35);
   assert.deepEqual(parseSourceId('tpdb:scene-1'), { provider: 'tpdb', upstreamId: 'scene-1' });
 });

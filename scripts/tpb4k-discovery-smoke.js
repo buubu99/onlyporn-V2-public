@@ -10,7 +10,6 @@ const IDS = [
   'tpb4k.hentai.all',
   'tpb4k.hentai.new',
   'tpb4k.hentai.top',
-  'tpb4k.tpdb.recent',
   'tpb4k.yesporn.recent',
   'tpb4k.sukebei.top',
 ];

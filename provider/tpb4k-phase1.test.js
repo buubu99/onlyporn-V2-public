@@ -109,10 +109,10 @@ function memoryAdapter() {
 
 test.afterEach(() => clearAdapters());
 
-test('Phase 1 defines the exact 28 selected OnlyPorn board catalogs', () => {
-  assert.equal(catalogDefinitions.length, 28);
-  assert.equal(tpb4kCatalogs.length, 28);
-  assert.equal(new Set(catalogDefinitions.map(item => item.id)).size, 28);
+test('Phase 1 defines the exact 26 selected OnlyPorn board catalogs', () => {
+  assert.equal(catalogDefinitions.length, 26);
+  assert.equal(tpb4kCatalogs.length, 26);
+  assert.equal(new Set(catalogDefinitions.map(item => item.id)).size, 26);
   assert.ok(getCatalogDefinition('tpb4k.pornrips.recent'));
   assert.ok(getCatalogDefinition('tpb4k.hentai.top'));
   assert.ok(getCatalogDefinition('tpb4k.stripchat.couples'));
@@ -123,10 +123,10 @@ test('Phase 1 defines the exact 28 selected OnlyPorn board catalogs', () => {
   assert.equal(catalogDefinitions.some(item => /(?: 4K| 1080p) · Top/.test(item.name)), false);
 });
 
-test('OnlyPorn board catalogs stay disabled by default and expose 28 descriptors only behind the feature flag', () => {
+test('OnlyPorn board catalogs stay disabled by default and expose 26 descriptors only behind the feature flag', () => {
   assert.equal(isTpb4kEnabled({}), false);
   assert.equal(isTpb4kEnabled({ TPB4K_ENABLED: 'true' }), true);
-  assert.equal(tpb4kCatalogs.filter(item => item.id.startsWith('tpb4k.')).length, 28);
+  assert.equal(tpb4kCatalogs.filter(item => item.id.startsWith('tpb4k.')).length, 26);
 });
 
 test('magnet and info-hash normalization accepts valid hashes and rejects HTML placeholders', () => {
@@ -420,60 +420,6 @@ test('Continue Watching recovers studio artwork when the saved torrent bundle is
   assert.equal(result.meta.background, 'https://images.example/onlyfans-continue-watching.jpg');
 });
 
-test('ThePornDB recent resolves exact scene torrents instead of remaining metadata-only', async () => {
-  registerAdapter({
-    id: 'tpdb',
-    async catalog() {
-      return [{
-        sourceId: 'tpdb:playable-scene',
-        title: 'Playable TPDB Scene',
-        poster: 'https://images.example/tpdb-playable.jpg',
-        studio: 'Fixture Studio',
-      }];
-    },
-    async meta({ sourceId }) {
-      return {
-        sourceId,
-        title: 'Playable TPDB Scene',
-        poster: 'https://images.example/tpdb-playable.jpg',
-        studio: 'Fixture Studio',
-      };
-    },
-    async resolve() { return []; },
-  });
-  registerAdapter({
-    id: 'torrent-index',
-    async catalog() { return []; },
-    async meta() { return null; },
-    async resolve({ item, catalog }) {
-      assert.equal(item.title, 'Playable TPDB Scene');
-      assert.equal(catalog.targetedPlaybackSearch, true);
-      return [{
-        source: 'knaben-targeted',
-        title: 'Playable TPDB Scene 1080p H264',
-        filename: 'Playable.TPDB.Scene.1080p.H264.mp4',
-        infoHash: HASH_ALT,
-        seeders: 12,
-      }];
-    },
-  });
-  const provider = new Tpb4kProvider({
-    installBuiltIns: false,
-    env: {
-      TPB4K_ENABLED: 'true',
-      TPB4K_CATALOG_LIMIT: '1',
-      ONLYPORN_DISABLE_PERSISTENT_CACHE: 'true',
-    },
-  });
-  const catalog = await provider.handleCatalog({
-    type: 'movie', id: 'tpb4k.tpdb.recent', extra: { skip: 0 },
-  });
-  const result = await provider.handleStream({ type: 'movie', id: catalog.metas[0].id });
-
-  assert.equal(result.streams.length, 1);
-  assert.equal(result.streams[0].infoHash, HASH_ALT);
-  assert.equal(result.streams[0].behaviorHints.filename, 'Playable.TPDB.Scene.1080p.H264.mp4');
-});
 
 test('PornRips preserves its authoritative torrent and adds index alternatives for failover', async () => {
   registerAdapter({

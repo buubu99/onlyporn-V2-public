@@ -9,7 +9,6 @@ const {
 } = require('./tpb4k/candidate');
 const { readTpb4kConfig, publicConfigStatus, redactSecrets } = require('./tpb4k/config');
 const { fillCatalogWithMetadata } = require('./tpb4k/catalog-metadata-fill');
-const { resolveAuthoritativeManyVids } = require('./tpb4k/manyvids-authoritative');
 const { createCatalogResponseStore } = require('./tpb4k/catalog-response-store');
 const { decodeTpb4kId, encodeTpb4kId } = require('./tpb4k/id-codec');
 const { buildSceneIdentity } = require('./tpb4k/identity');
@@ -40,12 +39,8 @@ function legacyCatalogCacheSuffix(args = {}) {
 }
 const HENTAI_PREFIX = 'ophmm-';
 const HENTAI_TOP_PREFIX = 'ophtop-';
-const TORRENT_FIRST_STUDIOS = new Set(['onlyfans', 'digitalplayground', 'xvideosred', 'sexmex']);
-const PLAYABILITY_GATED_CATALOGS = new Set(['tpb4k.pornrips.recent', 'tpb4k.tpdb.recent']);
-const AUTHORITATIVE_MANYVIDS_CATALOGS = new Set([
-  'tpb4k.tpdb.recent',
-  'tpb4k.studio.xvideosred.top',
-]);
+const TORRENT_FIRST_STUDIOS = new Set(['onlyfans', 'digitalplayground', 'sexmex']);
+const PLAYABILITY_GATED_CATALOGS = new Set(['tpb4k.pornrips.recent']);
 const CATALOG_CACHE_TTL_MS = 15 * 60 * 1000;
 const CATALOG_STALE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 let loggerInstance;
@@ -268,6 +263,8 @@ class Tpb4kProvider {
 
   async handleCatalog(args) {
     if (!this.enabled()) return { metas: [] };
+    const definition = getCatalogDefinition(args.id);
+    if (!definition || args.type !== (definition.type || MOVIE_TYPE)) return { metas: [] };
     // The explicit cache revision invalidates incompatible catalogue formats.
     // Package releases using the same revision reuse last-known-good rows so a
     // deploy does not force every Home catalogue through a cold provider burst.
@@ -348,8 +345,6 @@ class Tpb4kProvider {
     let studioPlaybackBinding;
     let studioTargetedRecovery;
     let torrentFirstStudioFallback;
-    let catalogPlayabilityBinding;
-    let catalogTargetedRecovery;
     let pornripsMetadataEnrichment;
     try {
       const requestedLimit = this.contentFilter.enabled
@@ -357,33 +352,7 @@ class Tpb4kProvider {
         : config.catalogLimit;
       const requiresPlayableBinding = ['studio-metadata', 'platform-hybrid'].includes(definition.source)
         && definition.lookupSource === 'torrent-index';
-      if (definition.id === 'tpb4k.tpdb.recent') {
-        const resolverAdapter = getAdapter(definition.lookupSource);
-        if (!resolverAdapter) throw new Error('OnlyPorn TPDB torrent resolver is unavailable');
-        const metadataItems = await adapter.catalog({
-          catalog: definition,
-          skip,
-          limit: Math.min(Math.max(config.catalogLimit * 2, 40), 100),
-          config,
-        });
-        const binding = await recoverStudioPlayback({
-          catalog: { ...definition, targetedPlaybackSearch: true },
-          metadataItems,
-          torrentItems: [],
-          resolverAdapter,
-          config,
-          skip: 0,
-          limit: config.catalogLimit,
-        });
-        rawItems = [...fillCatalogWithMetadata(
-          definition,
-          binding.items,
-          metadataItems,
-          config.catalogLimit
-        )];
-        catalogPlayabilityBinding = binding.stats;
-        catalogTargetedRecovery = binding.recovery;
-      } else if (requiresPlayableBinding) {
+      if (requiresPlayableBinding) {
         const resolverAdapter = getAdapter(definition.lookupSource);
         if (!resolverAdapter) throw new Error('OnlyPorn studio torrent resolver is unavailable');
         const loadTorrentPool = typeof resolverAdapter.catalogTorrents === 'function'
@@ -397,9 +366,9 @@ class Tpb4kProvider {
         const torrentPoolLimit = torrentFirstEnabled ? 160 : 120;
         // Keep the broad metadata/torrent identity pools needed to find exact
         // release matches. Only the network-heavy poster-enrichment branch is
-        // narrowed for these two weak catalogues so it can finish its targeted
+        // narrowed for DigitalPlayground so it can finish its targeted
         // lookups inside the fixed deadline.
-        const enrichmentPoolLimit = ['xvideosred', 'digitalplayground'].includes(weakStudioKey)
+        const enrichmentPoolLimit = weakStudioKey === 'digitalplayground'
           ? 60
           : 100;
         const [metadataItems, torrentItems, enrichedTorrentItems] = await Promise.all([
@@ -562,8 +531,6 @@ class Tpb4kProvider {
       ...(studioPlaybackBinding ? { studioPlaybackBinding } : {}),
       ...(studioTargetedRecovery ? { studioTargetedRecovery } : {}),
       ...(torrentFirstStudioFallback ? { torrentFirstStudioFallback } : {}),
-      ...(catalogPlayabilityBinding ? { catalogPlayabilityBinding } : {}),
-      ...(catalogTargetedRecovery ? { catalogTargetedRecovery } : {}),
       ...(pornripsMetadataEnrichment ? { pornripsMetadataEnrichment } : {}),
       ...(diagnosticsStale ? { diagnosticsStale: true } : {}),
       contentFilter: {
@@ -579,7 +546,9 @@ class Tpb4kProvider {
   async handleMeta(args) {
     if (!this.enabled()) return { meta: {} };
     const decoded = requestIdentity(args);
-    if (!decoded || args.type !== catalogType(decoded.catalogId)) return { meta: {} };
+    if (!decoded) return { meta: {} };
+    const definition = getCatalogDefinition(decoded.catalogId);
+    if (!definition || args.type !== (definition.type || MOVIE_TYPE)) return { meta: {} };
     const adapter = getAdapter(decoded.source);
     if (!adapter) return { meta: {} };
     const config = readTpb4kConfig(this.env);
@@ -650,11 +619,12 @@ class Tpb4kProvider {
   async handleStream(args) {
     if (!this.enabled()) return { streams: [] };
     const decoded = requestIdentity(args);
-    if (!decoded || args.type !== catalogType(decoded.catalogId)) return { streams: [] };
+    if (!decoded) return { streams: [] };
+    const definition = getCatalogDefinition(decoded.catalogId);
+    if (!definition || args.type !== (definition.type || MOVIE_TYPE)) return { streams: [] };
     const sourceAdapter = getAdapter(decoded.source);
     if (!sourceAdapter) return { streams: [] };
-    const definition = getCatalogDefinition(decoded.catalogId);
-    const resolverAdapter = decoded.source === 'hentai' ? sourceAdapter : getAdapter(definition?.lookupSource || decoded.source);
+    const resolverAdapter = decoded.source === 'hentai' ? sourceAdapter : getAdapter(definition.lookupSource || decoded.source);
     if (!resolverAdapter) return { streams: [] };
     const config = readTpb4kConfig(this.env);
     let rawItem = null;
@@ -670,24 +640,6 @@ class Tpb4kProvider {
     const sukebeiNeedsFileSelection = decoded.source === 'sukebei'
       && Array.isArray(decoded.torrents)
       && decoded.torrents.some(torrent => !Number.isInteger(torrent?.fileIdx));
-    let authoritativeManyvidsCandidates = [];
-    if (AUTHORITATIVE_MANYVIDS_CATALOGS.has(decoded.catalogId) && rawItem) {
-      try {
-        authoritativeManyvidsCandidates = await resolveAuthoritativeManyVids({
-          item: rawItem,
-          fetchImpl: this.fetchImpl,
-          timeoutMs: config.requestTimeoutMs,
-        });
-      } catch (error) {
-        logger().warn({
-          provider: this.name,
-          catalogId: decoded.catalogId,
-          source: decoded.source,
-          sourceId: decoded.sourceId,
-          error: redactSecrets(error?.message || error, this.env),
-        }, 'OnlyPorn authoritative ManyVids resolution failed safely');
-      }
-    }
     const bundledCandidates = Array.isArray(decoded.torrents) && !sukebeiNeedsFileSelection
       ? decoded.torrents.map(torrent => ({
         ...torrent,
@@ -696,10 +648,7 @@ class Tpb4kProvider {
         provenance: ['catalog-bound-torrent', 'multi-candidate-bundle'],
       }))
       : [];
-    let rawCandidates = [
-      ...authoritativeManyvidsCandidates,
-      ...bundledCandidates,
-    ];
+    let rawCandidates = [...bundledCandidates];
     if (!rawCandidates.length) {
       try {
         rawCandidates = await resolverAdapter.resolve({
@@ -771,7 +720,6 @@ class Tpb4kProvider {
       resolver: resolverAdapter.id,
       sourceId: decoded.sourceId,
       bundledCandidates: Array.isArray(decoded.torrents) ? decoded.torrents.length : 0,
-      authoritativeManyvidsCandidates: authoritativeManyvidsCandidates.length,
       candidates: normalized.length,
       streams: streams.length,
     }, 'OnlyPorn stream candidates normalized');

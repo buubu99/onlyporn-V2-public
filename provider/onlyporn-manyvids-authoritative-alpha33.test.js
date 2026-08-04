@@ -182,7 +182,7 @@ test('finds duration in a tail-located moov atom', async () => {
   assert.equal(Math.round(probe.durationSeconds), 90);
 });
 
-test('production source contains no teaser/preview candidate and provider fallback remains intact', () => {
+test('ManyVids helper remains teaser-safe but is no longer wired to removed catalogues', () => {
   const resolverSource = fs.readFileSync(
     path.join(__dirname, 'tpb4k', 'manyvids-authoritative.js'),
     'utf8'
@@ -192,6 +192,6 @@ test('production source contains no teaser/preview candidate and provider fallba
   assert.doesNotMatch(resolverSource, /candidateFromMedia\([\s\S]{0,500}preview:\s*true/);
   assert.match(resolverSource, /manyvids-duration-verified/);
   assert.match(resolverSource, /parseMvhdDuration/);
-  assert.match(providerSource, /resolveAuthoritativeManyVids/);
+  assert.doesNotMatch(providerSource, /resolveAuthoritativeManyVids/);
   assert.match(providerSource, /if \(!rawCandidates\.length\)[\s\S]{0,300}resolverAdapter\.resolve/);
 });

@@ -10,7 +10,6 @@ const WEAK_STUDIOS = [
   'tpb4k.studio.digitalplayground.top',
   'tpb4k.studio.onlyfans.top',
   'tpb4k.studio.sexmex.top',
-  'tpb4k.studio.xvideosred.top',
 ];
 
 function fail(message) { throw new Error(message); }
@@ -38,9 +37,9 @@ async function stream(type, id) { return json(`/stream/${type}/${encodeURICompon
   const internal = (manifest.catalogs || []).filter(item => String(item.id || '').startsWith('tpb4k.'));
   const sukebeiRows = internal.filter(item => String(item.id || '').startsWith('tpb4k.sukebei.'));
   if (manifest.version !== EXPECTED) fail(`manifest ${manifest.version}; expected ${EXPECTED}`);
-  if ((manifest.catalogs || []).length !== 37 || internal.length !== 28) fail(`manifest counts ${(manifest.catalogs || []).length}/${internal.length}; expected 37/28`);
+  if ((manifest.catalogs || []).length !== 35 || internal.length !== 26) fail(`manifest counts ${(manifest.catalogs || []).length}/${internal.length}; expected 35/26`);
   if (sukebeiRows.length !== 1 || sukebeiRows[0].id !== 'tpb4k.sukebei.top') fail('Sukebei must expose exactly one Top catalogue');
-  console.log(`MANIFEST ${manifest.version}: 37 total / 28 internal / one Sukebei`);
+  console.log(`MANIFEST ${manifest.version}: 35 total / 26 internal / one Sukebei`);
 
   for (const id of WEAK_STUDIOS) {
     const body = await catalog('movie', id);

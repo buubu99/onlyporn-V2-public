@@ -12,7 +12,7 @@ const FALLBACK_PATH = '/assets/tpb4k/studios/';
 const REQUIRED_STUDIOS = new Set([
   'BrazzersExxtra', 'Cum4K', 'DigitalPlayground', 'DorcelClub', 'MetArt',
   'MetArtX', 'Milfy', 'PlayboyPlus', 'SexArt', 'TheLifeErotic', 'Vixen',
-  'WowGirls', 'XVideosRED', 'OnlyFans',
+  'WowGirls', 'OnlyFans',
 ]);
 
 function percent(part, total) {
@@ -48,16 +48,14 @@ async function main() {
   if (!config.tpdb.configured) throw new Error('TPDB_API_KEY is not configured');
 
   const filterConfig = readContentFilterConfig(env);
-  const recent = catalogDefinitions.find(item => item.id === 'tpb4k.tpdb.recent');
   const studios = catalogDefinitions.filter(item => item.mode === 'studio-top');
-  if (!recent) throw new Error('TPDB Recent catalog is missing');
-  if (studios.length !== 19) throw new Error(`Expected 19 studio catalogs, found ${studios.length}`);
+  if (studios.length !== 18) throw new Error(`Expected 18 studio catalogs, found ${studios.length}`);
   const architectureValid = studios.every(item =>
     item.lookupSource === 'torrent-index' &&
     (item.source === 'studio-metadata' || (item.studio === 'OnlyFans' && item.source === 'platform-hybrid'))
   );
   if (!architectureValid) {
-    throw new Error('The 19 studio definitions do not preserve metadata-first/hybrid catalog architecture with torrent lookup provenance');
+    throw new Error('The 18 studio definitions do not preserve metadata-first/hybrid catalog architecture with torrent lookup provenance');
   }
 
   clearAdapters();
@@ -164,7 +162,7 @@ async function main() {
 
   const nonEmptyStudios = results.filter(item => item.studio && item.records > 0).length;
   if (nonEmptyStudios < 13) {
-    failures.push(`Only ${nonEmptyStudios}/19 studio catalogs were non-empty; expected at least 13`);
+    failures.push(`Only ${nonEmptyStudios}/18 studio catalogs were non-empty; expected at least 13`);
   }
 
   const vixen = studios.find(item => item.studio === 'Vixen');

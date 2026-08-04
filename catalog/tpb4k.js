@@ -43,14 +43,6 @@ const SELECTED_CATALOGS = [
     mode: 'couples',
   },
   {
-    id: 'tpb4k.tpdb.recent',
-    name: 'OnlyPorn: ThePornDB · Recent',
-    source: 'tpdb',
-    lookupSource: 'torrent-index',
-    targetedPlaybackSearch: true,
-    mode: 'recent',
-  },
-  {
     id: 'tpb4k.yesporn.recent',
     name: 'OnlyPorn: YesPorn · Recent',
     source: 'yesporn',
@@ -207,14 +199,6 @@ const SELECTED_CATALOGS = [
     lookupSource: 'torrent-index',
     mode: 'studio-top',
     studio: 'SexArt',
-  },
-  {
-    id: 'tpb4k.studio.xvideosred.top',
-    name: 'OnlyPorn: XVideosRED · Top',
-    source: 'studio-metadata',
-    lookupSource: 'torrent-index',
-    mode: 'studio-top',
-    studio: 'XVideosRED',
   },
 ];
 

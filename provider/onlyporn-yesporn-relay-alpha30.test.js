@@ -286,14 +286,10 @@ test('YesPorn relay source uses fetch-session transport rather than axios', () =
   );
 });
 
-test('the YesPorn catalog remains website-native and XVideosRED is unchanged', () => {
+test('the YesPorn catalog remains website-native and XVideosRED is removed', () => {
   const yesporn = getCatalogDefinition('tpb4k.yesporn.recent');
-  const xvideosred = getCatalogDefinition('tpb4k.studio.xvideosred.top');
 
   assert.equal(yesporn.source, 'yesporn');
   assert.equal(yesporn.mode, 'recent');
-
-  assert.equal(xvideosred.source, 'studio-metadata');
-  assert.equal(xvideosred.lookupSource, 'torrent-index');
-  assert.equal(xvideosred.studio, 'XVideosRED');
+  assert.equal(getCatalogDefinition('tpb4k.studio.xvideosred.top'), null);
 });

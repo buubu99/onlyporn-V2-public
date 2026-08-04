@@ -52,9 +52,9 @@ function torrentFor(definition, suffix, infoHash, resolution = '2160p', seeders 
   };
 }
 
-test('all 19 professional catalog definitions can emit version-3 cards with every distinct bound hash', () => {
+test('all 18 professional catalog definitions can emit version-3 cards with every distinct bound hash', () => {
   const studios = catalogDefinitions.filter(item => item.id.startsWith('tpb4k.studio.'));
-  assert.equal(studios.length, 19);
+  assert.equal(studios.length, 18);
 
   for (const definition of studios) {
     assert.ok(['studio-metadata', 'platform-hybrid'].includes(definition.source));
