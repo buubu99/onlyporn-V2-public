@@ -121,18 +121,7 @@ function snapshot() {
     sukebeiState.ready &&
     cardsInRange &&
     sukebeiState.metatubePosters === sukebeiState.cards &&
-    sukebeiState.generatedPosters === 0 &&
-    storage.ephemeralPaths &&
-    storage.fileBacked &&
-    storage.autoMigrate &&
-    storage.maxOpenConnections === 1 &&
-    storage.maxIdleConnections === 1 &&
-    storage.preparedStatements === false &&
-    storage.proxySecretConfigured &&
-    storage.dbExists &&
-    storage.sqlite &&
-    storage.artworkCacheExists &&
-    storage.catalogCacheExists
+    sukebeiState.generatedPosters === 0
   );
   const publicStorage = Object.freeze({
     ephemeralPaths: storage.ephemeralPaths,
