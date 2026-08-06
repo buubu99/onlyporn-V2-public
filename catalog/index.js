@@ -82,11 +82,18 @@ function compactLegacyCatalog(catalog) {
   return compact;
 }
 function compactTpb4kCatalog(catalog) {
+  const names = new Set(
+    (Array.isArray(catalog.extra) ? catalog.extra : [])
+      .map(item => String(item?.name || ''))
+      .filter(name => name === 'search' || name === 'skip')
+  );
+  if (!names.has('skip')) names.add('skip');
+
   return {
     id: catalog.id,
     type: catalog.type,
     name: catalog.name,
-    extra: [{ name: 'skip' }],
+    extra: [...names].map(name => ({ name })),
   };
 }
 

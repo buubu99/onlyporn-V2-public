@@ -18,6 +18,8 @@ const { detectResolution, extractMagnetFromHtml } = require('./torrent-index');
 const { decodeTorrent, readBoundedBuffer, safeNativeRequest } = require('./native-discovery');
 const { assertSafeHttpsUrl } = require('../url-security');
 const { evaluateContent, readContentFilterConfig } = require('../content-filter');
+const { createMetaTubeClient } = require('./metatube-client');
+const { recordSukebeiResult } = require('../runtime-readiness');
 
 const CODE_EXCLUSIONS = new Set([
   'H264', 'H265', 'X264', 'X265', 'HEVC', 'AV1', 'AAC', 'AC3', 'DDP',
@@ -40,6 +42,14 @@ function compactText(value) {
 
 function compactKey(value) {
   return compactText(value).toUpperCase().replace(/[^A-Z0-9]+/g, '');
+}
+function isMetaTubePoster(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:' && /\/onlyporn\/poster\/metatube\//i.test(url.pathname);
+  } catch {
+    return false;
+  }
 }
 
 function extractSceneCodes(value) {
@@ -541,6 +551,7 @@ async function queryExactCodeProvider(provider, metadataClient, source, code, op
         query: code,
         perPage: 20,
         page: 1,
+        timeoutMs: options.timeoutMs,
       });
     }
 
@@ -582,7 +593,13 @@ async function queryExactCodeProvider(provider, metadataClient, source, code, op
 
 function createSukebeiMetadataAdapter(options = {}) {
   const config = options.config || {};
-  const clients = options.metadataClients || {};
+  const env = options.env || process.env;
+  const metatubeClient = options.metatubeClient || createMetaTubeClient({ env, fetchImpl: options.fetchImpl });
+  const metatubeStrict = Boolean(metatubeClient.configured && /^(?:1|true|yes|on)$/i.test(String(env.TPB4K_METATUBE_STRICT || '')));
+  const clients = {
+    ...(options.metadataClients || {}),
+    ...(metatubeClient.configured ? { metatube: metatubeClient } : {}),
+  };
   const posterFetchImpl = options.fetchImpl || globalThis.fetch;
   const posterCheckDns = options.checkDns;
   const providers = ['stashdb', 'tpdb'].filter(name => clients[name]?.configured);
@@ -987,7 +1004,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     const requestStartedAt = Date.now();
     const budgetMs = Math.min(
       Math.max(Number(config.sukebeiEnrichmentDeadlineMs || 24_000), 4_000),
-      28_000
+      900_000
     );
     const deadlineAt = requestStartedAt + budgetMs;
     const rssDeadlineAt = Math.min(
@@ -996,6 +1013,8 @@ function createSukebeiMetadataAdapter(options = {}) {
     );
     const safeSkip = Math.max(Number.parseInt(String(skip || 0), 10) || 0, 0);
     const safeLimit = Math.min(Math.max(Number.parseInt(String(limit || 40), 10) || 40, 1), 100);
+    const needed = safeSkip + safeLimit;
+    const strictMinimum = safeSkip === 0 ? Math.min(24, safeLimit) : 0;
     const feed = [];
     const useOfficialTopPage = officialTopMode && catalogDefinition?.mode === 'top';
     const requestedRssPages = Math.min(Math.max(Number(config.sukebeiRssPages || 4), 1), 8);
@@ -1140,9 +1159,9 @@ function createSukebeiMetadataAdapter(options = {}) {
     stats.inspected = normalized.length;
     stats.codeCandidates = normalized.filter(item => extractSceneCodes(item.title).length > 0).length;
 
-    const codeLimit = Math.min(Math.max(Number(config.sukebeiCodeLookupLimit || 40), 1), 60);
-    const titleLimit = Math.min(Math.max(Number(config.sukebeiTitleLookupLimit || 4), 0), 20);
-    const detailLimit = Math.min(Math.max(Number(config.sukebeiDetailImageLimit || 20), 0), 40);
+    const codeLimit = Math.min(Math.max(Number(config.sukebeiCodeLookupLimit || 130), 1), 180);
+    const titleLimit = metatubeStrict ? 0 : Math.min(Math.max(Number(config.sukebeiTitleLookupLimit || 4), 0), 20);
+    const detailLimit = metatubeStrict ? 0 : Math.min(Math.max(Number(config.sukebeiDetailImageLimit || 20), 0), 40);
     const detailTargetLimit = detailLimit;
     const detailLookupTimeoutMs = Math.min(
       Math.max(Number(config.metadataLookupTimeoutMs || 2_500), 750),
@@ -1207,6 +1226,11 @@ function createSukebeiMetadataAdapter(options = {}) {
       cache.set(`sukebei:${sourceId}`, restored, positiveTtlMs);
       resolvedById.set(sourceId, restored);
     }
+    if (metatubeStrict) {
+      for (const [sourceId, item] of resolvedById) {
+        if (!isMetaTubePoster(item?.poster)) resolvedById.delete(sourceId);
+      }
+    }
     // Stage 1: scan every selected unique JAV code through the primary provider.
     // A confirmed miss stays a miss, but a provider error falls through to the
     // secondary provider. This prevents a StashDB outage from suppressing every
@@ -1229,12 +1253,14 @@ function createSukebeiMetadataAdapter(options = {}) {
     }
     const codeJobs = [...codeJobsByKey.values()];
     stats.codeStageJobs = codeJobs.length;
-    const codeProviders = ['stashdb', 'tpdb'].filter(provider => clients[provider]?.configured);
+    const codeProviders = (metatubeStrict ? ['metatube'] : ['metatube', 'stashdb', 'tpdb'])
+      .filter(provider => clients[provider]?.configured);
     const providerFailures = Object.fromEntries(codeProviders.map(provider => [provider, 0]));
     stats.codeStageProvider = codeProviders.join(',');
 
     if (codeProviders.length) {
       await Promise.all(codeJobs.map(job => runLimited(async () => {
+        if (metatubeStrict && resolvedById.size >= needed) return;
         if (Date.now() >= metadataDeadlineAt) {
           stats.codeStageDeadlineSkipped += 1;
           stats.deadlineSkipped += 1;
@@ -1242,16 +1268,18 @@ function createSukebeiMetadataAdapter(options = {}) {
         }
         let result = null;
         for (const provider of codeProviders) {
-          if (stats.providerCircuitOpen[provider]) {
+          if (provider !== 'metatube' && stats.providerCircuitOpen[provider]) {
             stats.providerCircuitOpen[provider] += 1;
             continue;
           }
           const remaining = Math.max(metadataDeadlineAt - Date.now(), 250);
-          const lookupTimeoutMs = Math.min(
-            Math.max(Number(config.metadataLookupTimeoutMs || 2_500), 750),
-            remaining,
-            3_500
-          );
+          const lookupTimeoutMs = provider === 'metatube'
+            ? Math.min(210_000, remaining)
+            : Math.min(
+                Math.max(Number(config.metadataLookupTimeoutMs || 2_500), 750),
+                remaining,
+                3_500
+              );
           result = await queryExactCodeProvider(
             provider,
             clients[provider],
@@ -1260,12 +1288,14 @@ function createSukebeiMetadataAdapter(options = {}) {
             { stats, timeoutMs: lookupTimeoutMs }
           );
           if (!result.ok) {
-            providerFailures[provider] = (providerFailures[provider] || 0) + 1;
-            if (providerFailures[provider] >= 3) stats.providerCircuitOpen[provider] = 1;
+            if (provider !== 'metatube') {
+              providerFailures[provider] = (providerFailures[provider] || 0) + 1;
+              if (providerFailures[provider] >= 3) stats.providerCircuitOpen[provider] = 1;
+            }
             continue;
           }
           providerFailures[provider] = 0;
-          break;
+          if (result.candidate || provider !== 'metatube') break;
         }
         stats.codeStageCompleted += 1;
         if (result?.candidate) {
@@ -1360,20 +1390,27 @@ function createSukebeiMetadataAdapter(options = {}) {
       if (!item) continue;
       const evaluation = evaluateContent(item, filterConfig);
       if (!evaluation.excluded) {
-        allowed.push(item);
+        if (!metatubeStrict || isMetaTubePoster(item.poster)) allowed.push(item);
         continue;
       }
       stats.filtered += 1;
       incrementCounter(stats.filterReasons, evaluation.reason);
     }
 
+    if (metatubeStrict && strictMinimum > 0 && allowed.length < strictMinimum) {
+      stats.returned = 0;
+      stats.totalElapsedMs = Date.now() - requestStartedAt;
+      stats.deadlineExceededMs = Math.max(Date.now() - deadlineAt, 0);
+      lastDiagnostics = freezeDiagnostics(stats);
+      recordSukebeiResult({ ready: false, cards: 0, metatubePosters: allowed.length, generatedPosters: 0 });
+      return remember([]);
+    }
     stats.persistentArtworkWrites += artworkStore.setMany(allowed);
     // Keep one Sukebei catalogue. Prefer verified scene artwork, then fill the
     // complete requested Stremio window with honest title-specific cards backed
     // by each real upstream torrent identity. Artwork failure must not discard
     // a valid playable info hash.
-    const needed = safeSkip + safeLimit;
-    if (catalogDefinition?.mode === 'top' && allowed.length < needed) {
+    if (catalogDefinition?.mode === 'top' && allowed.length < needed && !metatubeStrict) {
       const existing = new Set(allowed.map(item => String(item.sourceId)));
       for (const source of normalized) {
         if (allowed.length >= needed || existing.has(String(source.sourceId))) continue;
@@ -1404,6 +1441,16 @@ function createSukebeiMetadataAdapter(options = {}) {
     // Honor Stremio pagination over the combined, deduplicated upstream pool.
     const window = allowed.slice(safeSkip, safeSkip + safeLimit);
     stats.returned = window.length;
+    if (metatubeStrict && safeSkip === 0) {
+      const cards = window.length;
+      const metatubePosters = window.filter(item => isMetaTubePoster(item.poster)).length;
+      recordSukebeiResult({
+        ready: cards >= strictMinimum && cards <= safeLimit && metatubePosters === cards && stats.rssFallbackCards === 0,
+        cards,
+        metatubePosters,
+        generatedPosters: stats.rssFallbackCards,
+      });
+    }
     stats.totalElapsedMs = Date.now() - requestStartedAt;
     stats.deadlineExceededMs = Math.max(Date.now() - deadlineAt, 0);
     lastDiagnostics = freezeDiagnostics(stats);

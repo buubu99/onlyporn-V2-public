@@ -129,17 +129,32 @@ function safeHttpsUrl(value) {
 
 function normalizedImages(images) {
   return (Array.isArray(images) ? images : [])
-    .map(image => ({
-      url: safeHttpsUrl(
-        image?.url ||
-          image?.large ||
-          image?.medium ||
-          image?.small ||
-          image
-      ),
-      width: Number.parseInt(String(image?.width || 0), 10) || 0,
-      height: Number.parseInt(String(image?.height || 0), 10) || 0,
-    }))
+    .map(image => {
+      const isObject =
+        image !== null &&
+        typeof image === 'object' &&
+        !Array.isArray(image);
+
+      const candidate = isObject
+        ? (
+            image.url ||
+            image.large ||
+            image.medium ||
+            image.small ||
+            ''
+          )
+        : image;
+
+      return {
+        url: safeHttpsUrl(candidate),
+        width: isObject
+          ? Number.parseInt(String(image.width || 0), 10) || 0
+          : 0,
+        height: isObject
+          ? Number.parseInt(String(image.height || 0), 10) || 0
+          : 0,
+      };
+    })
     .filter(image => image.url);
 }
 

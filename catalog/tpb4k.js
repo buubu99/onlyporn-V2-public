@@ -207,13 +207,17 @@ function isTpb4kEnabled(env = process.env) {
 }
 
 function toManifestCatalog(definition) {
+  const extra = definition.source === 'stripchat'
+    ? [{ name: 'skip' }]
+    : [{ name: 'search' }, { name: 'skip' }];
+
   return Object.freeze({
     id: definition.id,
     type: definition.type || 'movie',
     name: definition.name,
     posterShape: 'poster',
-    extra: [{ name: 'skip' }],
-    extraSupported: ['skip'],
+    extra,
+    extraSupported: extra.map(item => item.name),
   });
 }
 

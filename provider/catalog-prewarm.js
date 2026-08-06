@@ -2,6 +2,7 @@
 
 const crypto = require('node:crypto');
 const logger = require('../logger');
+const { recordCatalogPrewarmResult } = require('./runtime-readiness');
 
 const DEFERRED_CATALOG_IDS = new Set([
   'tpb4k.stripchat.girls',
@@ -55,6 +56,11 @@ function activeCatalogsFromManifest(manifest) {
   );
 }
 
+function minimumHealthyMetas(catalogId) {
+  if (catalogId === 'tpb4k.sukebei.top') return 24;
+  if (catalogId === 'tpb4k.studio.playboyplus.top') return 30;
+  return 1;
+}
 function catalogUrl(baseUrl, catalog, runId, pass) {
   const query = new URLSearchParams({
     skip: '0',
@@ -137,10 +143,12 @@ async function requestCatalog({
       }
     );
     const metas = Array.isArray(response.body?.metas) ? response.body.metas.length : 0;
+    const minimumMetas = minimumHealthyMetas(catalog.id);
     return {
       catalogId: catalog.id,
       catalogType: catalog.type,
-      healthy: response.ok && !response.parseError && metas > 0,
+      healthy: response.ok && !response.parseError && metas >= minimumMetas,
+      minimumMetas,
       httpStatus: response.status,
       metas,
       elapsedMs: response.elapsedMs,
@@ -192,7 +200,7 @@ async function runCatalogPrewarm(options = {}) {
     options.requestTimeoutMs,
     DEFAULTS.requestTimeoutMs,
     1_000,
-    300_000
+    900_000
   );
   const expectedActiveCatalogs = toInteger(
     options.expectedActiveCatalogs,
@@ -416,7 +424,7 @@ function readSchedulerConfig(env = process.env) {
       env.ONLYPORN_PREWARM_REQUEST_TIMEOUT_MS,
       DEFAULTS.requestTimeoutMs,
       1_000,
-      300_000
+      900_000
     ),
     expectedActiveCatalogs: toInteger(
       env.ONLYPORN_PREWARM_EXPECTED_ACTIVE,
@@ -476,16 +484,25 @@ function startCatalogPrewarmScheduler(options = {}) {
       expectedActiveCatalogs: config.expectedActiveCatalogs,
       verificationPasses: config.verificationPasses,
     })
+      .then(result => {
+        recordCatalogPrewarmResult(result);
+        return result;
+      })
       .catch(error => {
         log.error(
           { reason, error: error?.message || String(error) },
           'OnlyPorn catalog prewarm run failed'
         );
-        return {
+        const result = {
           success: false,
           error: error?.message || String(error),
+          activeCatalogs: 0,
+          healthyCatalogs: 0,
           missingCatalogs: [],
+          finishedAt: new Date().toISOString(),
         };
+        recordCatalogPrewarmResult(result);
+        return result;
       })
       .finally(() => {
         running = null;
@@ -535,6 +552,7 @@ module.exports = {
   DEFAULTS,
   DEFERRED_CATALOG_IDS,
   activeCatalogsFromManifest,
+  minimumHealthyMetas,
   normalizeBaseUrl,
   readSchedulerConfig,
   requestCatalog,

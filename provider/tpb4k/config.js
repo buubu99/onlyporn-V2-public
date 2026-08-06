@@ -161,11 +161,11 @@ function readTpb4kConfig(env = process.env) {
     sukebeiEnrichmentDeadlineMs: positiveInteger(
       env.TPB4K_SUKEBEI_ENRICHMENT_DEADLINE_MS,
       24_000,
-      { min: 4_000, max: 28_000 }
+      { min: 4_000, max: 900_000 }
     ),
     sukebeiCodeLookupLimit: positiveInteger(env.TPB4K_SUKEBEI_CODE_LOOKUP_LIMIT, 40, {
       min: 1,
-      max: 60,
+      max: 180,
     }),
     sukebeiTitleLookupLimit: positiveInteger(env.TPB4K_SUKEBEI_TITLE_LOOKUP_LIMIT, 4, {
       min: 0,

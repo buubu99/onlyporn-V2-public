@@ -1,6 +1,10 @@
 const { addonBuilder } = require('stremio-addon-sdk');
 const { loadProvider } = require('./provider');
 const packageInfo = require('./package.json');
+const {
+  applyTpb4kCatalogSearch,
+  toProviderCatalogArgs,
+} = require('./provider/tpb4k/catalog-search');
 const { catalogs: sourceCatalogs } = require('./catalog');
 const logger = require('./logger');
 const {
@@ -62,8 +66,10 @@ function logFiltered(resource, args, result) {
 
 builder.defineCatalogHandler(async args => {
   try {
-    const response = await loadProvider(args.id).handleCatalog(args);
-    const filtered = filterCatalogResponse(response, contentFilter);
+    const providerArgs = toProviderCatalogArgs(args);
+    const response = await loadProvider(args.id).handleCatalog(providerArgs);
+    const searched = applyTpb4kCatalogSearch(response, args);
+    const filtered = filterCatalogResponse(searched, contentFilter);
     logFiltered('catalog', args, filtered);
     return filtered.response;
   } catch (error) {

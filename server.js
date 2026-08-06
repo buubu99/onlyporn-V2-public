@@ -6,12 +6,16 @@ const logger = require('./logger');
 const { startCatalogPrewarmScheduler } = require('./provider/catalog-prewarm');
 const { installSukebeiPosterRoute } = require('./provider/tpb4k/sukebei-rss-poster');
 const { installStudioReleasePosterRoute } = require('./provider/tpb4k/studio-release-poster');
+const { installMetaTubeImageProxyRoute } = require('./provider/tpb4k/metatube-image-proxy');
+const { installRuntimeReadinessRoute } = require('./provider/runtime-readiness');
 
 serveHTTP(addonInterface, {
   port: process.env.PORT || 49581,
   configureApp(app) {
     installSukebeiPosterRoute(app);
     installStudioReleasePosterRoute(app);
+    installMetaTubeImageProxyRoute(app);
+    installRuntimeReadinessRoute(app);
   },
 })
   .then(({ url, server }) => {
