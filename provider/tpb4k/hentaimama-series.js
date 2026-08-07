@@ -757,12 +757,15 @@ function createHentaiMamaSeriesAdapter(options = {}) {
         catalogWindows.set(key, state);
       }
       let pages = 0;
+      const maxPagesThisRequest = catalog?.searchMode
+        ? 3
+        : NATIVE_MAX_CATALOG_PAGES_PER_REQUEST;
       // All and New keep the existing fast listing path. Only Top performs
       // detail preflight, bounded to the normal addon request budget.
       const topDeadlineAt = catalog?.mode === 'top'
         ? Date.now() + Math.min(Math.max(Number(options.config.requestTimeoutMs || 15_000) + 7_000, 10_000), 24_000)
         : Infinity;
-      while (state.records.length < targetEnd && pages < NATIVE_MAX_CATALOG_PAGES_PER_REQUEST) {
+      while (state.records.length < targetEnd && pages < maxPagesThisRequest) {
         if (catalog?.mode === 'top' && Date.now() >= topDeadlineAt) break;
         const page = state.nextPage;
         const url = buildCatalogUrl('hentai', catalog, page);

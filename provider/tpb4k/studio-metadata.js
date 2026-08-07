@@ -302,6 +302,7 @@ function createStudioMetadataAdapter(options = {}) {
       return [];
     }
     const platformMode = catalog?.metadataMode === 'platform-query';
+    const searchQuery = compactText(catalog?.searchQuery || '');
     const aliases = platformMode
       ? [...new Set([...(catalog?.metadataQueries || []), studio].map(compactText).filter(Boolean))].slice(0, 3)
       : [...studioAliases(studio)].slice(0, 3);
@@ -337,18 +338,23 @@ function createStudioMetadataAdapter(options = {}) {
         stats.requests += 1;
         let scenes;
         try {
-          scenes = await runMetadataCall(() => client.queryScenes(platformMode
+          const platformTerm = searchQuery ? `${alias} ${searchQuery}` : alias;
+          const request = platformMode
             ? (provider === 'tpdb'
-              ? { page, perPage: 100, query: alias, sort: 'DATE', orderBy: 'date' }
-              : { page, perPage: 100, title: alias, sort: 'DATE' })
+              ? { page, perPage: 100, query: platformTerm, sort: 'DATE', orderBy: 'date' }
+              : { page, perPage: 100, title: platformTerm, sort: 'DATE' })
             : {
               page,
               perPage: 100,
+              ...(searchQuery
+                ? (provider === 'tpdb' ? { query: searchQuery } : { title: searchQuery })
+                : {}),
               studio: alias,
               studioIds,
               sort: 'DATE',
               orderBy: 'date',
-            }));
+            };
+          scenes = await runMetadataCall(() => client.queryScenes(request));
         } catch (error) {
           stats.providerErrors[provider] = (stats.providerErrors[provider] || 0) + 1;
           const reason = classifyProviderError(error);
@@ -392,7 +398,8 @@ function createStudioMetadataAdapter(options = {}) {
     if (!studio || !providers.length) return [];
 
     const metadataMode = compactText(catalog?.metadataMode || 'studio');
-    const cacheKey = `studio-metadata:${compactKey(studio)}:${compactKey(metadataMode)}:${safeSkip}:${safeLimit}:${filterConfig.enabled}:${filterConfig.blockGay}:${filterConfig.blockInterracial}:${filterConfig.blockUnknown}`;
+    const searchQuery = compactText(catalog?.searchQuery || '');
+    const cacheKey = `studio-metadata:${compactKey(studio)}:${compactKey(metadataMode)}:${compactKey(searchQuery) || 'BROWSE'}:${safeSkip}:${safeLimit}:${filterConfig.enabled}:${filterConfig.blockGay}:${filterConfig.blockInterracial}:${filterConfig.blockUnknown}`;
     const cached = cache.getEntry(cacheKey);
     if (cached && !cached.negative) {
       lastDiagnostics = freezeDiagnostics({

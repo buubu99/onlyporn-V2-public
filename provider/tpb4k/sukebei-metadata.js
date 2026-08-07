@@ -1002,10 +1002,19 @@ function createSukebeiMetadataAdapter(options = {}) {
   async function catalog({ catalog: catalogDefinition, skip = 0, limit = 40 }) {
     if (!client.configured) return [];
     const requestStartedAt = Date.now();
-    const budgetMs = Math.min(
+    const searchQuery = compactText(catalogDefinition?.searchQuery || '').slice(0, 120);
+    const searchMode = Boolean(searchQuery);
+    const configuredBudgetMs = Math.min(
       Math.max(Number(config.sukebeiEnrichmentDeadlineMs || 24_000), 4_000),
       900_000
     );
+    const searchBudgetMs = Math.min(
+      Math.max(Number(env.ONLYPORN_SEARCH_SUKEBEI_BUDGET_MS || 45_000), 10_000),
+      90_000
+    );
+    const budgetMs = searchMode
+      ? Math.min(configuredBudgetMs, searchBudgetMs)
+      : configuredBudgetMs;
     const deadlineAt = requestStartedAt + budgetMs;
     const rssDeadlineAt = Math.min(
       deadlineAt,
@@ -1014,7 +1023,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     const safeSkip = Math.max(Number.parseInt(String(skip || 0), 10) || 0, 0);
     const safeLimit = Math.min(Math.max(Number.parseInt(String(limit || 40), 10) || 40, 1), 100);
     const needed = safeSkip + safeLimit;
-    const strictMinimum = safeSkip === 0 ? Math.min(24, safeLimit) : 0;
+    const strictMinimum = searchMode ? 0 : (safeSkip === 0 ? Math.min(24, safeLimit) : 0);
     const feed = [];
     const useOfficialTopPage = officialTopMode && catalogDefinition?.mode === 'top';
     const requestedRssPages = Math.min(Math.max(Number(config.sukebeiRssPages || 4), 1), 8);
@@ -1054,12 +1063,12 @@ function createSukebeiMetadataAdapter(options = {}) {
       const topUrl = new URL(detailOrigin);
       topUrl.searchParams.set('f', '0');
       topUrl.searchParams.set('c', '2_2');
-      topUrl.searchParams.set('q', '');
+      topUrl.searchParams.set('q', searchQuery);
       topUrl.searchParams.set('s', 'seeders');
       topUrl.searchParams.set('o', 'desc');
       const remaining = Math.max(rssDeadlineAt - Date.now(), 250);
       const payload = await topClient.fetchText(topUrl.toString(), {
-        cacheKey: 'sukebei:top:real-life-videos:seeders',
+        cacheKey: `sukebei:top:real-life-videos:seeders:${compactKey(searchQuery) || 'BROWSE'}`,
         timeoutMs: Math.min(topClient.timeoutMs, remaining),
       });
       const pageItems = parseSukebeiTopHtml(payload, detailOrigin);
@@ -1072,9 +1081,10 @@ function createSukebeiMetadataAdapter(options = {}) {
       if (Date.now() >= rssDeadlineAt) break;
       const pageUrl = new URL(client.endpoint);
       pageUrl.searchParams.set('p', String(page));
+      if (searchMode) pageUrl.searchParams.set('q', searchQuery);
       const remaining = Math.max(rssDeadlineAt - Date.now(), 250);
       const payload = await client.fetchText(pageUrl.toString(), {
-        cacheKey: `sukebei:rss:${page}`,
+        cacheKey: `sukebei:rss:${compactKey(searchQuery) || 'BROWSE'}:${page}`,
         timeoutMs: Math.min(client.timeoutMs, remaining),
       });
       const pageItems = parseRssFeed(payload);
@@ -1102,7 +1112,7 @@ function createSukebeiMetadataAdapter(options = {}) {
       rssCategory: useOfficialTopPage ? '2_2' : (() => {
         try { return new URL(client.endpoint).searchParams.get('c') || ''; } catch { return ''; }
       })(),
-      discoveryMode: useOfficialTopPage ? 'official-html-top+rss' : 'rss',
+      discoveryMode: `${useOfficialTopPage ? 'official-html-top+rss' : 'rss'}${searchMode ? '-search' : ''}`,
       codeCandidates: 0,
       codeStageJobs: 0,
       codeStageCompleted: 0,
@@ -1159,7 +1169,9 @@ function createSukebeiMetadataAdapter(options = {}) {
     stats.inspected = normalized.length;
     stats.codeCandidates = normalized.filter(item => extractSceneCodes(item.title).length > 0).length;
 
-    const codeLimit = Math.min(Math.max(Number(config.sukebeiCodeLookupLimit || 130), 1), 180);
+    const codeLimit = searchMode
+      ? Math.min(Math.max(Number(env.ONLYPORN_SEARCH_SUKEBEI_CODE_LIMIT || 12), 1), 24)
+      : Math.min(Math.max(Number(config.sukebeiCodeLookupLimit || 130), 1), 180);
     const titleLimit = metatubeStrict ? 0 : Math.min(Math.max(Number(config.sukebeiTitleLookupLimit || 4), 0), 20);
     const detailLimit = metatubeStrict ? 0 : Math.min(Math.max(Number(config.sukebeiDetailImageLimit || 20), 0), 40);
     const detailTargetLimit = detailLimit;
@@ -1402,7 +1414,7 @@ function createSukebeiMetadataAdapter(options = {}) {
       stats.totalElapsedMs = Date.now() - requestStartedAt;
       stats.deadlineExceededMs = Math.max(Date.now() - deadlineAt, 0);
       lastDiagnostics = freezeDiagnostics(stats);
-      recordSukebeiResult({ ready: false, cards: 0, metatubePosters: allowed.length, generatedPosters: 0 });
+      if (!searchMode) recordSukebeiResult({ ready: false, cards: 0, metatubePosters: allowed.length, generatedPosters: 0 });
       return remember([]);
     }
     stats.persistentArtworkWrites += artworkStore.setMany(allowed);
@@ -1441,7 +1453,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     // Honor Stremio pagination over the combined, deduplicated upstream pool.
     const window = allowed.slice(safeSkip, safeSkip + safeLimit);
     stats.returned = window.length;
-    if (metatubeStrict && safeSkip === 0) {
+    if (!searchMode && metatubeStrict && safeSkip === 0) {
       const cards = window.length;
       const metatubePosters = window.filter(item => isMetaTubePoster(item.poster)).length;
       recordSukebeiResult({

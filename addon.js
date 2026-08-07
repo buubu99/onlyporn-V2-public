@@ -3,6 +3,8 @@ const { loadProvider } = require('./provider');
 const packageInfo = require('./package.json');
 const {
   applyTpb4kCatalogSearch,
+  isTpb4kSearchRequest,
+  normalizeCatalogSearchArgs,
   toProviderCatalogArgs,
 } = require('./provider/tpb4k/catalog-search');
 const { catalogs: sourceCatalogs } = require('./catalog');
@@ -66,9 +68,11 @@ function logFiltered(resource, args, result) {
 
 builder.defineCatalogHandler(async args => {
   try {
-    const providerArgs = toProviderCatalogArgs(args);
+    args = normalizeCatalogSearchArgs(args);
+    const tpb4kSearch = isTpb4kSearchRequest(args);
+    const providerArgs = tpb4kSearch ? args : toProviderCatalogArgs(args);
     const response = await loadProvider(args.id).handleCatalog(providerArgs);
-    const searched = applyTpb4kCatalogSearch(response, args);
+    const searched = tpb4kSearch ? response : applyTpb4kCatalogSearch(response, args);
     const filtered = filterCatalogResponse(searched, contentFilter);
     logFiltered('catalog', args, filtered);
     return filtered.response;

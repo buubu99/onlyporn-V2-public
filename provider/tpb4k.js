@@ -10,6 +10,12 @@ const {
 const { readTpb4kConfig, publicConfigStatus, redactSecrets } = require('./tpb4k/config');
 const { fillCatalogWithMetadata } = require('./tpb4k/catalog-metadata-fill');
 const { createCatalogResponseStore } = require('./tpb4k/catalog-response-store');
+const { createSearchSqliteStore } = require('./search-sqlite');
+const {
+  mergeSearchItems,
+  normalizeSearchQuery,
+  rankSearchItems,
+} = require('./tpb4k/search-engine');
 const { decodeTpb4kId, encodeTpb4kId } = require('./tpb4k/id-codec');
 const { buildSceneIdentity } = require('./tpb4k/identity');
 const { getAdapter, installBuiltInAdapters } = require('./tpb4k/index');
@@ -256,6 +262,14 @@ class Tpb4kProvider {
     this.catalogResponseCache = new Map();
     this.catalogInFlight = new Map();
     this.catalogResponseStore = options.catalogResponseStore || createCatalogResponseStore({ env: this.env });
+    this.searchStore = options.searchStore || createSearchSqliteStore({ env: this.env });
+    this.searchInFlight = new Map();
+    this.searchNetworkActive = 0;
+    this.searchNetworkWaiters = [];
+    this.searchNetworkConcurrency = Math.min(
+      Math.max(Number.parseInt(String(this.env.ONLYPORN_SEARCH_NETWORK_CONCURRENCY || 6), 10) || 6, 1),
+      12
+    );
     if (options.installBuiltIns !== false) installBuiltInAdapters({ env: this.env, fetchImpl: this.fetchImpl });
   }
   static create(options) { return new Tpb4kProvider(options); }
@@ -271,6 +285,10 @@ class Tpb4kProvider {
     if (!this.enabled()) return { metas: [] };
     const definition = getCatalogDefinition(args.id);
     if (!definition || args.type !== (definition.type || MOVIE_TYPE)) return { metas: [] };
+    const searchQuery = normalizeSearchQuery(args?.extra?.search);
+    if (searchQuery && definition.source !== 'stripchat') {
+      return this._handleCatalogSearch(args, definition, searchQuery);
+    }
     // The explicit cache revision invalidates incompatible catalogue formats.
     // Package releases using the same revision reuse last-known-good rows so a
     // deploy does not force every Home catalogue through a cold provider burst.
@@ -338,6 +356,215 @@ class Tpb4kProvider {
     return operation;
   }
 
+  async _withSearchNetworkSlot(operation) {
+    if (this.searchNetworkActive >= this.searchNetworkConcurrency) {
+      await new Promise(resolve => this.searchNetworkWaiters.push(resolve));
+    }
+    this.searchNetworkActive += 1;
+    try {
+      return await operation();
+    } finally {
+      this.searchNetworkActive -= 1;
+      this.searchNetworkWaiters.shift()?.();
+    }
+  }
+
+  _rememberSearchPool(catalogId, items) {
+    if (!Array.isArray(items) || !items.length || !this.searchStore?.enabled) return;
+    // Search indexing must never delay browse/prewarm/readiness.
+    Promise.resolve(this.searchStore.upsertPool(catalogId, items)).catch(() => {});
+  }
+
+  async _handleCatalogSearch(args, definition, query) {
+    const skip = Math.max(Number.parseInt(String(args?.extra?.skip || 0), 10) || 0, 0);
+    const pageSize = 40;
+    const key = `${definition.id}\0${query}`;
+    const cached = await this.searchStore.getQuery(definition.id, query);
+    const slice = metas => ({
+      metas: (Array.isArray(metas) ? metas : []).slice(skip, skip + pageSize),
+    });
+
+    if (cached?.fresh) return slice(cached.metas);
+
+    if (this.searchInFlight.has(key)) {
+      if (cached) return slice(cached.metas);
+      return slice((await this.searchInFlight.get(key))?.metas);
+    }
+
+    const operation = this._handleCatalogSearchFresh(args, definition, query)
+      .then(async value => {
+        const metas = Array.isArray(value?.metas) ? value.metas : [];
+        await this.searchStore.putQuery(definition.id, query, metas);
+        return { metas };
+      })
+      .catch(error => {
+        logger().warn({
+          provider: this.name,
+          catalogId: definition.id,
+          search: query,
+          error: redactSecrets(error?.message || error, this.env),
+        }, 'OnlyPorn search refresh failed safely');
+        return cached ? { metas: cached.metas } : { metas: [] };
+      })
+      .finally(() => this.searchInFlight.delete(key));
+
+    this.searchInFlight.set(key, operation);
+
+    // File-backed stale-while-revalidate: once a query has succeeded, an
+    // expired-but-usable result returns immediately while one refresh runs.
+    if (cached) {
+      operation.catch(() => {});
+      return slice(cached.metas);
+    }
+    return slice((await operation).metas);
+  }
+
+  async _handleCatalogSearchFresh(args, definition, query) {
+    if (!this.enabled()) return { metas: [] };
+    const adapter = getAdapter(definition.source);
+    if (!adapter) return { metas: [] };
+
+    const config = readTpb4kConfig(this.env);
+    const generalResultLimit = Math.min(
+      Math.max(Number.parseInt(String(this.env.ONLYPORN_SEARCH_RESULT_LIMIT || 80), 10) || 80, 1),
+      100
+    );
+    const poolLimit = Math.min(
+      Math.max(Number.parseInt(String(this.env.ONLYPORN_SEARCH_POOL_LIMIT || 160), 10) || 160, 40),
+      300
+    );
+    const cachedPool = await this.searchStore.searchPool(definition.id, query, poolLimit);
+    let rawItems = [];
+    let searchMode = 'sqlite-pool';
+    let studioSearchRecovery;
+
+    const requiresPlayableBinding = ['studio-metadata', 'platform-hybrid'].includes(definition.source)
+      && definition.lookupSource === 'torrent-index';
+
+    if (requiresPlayableBinding) {
+      const resolverAdapter = getAdapter(definition.lookupSource);
+      if (!resolverAdapter) return { metas: [] };
+
+      const cachedMatches = rankSearchItems(cachedPool, query);
+      const cachedPlayable = cachedMatches.filter(item => torrentBundle(item).length > 0);
+      if (cachedPlayable.length) {
+        rawItems = cachedPlayable.slice(0, 40);
+      } else {
+        searchMode = 'studio-upstream-query';
+        let metadataItems = cachedMatches;
+        if (!metadataItems.length) {
+          metadataItems = await this._withSearchNetworkSlot(() => adapter.catalog({
+            catalog: {
+              ...definition,
+              playbackBindingPool: true,
+              searchMode: true,
+              searchQuery: query,
+            },
+            skip: 0,
+            limit: Math.min(poolLimit, definition.metadataMode === 'platform-query' ? 120 : 80),
+            config,
+          }));
+          this._rememberSearchPool(definition.id, metadataItems);
+          metadataItems = rankSearchItems(metadataItems, query);
+        }
+
+        // Resolve only metadata that actually matched the user query. This is
+        // the key difference from the old first-40 browse filter.
+        metadataItems = metadataItems.slice(0, 24);
+        if (!metadataItems.length) return { metas: [] };
+
+        const binding = await this._withSearchNetworkSlot(() => recoverStudioPlayback({
+          catalog: { ...definition, searchMode: true, searchQuery: query },
+          metadataItems,
+          torrentItems: [],
+          resolverAdapter,
+          config,
+          skip: 0,
+          limit: 40,
+        }));
+        studioSearchRecovery = binding.recovery;
+        rawItems = [...binding.items];
+      }
+    } else if (definition.id === 'tpb4k.sukebei.top') {
+      const cachedMatches = rankSearchItems(cachedPool, query);
+      if (cachedMatches.length >= 4) {
+        rawItems = cachedMatches.slice(0, 24);
+      } else {
+        searchMode = 'sukebei-upstream-query';
+        const fetched = await this._withSearchNetworkSlot(() => adapter.catalog({
+          catalog: { ...definition, searchMode: true, searchQuery: query },
+          skip: 0,
+          limit: 24,
+          config,
+        }));
+        this._rememberSearchPool(definition.id, fetched);
+        rawItems = rankSearchItems(mergeSearchItems(cachedPool, fetched), query).slice(0, 24);
+      }
+    } else {
+      let matches = rankSearchItems(cachedPool, query);
+      if (matches.length < 8) {
+        searchMode = 'bounded-source-expansion';
+        const fetched = await this._withSearchNetworkSlot(() => adapter.catalog({
+          catalog: { ...definition, searchMode: true, searchQuery: query },
+          skip: 0,
+          limit: Math.min(poolLimit, 100),
+          config,
+        }));
+        this._rememberSearchPool(definition.id, fetched);
+        matches = rankSearchItems(mergeSearchItems(cachedPool, fetched), query);
+      }
+      rawItems = matches.slice(0, generalResultLimit);
+
+      // PornRips enrichment used to run over an unrelated browse pool. Search
+      // now filters first and only enriches the matching rows.
+      if (definition.id === 'tpb4k.pornrips.recent' && rawItems.length) {
+        const enrichmentAdapter = getAdapter('torrent-index');
+        if (typeof enrichmentAdapter?.enrichMetadata === 'function') {
+          const enrichment = await this._withSearchNetworkSlot(() => enrichmentAdapter.enrichMetadata(rawItems, {
+            preserveSourcePoster: true,
+            replaceTitle: true,
+          }));
+          rawItems = [...enrichment.items];
+        }
+      }
+    }
+
+    const normalizedItems = (Array.isArray(rawItems) ? rawItems : [])
+      .map(item => {
+        const itemAdapter = getAdapter(item?.source) || adapter;
+        return normalizeDiscoveryItem(itemAdapter, { ...item, catalogId: definition.id });
+      })
+      .filter(Boolean)
+      .filter(item => definition.id !== 'tpb4k.sukebei.top' || Boolean(safePoster(item.poster)))
+      .filter(item => !['studio-metadata', 'platform-hybrid'].includes(definition.source) || Boolean(realStudioPoster(item.poster)));
+
+    const contentFiltered = filterItems(normalizedItems, this.contentFilter);
+    const ranked = rankSearchItems(contentFiltered.items, query);
+    const resultLimit = requiresPlayableBinding ? 40 : generalResultLimit;
+    const finalItems = ranked.slice(0, resultLimit);
+    const metas = finalItems.map(item => toMetaPreview(item, definition.id, config));
+
+    // Final normalized/playable rows also improve later related queries.
+    this._rememberSearchPool(definition.id, finalItems);
+
+    logger().info({
+      provider: this.name,
+      catalogId: definition.id,
+      source: definition.source,
+      search: query,
+      searchMode,
+      metas: metas.length,
+      sqliteSearch: Boolean(this.searchStore?.enabled),
+      ...(studioSearchRecovery ? { studioSearchRecovery } : {}),
+      contentFilter: {
+        removed: contentFiltered.removed,
+        reasons: contentFiltered.reasons,
+      },
+    }, 'OnlyPorn source-aware search completed');
+
+    return { metas };
+  }
+
   async _handleCatalogFresh(args) {
     if (!this.enabled()) return { metas: [] };
     const definition = getCatalogDefinition(args.id);
@@ -392,6 +619,7 @@ class Tpb4kProvider {
             config,
           }) : Promise.resolve([]),
         ]);
+        this._rememberSearchPool(definition.id, metadataItems);
         let binding = bindStudioPlayback({
           catalog: definition,
           metadataItems,
@@ -503,6 +731,7 @@ class Tpb4kProvider {
       logger().warn({ provider: this.name, catalogId: definition.id, source: definition.source, error: redactSecrets(error?.message || error, this.env) }, 'OnlyPorn catalog adapter failed safely');
     }
 
+    this._rememberSearchPool(definition.id, rawItems);
     const normalizedItems = (Array.isArray(rawItems) ? rawItems : [])
       .map(item => {
         const itemAdapter = getAdapter(item?.source) || adapter;

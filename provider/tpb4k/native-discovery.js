@@ -1354,9 +1354,12 @@ function createNativeAdapter(source, options = {}) {
       // Keeping a canonical timeline also tolerates WordPress page overlap
       // when new posts shift between page requests.
       let pagesFetched = 0;
+      const maxPagesThisRequest = catalog?.searchMode
+        ? 3
+        : NATIVE_MAX_CATALOG_PAGES_PER_REQUEST;
       while (
         state.records.length < targetEnd
-        && pagesFetched < NATIVE_MAX_CATALOG_PAGES_PER_REQUEST
+        && pagesFetched < maxPagesThisRequest
       ) {
         const page = state.nextPage;
         const url = buildCatalogUrl(source, catalog, page);

@@ -11,6 +11,15 @@ function compactSearch(value) {
     .slice(0, MAX_SEARCH_LENGTH);
 }
 
+function normalizeCatalogSearchArgs(args = {}) {
+  if (!args || typeof args !== 'object' || !args.extra || !Object.hasOwn(args.extra, 'search')) return args;
+  const search = compactSearch(args.extra.search);
+  const extra = { ...args.extra };
+  if (search) extra.search = search;
+  else delete extra.search;
+  return { ...args, extra };
+}
+
 function normalizeForMatch(value) {
   return String(value || '')
     .normalize('NFKD')
@@ -61,9 +70,6 @@ function metaSearchFields(meta = {}) {
     field(meta.description, 40),
     field(onlyporn.sceneCode, 150),
     field(listText(onlyporn.tags), 120),
-    field(onlyporn.source, 20),
-    field(onlyporn.metadataProvider, 20),
-    field(onlyporn.lookupSource, 20),
   ].filter(Boolean);
 }
 
@@ -177,6 +183,7 @@ module.exports = {
   isTpb4kId,
   isTpb4kSearchRequest,
   metaSearchFields,
+  normalizeCatalogSearchArgs,
   normalizeForMatch,
   scoreMeta,
   searchMetas,

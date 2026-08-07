@@ -5,6 +5,16 @@ const { bindStudioPlayback, validInfoHash } = require('./studio-playback-binding
 function compact(value) { return String(value || '').normalize('NFKC').replace(/\s+/g, ' ').trim(); }
 function key(value) { return compact(value).toLowerCase().replace(/[^a-z0-9]+/g, ''); }
 function profile(catalog = {}) {
+  if (catalog?.searchMode) {
+    return Object.freeze({
+      maxTargets: 4,
+      minimumCards: 2,
+      desiredCandidates: 1,
+      concurrency: 2,
+      targetTimeoutMs: 4_000,
+      totalBudgetMs: 7_000,
+    });
+  }
   const studio = key(catalog.studio);
   if (studio === 'onlyfans') return Object.freeze({ maxTargets: 15, minimumCards: 8, desiredCandidates: 2, concurrency: 3, targetTimeoutMs: 6_500, totalBudgetMs: 22_000 });
   if (studio === 'digitalplayground') return Object.freeze({ maxTargets: 15, minimumCards: 8, desiredCandidates: 2, concurrency: 3, targetTimeoutMs: 6_500, totalBudgetMs: 22_000 });
