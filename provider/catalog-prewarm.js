@@ -1,6 +1,8 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const logger = require('../logger');
 const { recordCatalogPrewarmResult } = require('./runtime-readiness');
 
@@ -20,6 +22,112 @@ const DEFAULTS = Object.freeze({
   expectedActiveCatalogs: 33,
   verificationPasses: 1,
 });
+
+const SUKEBEI_READY_CATALOG_ID = 'tpb4k.sukebei.top';
+const STARTUP_PREWARM_READY_FILE = 'startup-prewarm-ready.json';
+
+function startupEnvTrue(value) {
+  return /^(?:1|true|yes|on)$/i.test(String(value || '').trim());
+}
+
+function startupPrewarmReadyPath(env = process.env) {
+  const runtimeDir = path.resolve(String(
+    env.ONLYPORN_RUNTIME_DIR || '/tmp/onlyporn-runtime'
+  ));
+  return path.join(runtimeDir, STARTUP_PREWARM_READY_FILE);
+}
+
+function startupMetaTubePoster(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:' &&
+      /\/onlyporn\/poster\/metatube\//i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function latestPrewarmCatalogResult(passSummaries, catalogId) {
+  const summaries = Array.isArray(passSummaries) ? passSummaries : [];
+  for (let index = summaries.length - 1; index >= 0; index -= 1) {
+    const results = Array.isArray(summaries[index]?.results)
+      ? summaries[index].results
+      : [];
+    const match = results.find(item => item?.catalogId === catalogId);
+    if (match) return match;
+  }
+  return null;
+}
+
+function writeStartupPrewarmReadyMarker(result, env = process.env) {
+  if (
+    result?.success !== true ||
+    Number(result.activeCatalogs) !== 33 ||
+    Number(result.healthyCatalogs) !== 33 ||
+    !Array.isArray(result.missingCatalogs) ||
+    result.missingCatalogs.length !== 0
+  ) {
+    return false;
+  }
+
+  const sukebei = latestPrewarmCatalogResult(
+    result.passSummaries,
+    SUKEBEI_READY_CATALOG_ID
+  );
+
+  const metas = Number(sukebei?.metas || 0);
+  const metatubePosters = Number(sukebei?.metatubePosters || 0);
+  const strictMetaTube =
+    startupEnvTrue(env.TPB4K_METATUBE_ENABLED) &&
+    startupEnvTrue(env.TPB4K_METATUBE_STRICT);
+
+  if (
+    sukebei?.healthy !== true ||
+    metas < 24 ||
+    metas > 40 ||
+    metatubePosters !== metas ||
+    !strictMetaTube
+  ) {
+    throw new Error(
+      `Render readiness refused: Sukebei is not strict-ready ` +
+      `(healthy=${Boolean(sukebei?.healthy)} metas=${metas} ` +
+      `metatubePosters=${metatubePosters} strict=${strictMetaTube})`
+    );
+  }
+
+  const markerPath = startupPrewarmReadyPath(env);
+  const temporary = `${markerPath}.${process.pid}.tmp`;
+  const marker = {
+    ready: true,
+    gate: 'catalog-prewarm-success',
+    latchedAt: new Date().toISOString(),
+    runId: String(result.runId || ''),
+    activeCatalogs: 33,
+    healthyCatalogs: 33,
+    missingCatalogs: [],
+    sukebei: {
+      healthy: true,
+      metas,
+      metatubePosters,
+      generatedPosters: 0,
+      strictMetaTube: true,
+    },
+  };
+
+  fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+  fs.writeFileSync(temporary, `${JSON.stringify(marker)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+  fs.renameSync(temporary, markerPath);
+
+  process.stdout.write(
+    `OnlyPorn PREWARM READY: 33/33 + Sukebei ${metas} MetaTube cards; ` +
+    `marker=${markerPath}\n`
+  );
+
+  return true;
+}
 
 function toInteger(value, fallback, min, max) {
   const parsed = Number.parseInt(String(value ?? ''), 10);
@@ -142,7 +250,11 @@ async function requestCatalog({
         'x-onlyporn-refresh-id': runId,
       }
     );
-    const metas = Array.isArray(response.body?.metas) ? response.body.metas.length : 0;
+    const metaRows = Array.isArray(response.body?.metas) ? response.body.metas : [];
+    const metas = metaRows.length;
+    const metatubePosters = catalog.id === SUKEBEI_READY_CATALOG_ID
+      ? metaRows.filter(meta => startupMetaTubePoster(meta?.poster)).length
+      : 0;
     const minimumMetas = minimumHealthyMetas(catalog.id);
     return {
       catalogId: catalog.id,
@@ -151,6 +263,7 @@ async function requestCatalog({
       minimumMetas,
       httpStatus: response.status,
       metas,
+      metatubePosters,
       elapsedMs: response.elapsedMs,
       error: response.parseError,
     };
@@ -339,6 +452,8 @@ async function runCatalogPrewarm(options = {}) {
           passSummaries,
           finishedAt,
         };
+        writeStartupPrewarmReadyMarker(result);
+
         log.info(
           {
             success: true,

@@ -9,11 +9,11 @@ const internalPort = Number(process.env.INTERNAL_ONLYPORN_PORT || 10001);
 const runtimeDir = path.resolve(String(
   process.env.ONLYPORN_RUNTIME_DIR || '/tmp/onlyporn-runtime'
 ));
-const readyMarkerPath = path.join(runtimeDir, 'startup-ready.json');
+const readyMarkerPath = path.join(runtimeDir, 'startup-prewarm-ready.json');
 
 let readyAnnounced = false;
 
-function writeJson(response, statusCode, payload, headOnly = false) {
+function sendJson(response, statusCode, payload, headOnly = false) {
   const body = `${JSON.stringify(payload)}\n`;
   response.writeHead(statusCode, {
     'content-type': 'application/json; charset=utf-8',
@@ -24,34 +24,41 @@ function writeJson(response, statusCode, payload, headOnly = false) {
   response.end(headOnly ? undefined : body);
 }
 
-function readReadyMarker() {
+function readValidMarker() {
   try {
-    const parsed = JSON.parse(fs.readFileSync(readyMarkerPath, 'utf8'));
+    const marker = JSON.parse(fs.readFileSync(readyMarkerPath, 'utf8'));
+    const metas = Number(marker?.sukebei?.metas || 0);
+    const posters = Number(marker?.sukebei?.metatubePosters || 0);
+
     if (
-      parsed?.ready === true &&
-      parsed?.catalog?.success === true &&
-      Number(parsed?.catalog?.activeCatalogs) === 33 &&
-      Number(parsed?.catalog?.healthyCatalogs) === 33 &&
-      parsed?.sukebei?.ready === true
+      marker?.ready === true &&
+      marker?.gate === 'catalog-prewarm-success' &&
+      Number(marker?.activeCatalogs) === 33 &&
+      Number(marker?.healthyCatalogs) === 33 &&
+      Array.isArray(marker?.missingCatalogs) &&
+      marker.missingCatalogs.length === 0 &&
+      marker?.sukebei?.healthy === true &&
+      marker?.sukebei?.strictMetaTube === true &&
+      metas >= 24 &&
+      metas <= 40 &&
+      posters === metas &&
+      Number(marker?.sukebei?.generatedPosters || 0) === 0
     ) {
-      const cards = Number(parsed.sukebei.cards || 0);
-      const posters = Number(parsed.sukebei.metatubePosters || 0);
-      const generated = Number(parsed.sukebei.generatedPosters || 0);
-      if (cards >= 24 && cards <= 40 && posters === cards && generated === 0) {
-        return parsed;
-      }
+      return marker;
     }
   } catch {}
+
   return null;
 }
 
-function handleReadiness(request, response) {
-  const marker = readReadyMarker();
+function handleReady(request, response) {
+  const marker = readValidMarker();
+
   if (!marker) {
-    writeJson(response, 503, {
+    sendJson(response, 503, {
       ready: false,
-      gate: 'startup-ready-marker',
-      waitingFor: 'strict Sukebei 24-40 MetaTube cards + 33/33 startup prewarm',
+      gate: 'catalog-prewarm-success',
+      waitingFor: '33/33 prewarm + strict Sukebei MetaTube cards',
     }, request.method === 'HEAD');
     return;
   }
@@ -59,11 +66,11 @@ function handleReadiness(request, response) {
   if (!readyAnnounced) {
     readyAnnounced = true;
     process.stdout.write(
-      `OnlyPorn public readiness OPEN: /onlyporn/ready -> 200; marker=${readyMarkerPath}\n`
+      `OnlyPorn PUBLIC READY: /onlyporn/ready=200; marker=${readyMarkerPath}\n`
     );
   }
 
-  writeJson(response, 200, marker, request.method === 'HEAD');
+  sendJson(response, 200, marker, request.method === 'HEAD');
 }
 
 const server = http.createServer((request, response) => {
@@ -76,7 +83,7 @@ const server = http.createServer((request, response) => {
     (request.method === 'GET' || request.method === 'HEAD') &&
     pathname === '/onlyporn/ready'
   ) {
-    handleReadiness(request, response);
+    handleReady(request, response);
     return;
   }
 
@@ -92,13 +99,18 @@ const server = http.createServer((request, response) => {
       'x-forwarded-host': request.headers.host || '',
     },
   }, upstreamResponse => {
-    response.writeHead(upstreamResponse.statusCode || 502, upstreamResponse.headers);
+    response.writeHead(
+      upstreamResponse.statusCode || 502,
+      upstreamResponse.headers
+    );
     upstreamResponse.pipe(response);
   });
 
   upstream.on('error', error => {
     if (!response.headersSent) {
-      response.writeHead(502, { 'content-type': 'text/plain; charset=utf-8' });
+      response.writeHead(502, {
+        'content-type': 'text/plain; charset=utf-8',
+      });
     }
     response.end(`OnlyPorn internal proxy error: ${error.message}`);
   });
@@ -108,6 +120,7 @@ const server = http.createServer((request, response) => {
 
 server.listen(publicPort, '0.0.0.0', () => {
   process.stdout.write(
-    `OnlyPorn public gate opened on port ${publicPort}; readiness marker=${readyMarkerPath}\n`
+    `OnlyPorn public gate opened on port ${publicPort}; ` +
+    `waiting on ${readyMarkerPath}\n`
   );
 });
