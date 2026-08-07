@@ -6,6 +6,57 @@ const path = require('node:path');
 const SUKEBEI_MIN_CARDS = 24;
 const SUKEBEI_MAX_CARDS = 40;
 
+const STARTUP_READY_MARKER = 'startup-ready.json';
+let startupReadyLatched = false;
+
+function startupReadyMarkerPath(env = process.env) {
+  const runtimeDir = path.resolve(String(
+    env.ONLYPORN_RUNTIME_DIR || '/tmp/onlyporn-runtime'
+  ));
+  return path.join(runtimeDir, STARTUP_READY_MARKER);
+}
+
+function latchStartupReadyMarkerIfNeeded() {
+  if (startupReadyLatched) return false;
+
+  const state = snapshot();
+  if (!state.ready) return false;
+
+  const markerPath = startupReadyMarkerPath();
+  const temporary = `${markerPath}.${process.pid}.tmp`;
+  const payload = Object.freeze({
+    ready: true,
+    latchedAt: new Date().toISOString(),
+    catalog: Object.freeze({
+      success: state.catalog.success,
+      activeCatalogs: state.catalog.activeCatalogs,
+      healthyCatalogs: state.catalog.healthyCatalogs,
+      missingCatalogs: state.catalog.missingCatalogs,
+      finishedAt: state.catalog.finishedAt,
+    }),
+    sukebei: Object.freeze({
+      ready: state.sukebei.ready,
+      cards: state.sukebei.cards,
+      metatubePosters: state.sukebei.metatubePosters,
+      generatedPosters: state.sukebei.generatedPosters,
+      updatedAt: state.sukebei.updatedAt,
+    }),
+  });
+
+  fs.mkdirSync(path.dirname(markerPath), { recursive: true });
+  fs.writeFileSync(temporary, `${JSON.stringify(payload)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+  });
+  fs.renameSync(temporary, markerPath);
+  startupReadyLatched = true;
+
+  process.stdout.write(
+    `OnlyPorn startup readiness latched: 33/33 + strict Sukebei; marker=${markerPath}\n`
+  );
+  return true;
+}
+
 function truthy(value) {
   return /^(?:1|true|yes|on)$/i.test(String(value || '').trim());
 }
@@ -33,6 +84,7 @@ function recordCatalogPrewarmResult(result = {}) {
     missingCatalogs: Object.freeze([...(result.missingCatalogs || [])]),
     finishedAt: String(result.finishedAt || new Date().toISOString()),
   });
+  latchStartupReadyMarkerIfNeeded();
 }
 
 function recordSukebeiResult(result = {}) {
@@ -43,6 +95,7 @@ function recordSukebeiResult(result = {}) {
     generatedPosters: Number(result.generatedPosters || 0),
     updatedAt: new Date().toISOString(),
   });
+  latchStartupReadyMarkerIfNeeded();
 }
 
 function sqliteHeader(filePath) {
@@ -162,5 +215,6 @@ module.exports = {
   recordCatalogPrewarmResult,
   recordSukebeiResult,
   snapshot,
+  startupReadyMarkerPath,
   storageSnapshot,
 };
