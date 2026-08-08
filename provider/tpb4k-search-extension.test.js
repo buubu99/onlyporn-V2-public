@@ -22,7 +22,7 @@ const {
   toProviderCatalogArgs,
 } = require('./tpb4k/catalog-search');
 
-test('exactly 24 TPB4K catalogs advertise search and the 2 Stripchat rows remain browse-only', () => {
+test('exactly 25 TPB4K catalogs advertise search and the 2 Stripchat rows remain browse-only', () => {
   const targetDefinitions = catalogDefinitions.filter(
     item => item.source !== 'stripchat'
   );
@@ -30,15 +30,15 @@ test('exactly 24 TPB4K catalogs advertise search and the 2 Stripchat rows remain
     item => item.source === 'stripchat'
   );
 
-  assert.equal(catalogDefinitions.length, 26);
-  assert.equal(targetDefinitions.length, 24);
+  assert.equal(catalogDefinitions.length, 27);
+  assert.equal(targetDefinitions.length, 25);
   assert.equal(stripchatDefinitions.length, 2);
-  assert.equal(tpb4kCatalogs.length, 26);
+  assert.equal(tpb4kCatalogs.length, 27);
 
   const sourceSearchable = tpb4kCatalogs.filter(catalog =>
     catalog.extra?.some(item => item.name === 'search')
   );
-  assert.equal(sourceSearchable.length, 24);
+  assert.equal(sourceSearchable.length, 25);
 
   for (const definition of targetDefinitions) {
     const catalog = tpb4kCatalogs.find(item => item.id === definition.id);
@@ -70,15 +70,15 @@ test('exactly 24 TPB4K catalogs advertise search and the 2 Stripchat rows remain
     catalog.extra?.some(item => item.name === 'search')
   );
 
-  assert.equal(finalTpb4k.length, 26);
-  assert.equal(finalSearchable.length, 24);
+  assert.equal(finalTpb4k.length, 27);
+  assert.equal(finalSearchable.length, 25);
   assert.equal(
     finalSearchable.some(item => item.id.startsWith('tpb4k.stripchat.')),
     false
   );
 });
 
-test('final Stremio manifest contains all 24 new search rows and remains below 8192 bytes', () => {
+test('final Stremio manifest contains all 25 search rows and remains below 8192 bytes', () => {
   const manifest = addon.manifest;
   const serialized = JSON.stringify(manifest);
   const tpb4k = manifest.catalogs.filter(item =>
@@ -88,8 +88,8 @@ test('final Stremio manifest contains all 24 new search rows and remains below 8
     item.extra?.some(extra => extra.name === 'search')
   );
 
-  assert.equal(tpb4k.length, 26);
-  assert.equal(searchable.length, 24);
+  assert.equal(tpb4k.length, 27);
+  assert.equal(searchable.length, 25);
   assert.equal(
     searchable.some(item => item.id.startsWith('tpb4k.stripchat.')),
     false

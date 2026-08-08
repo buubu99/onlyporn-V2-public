@@ -42,7 +42,7 @@ test('JAV search cards ignore data placeholders and choose the largest real srcs
 });
 
 test('search SQLite exposes live pool count and catalog rows without touching MetaTube', async t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'onlyporn-search-v73-'));
+  const root = fs.mkdtempSync('/tmp/onlyporn-search-v73-');
   const env = {
     ...process.env,
     ONLYPORN_RUNTIME_DIR: root,

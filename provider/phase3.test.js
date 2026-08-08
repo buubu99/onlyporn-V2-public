@@ -187,7 +187,7 @@ test('search, genre and pagination routes remain deterministic and page windows 
       name: 'xnxx',
       provider: createXnxx(),
       initial: 'https://www.xnxx.com/todays-selection',
-      search: 'https://www.xnxx.com/search/fixture+term/',
+      search: 'https://www.xnxx.com/search/fixture+term/0',
       genre: 'https://www.xnxx.com/hits',
       genreValue: 'hits',
     },
@@ -215,6 +215,29 @@ test('search, genre and pagination routes remain deterministic and page windows 
 
     assert.equal(new Set([page1, page2, page3]).size, 3, `${item.name} pagination repeated`);
   }
+
+  const xhamsterBest = createXhamster();
+  assert.equal(
+    xhamsterBest.handleGenre({ id: 'xhamster.best', extra: { genre: 'Best Week' } }),
+    'https://xhamster.com/best/weekly'
+  );
+});
+
+test('XNXX retries one transient empty search document without retaining it in cache', async () => {
+  const provider = createXnxx();
+  let requests = 0;
+  provider.fetchHtml = async () => {
+    requests += 1;
+    return requests === 1 ? '<html><body></body></html>' : fixture('xnxx', 'catalog.html');
+  };
+
+  const response = await provider.handleCatalog({
+    type: 'movie',
+    id: 'xnxx',
+    extra: { search: 'fixture term' },
+  });
+  assert.equal(requests, 2);
+  assert.ok(response.metas.length > 0);
 });
 
 test('HLS fixture parsing orders variants by resolution and resolves relative URLs', () => {

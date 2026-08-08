@@ -130,13 +130,14 @@ test('catalogue health requires Sukebei minimum 24, not exact 40', () => {
   assert.equal(minimumHealthyMetas('eporner'), 1);
   assert.equal(minimumHealthyMetas('tpb4k.studio.playboyplus.top'), 30);
   assert.equal(minimumHealthyMetas('tpb4k.sukebei.top'), 24);
+  assert.equal(minimumHealthyMetas('tpb4k.sukebei.hentai'), 18);
 
   const prewarmSource = fs.readFileSync(require.resolve('./catalog-prewarm'), 'utf8');
   assert.equal((prewarmSource.match(/900_000/g) || []).length, 2);
 });
 
 test('readiness accepts 24 through 40 matching MetaTube posters only', () => withSQLiteFixture(() => {
-  readiness.recordCatalogPrewarmResult({ success: true, activeCatalogs: 33, healthyCatalogs: 33 });
+  readiness.recordCatalogPrewarmResult({ success: true, activeCatalogs: 34, healthyCatalogs: 34 });
 
   readiness.recordSukebeiResult({ ready: true, cards: 23, metatubePosters: 23, generatedPosters: 0 });
   assert.equal(readiness.snapshot().ready, false);
@@ -175,7 +176,7 @@ test('readiness proves file-backed migrated SQLite with one connection', () => w
 
 test('strict Sukebei source publishes 24–40 MetaTube cards and no generated fallback', () => {
   const source = fs.readFileSync(require.resolve('./tpb4k/sukebei-metadata'), 'utf8');
-  assert.match(source, /const strictMinimum = safeSkip === 0 \? Math\.min\(24, safeLimit\) : 0/);
+  assert.match(source, /const strictMinimum = searchMode \? 0 : \(safeSkip === 0 \? Math\.min\(24, safeLimit\) : 0\)/);
   assert.match(source, /allowed\.length < strictMinimum/);
   assert.match(source, /catalogDefinition\?\.mode === 'top' && allowed\.length < needed && !metatubeStrict/);
   assert.match(source, /metatubePosters === cards/);

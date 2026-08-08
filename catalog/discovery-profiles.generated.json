@@ -1054,5 +1054,49 @@
       "value": "Spread Legs",
       "count": 33
     }
+  ],
+  "tpb4k.sukebei.hentai": [
+    {
+      "label": "Newest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 18
+    },
+    {
+      "label": "Seeded",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "seeders_desc",
+      "count": 18
+    },
+    {
+      "label": "Uncensored",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Uncensored",
+      "count": 1
+    },
+    {
+      "label": "English Subs",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "English Subtitles",
+      "count": 1
+    },
+    {
+      "label": "Complete",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Complete Series",
+      "count": 1
+    },
+    {
+      "label": "1080p",
+      "mode": "facet",
+      "facet": "resolution",
+      "value": "1080p",
+      "count": 1
+    }
   ]
 }

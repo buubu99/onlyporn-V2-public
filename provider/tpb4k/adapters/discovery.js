@@ -7,6 +7,7 @@ const { createHentaiMamaSeriesAdapter } = require('../hentaimama-series');
 const { createTorrentIndexAdapter } = require('../torrent-index');
 const { createStudioMetadataAdapter } = require('../studio-metadata');
 const { createSukebeiMetadataAdapter } = require('../sukebei-metadata');
+const { createSukebeiHentaiAdapter } = require('../sukebei-hentai');
 const { createPlatformHybridAdapter } = require('../platform-hybrid');
 
 function createMemoryIndex() {
@@ -108,6 +109,7 @@ function createDiscoveryAdapters(options = {}) {
     studioMetadata,
     platformHybrid,
     createSukebeiAdapter({ ...common, endpoint: config.discovery.sukebei }),
+    createSukebeiHentaiAdapter(common),
     createStripchatGateAdapter(),
   ];
   return Object.freeze({

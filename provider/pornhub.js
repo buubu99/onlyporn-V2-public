@@ -23,6 +23,12 @@ const { assertSafeHttpsUrl, sanitizeUrlForLogs } = require('./url-security');
 const PLAYBACK_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36';
 const CATALOG_URL = 'https://www.pornhub.com/video';
+const PAGE_HOSTS = Object.freeze([
+  'pornhub.com',
+  'www.pornhub.com',
+  'pornhub.org',
+  'www.pornhub.org',
+]);
 const MEDIA_DEFINITIONS_KEY = '"mediaDefinitions"';
 const VIEWKEY_RE = /(?:^|[?&])viewkey=([A-Za-z0-9]+)/i;
 
@@ -34,7 +40,7 @@ function canonicalVideoUrl(value, baseUrl = 'https://www.pornhub.com') {
   try {
     const parsed = new URL(value, baseUrl);
     const hostname = parsed.hostname.toLowerCase().replace(/\.$/, '');
-    if (!['pornhub.com', 'www.pornhub.com'].includes(hostname)) return '';
+    if (!PAGE_HOSTS.includes(hostname)) return '';
 
     const viewkey = parsed.searchParams.get('viewkey') || parsed.href.match(VIEWKEY_RE)?.[1];
     if (!viewkey || !/^[A-Za-z0-9]+$/.test(viewkey)) return '';
@@ -182,7 +188,9 @@ function sortStreams(streams) {
 class PornhubProvider extends Provider {
   constructor() {
     super('https://www.pornhub.com', 'pornhub', 40, {
-      allowedPageHosts: ['pornhub.com'],
+      // The public .com pages can redirect to their exact .org equivalents.
+      // Keep this list explicit: unrelated hosts and wildcard subdomains stay blocked.
+      allowedPageHosts: PAGE_HOSTS,
       htmlCacheTtlMs: 5_000,
       jsonCacheTtlMs: 5_000,
     });

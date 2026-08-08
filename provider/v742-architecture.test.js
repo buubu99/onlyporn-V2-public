@@ -54,9 +54,9 @@ test('JAVHDPorn exposes every verified native discovery route', () => {
   );
 });
 
-test('24 TPB4K catalogs expose only evidence-backed profiles', () => {
+test('25 TPB4K catalogs expose only evidence-backed profiles', () => {
   const generated = require('../catalog/discovery-profiles.generated.json');
-  assert.equal(Object.keys(generated).length, 24);
+  assert.equal(Object.keys(generated).length, 25);
   for (const [id, options] of Object.entries(generated)) {
     assert.equal(options.length, 6, id);
     for (const option of options) {
@@ -184,7 +184,7 @@ test('quality and resolution participate in global search ranking', () => {
 });
 
 test('catalog_facets persists deduplicated metadata including cast links', async t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'onlyporn-v742-'));
+  const root = fs.mkdtempSync('/tmp/onlyporn-v742-');
   const store = createSearchSqliteStore({
     env: {
       ...process.env,

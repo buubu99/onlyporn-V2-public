@@ -27,6 +27,7 @@ const htmlCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: HTML_TTL });
 const metaCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: META_TTL });
 const resolvedPageCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: META_TTL });
 const inFlight = new Map();
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const REGEX = {
   videoHLS: /html5player\.setVideoHLS\(['"]([^'"]+)['"]\)/,
@@ -120,6 +121,34 @@ class XnxxProvider extends Provider {
     return new XnxxProvider();
   }
 
+  async handleCatalog(args) {
+    const primary = await super.handleCatalog(args);
+    if (primary.metas.length) return primary;
+
+    // XNXX occasionally replies 200 with a transient empty document. Do not
+    // poison search or discovery for the five-minute HTML TTL: evict only the
+    // exact route and retry once through the normal protected request path.
+    let url = this.getInitialUrl(args.id);
+    const extra = args.extra || {};
+    if (extra.search) url = this.handleSearch(args);
+    if (extra.genre) url = this.handleGenre(args);
+    if (Number(extra.skip || 0) > 0) {
+      const paginated = this.handlePagination(url, args);
+      url = paginated.startsWith('http') ? paginated : url + paginated;
+    }
+    htmlCache.delete(url);
+    await sleep(250);
+
+    const retry = await super.handleCatalog(args);
+    if (retry.metas.length) {
+      logger.warn(
+        { provider: this.name, metasSize: retry.metas.length },
+        'XNXX recovered from a transient empty catalog response'
+      );
+    }
+    return retry;
+  }
+
   async fetchHtml(url) {
     const cached = htmlCache.get(url);
     if (cached !== undefined) return cached;
@@ -175,7 +204,10 @@ class XnxxProvider extends Provider {
 
   handleSearch({ extra: { search } }) {
     const formatted = encodeURIComponent(search).replace(/%20/g, '+');
-    return `${this.baseUrl}/search/${formatted}/`;
+    // XNXX exposes page zero as an explicit alias for the same first search
+    // window. That route consistently returns the result grid when the bare
+    // trailing-slash route intermittently serves an empty 200 document.
+    return `${this.baseUrl}/search/${formatted}/0`;
   }
 
   handleGenre(args) {
@@ -189,7 +221,7 @@ class XnxxProvider extends Provider {
     if (search) {
       const formatted = encodeURIComponent(search).replace(/%20/g, '+');
       return page === 0
-        ? `${this.baseUrl}/search/${formatted}/`
+        ? `${this.baseUrl}/search/${formatted}/0`
         : `${this.baseUrl}/search/${formatted}/${page}`;
     }
 

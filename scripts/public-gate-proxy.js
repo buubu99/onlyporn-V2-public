@@ -33,8 +33,8 @@ function readValidMarker() {
     if (
       marker?.ready === true &&
       marker?.gate === 'catalog-prewarm-success' &&
-      Number(marker?.activeCatalogs) === 33 &&
-      Number(marker?.healthyCatalogs) === 33 &&
+      Number(marker?.activeCatalogs) === 34 &&
+      Number(marker?.healthyCatalogs) === 34 &&
       Array.isArray(marker?.missingCatalogs) &&
       marker.missingCatalogs.length === 0 &&
       marker?.sukebei?.healthy === true &&
@@ -43,6 +43,11 @@ function readValidMarker() {
       metas <= 40 &&
       posters === metas &&
       Number(marker?.sukebei?.generatedPosters || 0) === 0
+      && marker?.sukebeiHentai?.healthy === true
+      && marker?.sukebeiHentai?.sqliteComplete === true
+      && Number(marker?.sukebeiHentai?.dbBytes || 0) > 0
+      && Number(marker?.sukebeiHentai?.metas || 0) >= 18
+      && Number(marker?.sukebeiHentai?.metas || 0) <= 40
     ) {
       return marker;
     }
@@ -58,7 +63,7 @@ function handleReady(request, response) {
     sendJson(response, 503, {
       ready: false,
       gate: 'catalog-prewarm-success',
-      waitingFor: '33/33 prewarm + strict Sukebei MetaTube cards',
+      waitingFor: '34/34 prewarm + strict Sukebei MetaTube + complete Sukebei Hentai SQLite index',
     }, request.method === 'HEAD');
     return;
   }

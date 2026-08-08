@@ -55,6 +55,13 @@ const SELECTED_CATALOGS = [
     mode: 'top',
   },
   {
+    id: 'tpb4k.sukebei.hentai',
+    type: 'series',
+    name: 'OnlyPorn: Sukebei Hentai',
+    source: 'sukebei-hentai',
+    mode: 'playable-series',
+  },
+  {
     id: 'tpb4k.studio.brazzersexxtra.top',
     name: 'OnlyPorn: BrazzersExxtra · Top',
     source: 'studio-metadata',

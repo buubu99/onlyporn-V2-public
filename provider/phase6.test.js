@@ -173,8 +173,25 @@ test('Pornhub Chrome helper is isolated and preloads public-access cookies', () 
   assert.match(helper, /"accessAgeDisclaimerUK": "1"/);
   assert.match(helper, /"accessPH": "1"/);
   assert.match(helper, /"platform": "pc"/);
+  assert.match(helper, /"pornhub\.org"/);
   assert.doesNotMatch(helper, /spankbang|javhdporn/i);
   assert.match(client, /pornhub_safari_fetch_helper\.py/);
+});
+
+test('Pornhub accepts only its exact public .com and .org page hosts', () => {
+  const { canonicalVideoUrl } = createPornhub._test;
+  assert.equal(
+    canonicalVideoUrl('https://www.pornhub.org/view_video.php?viewkey=phfixture001'),
+    'https://www.pornhub.com/view_video.php?viewkey=phfixture001'
+  );
+  assert.equal(
+    canonicalVideoUrl('https://redirect.pornhub.org/view_video.php?viewkey=phfixture001'),
+    ''
+  );
+  assert.equal(
+    canonicalVideoUrl('https://pornhub.org.attacker.example/view_video.php?viewkey=phfixture001'),
+    ''
+  );
 });
 
 test('Pornhub routes, manifest wiring, and release version are deterministic', () => {

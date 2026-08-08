@@ -68,7 +68,7 @@ test('search ranking ignores hidden provenance and matches visible metadata', ()
 });
 
 test('search SQLite is separate from MetaTube and persists exact-query + pool rows', async t => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'onlyporn-search-v7-'));
+  const root = fs.mkdtempSync('/tmp/onlyporn-search-v7-');
   const env = {
     ...process.env,
     ONLYPORN_RUNTIME_DIR: root,

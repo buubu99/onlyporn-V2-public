@@ -83,6 +83,25 @@ function sukebeiRssEndpoint(value) {
   return url.toString();
 }
 
+function sukebeiHentaiRssEndpoint(value) {
+  const configured = validateConfiguredEndpoint(
+    value || 'https://sukebei.nyaa.si/?page=rss&c=1_1&f=0',
+    'Sukebei Hentai RSS endpoint'
+  );
+  if (!configured) return '';
+  const url = new URL(configured);
+  if (url.hostname.toLowerCase() === 'sukebei.nyaa.si') {
+    url.searchParams.set('page', 'rss');
+    url.searchParams.set('c', '1_1');
+    url.searchParams.set('f', '0');
+    url.searchParams.delete('skip');
+    url.searchParams.delete('limit');
+    url.searchParams.delete('mode');
+    url.searchParams.delete('p');
+  }
+  return url.toString();
+}
+
 function readTpb4kConfig(env = process.env) {
   const tpdbApiKey = String(env.TPDB_API_KEY || '').trim();
   const stashdbApiKey = String(env.STASHDB_API_KEY || '').trim();
@@ -212,6 +231,7 @@ function readTpb4kConfig(env = process.env) {
       yesporn: 'https://yesporn.vip/',
       hentai: 'https://hentaimama.io/',
       sukebei: sukebeiRssEndpoint(env.TPB4K_SUKEBEI_RSS_URL),
+      sukebeiHentai: sukebeiHentaiRssEndpoint(env.TPB4K_SUKEBEI_HENTAI_RSS_URL),
     }),
     torrentIndex: Object.freeze({
       mirrors: endpointOrigins(env.TPB4K_TPB_MIRRORS),
@@ -276,5 +296,6 @@ module.exports = {
   publicConfigStatus,
   readTpb4kConfig,
   redactSecrets,
+  sukebeiHentaiRssEndpoint,
   sukebeiRssEndpoint,
 };

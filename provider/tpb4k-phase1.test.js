@@ -109,10 +109,10 @@ function memoryAdapter() {
 
 test.afterEach(() => clearAdapters());
 
-test('Phase 1 defines the exact 26 selected OnlyPorn board catalogs', () => {
-  assert.equal(catalogDefinitions.length, 26);
-  assert.equal(tpb4kCatalogs.length, 26);
-  assert.equal(new Set(catalogDefinitions.map(item => item.id)).size, 26);
+test('Phase 1 plus Sukebei Hentai defines the exact 27 selected OnlyPorn board catalogs', () => {
+  assert.equal(catalogDefinitions.length, 27);
+  assert.equal(tpb4kCatalogs.length, 27);
+  assert.equal(new Set(catalogDefinitions.map(item => item.id)).size, 27);
   assert.ok(getCatalogDefinition('tpb4k.pornrips.recent'));
   assert.ok(getCatalogDefinition('tpb4k.hentai.top'));
   assert.ok(getCatalogDefinition('tpb4k.stripchat.couples'));
@@ -123,10 +123,10 @@ test('Phase 1 defines the exact 26 selected OnlyPorn board catalogs', () => {
   assert.equal(catalogDefinitions.some(item => /(?: 4K| 1080p) · Top/.test(item.name)), false);
 });
 
-test('OnlyPorn board catalogs stay disabled by default and expose 26 descriptors only behind the feature flag', () => {
+test('OnlyPorn board catalogs stay disabled by default and expose 27 descriptors only behind the feature flag', () => {
   assert.equal(isTpb4kEnabled({}), false);
   assert.equal(isTpb4kEnabled({ TPB4K_ENABLED: 'true' }), true);
-  assert.equal(tpb4kCatalogs.filter(item => item.id.startsWith('tpb4k.')).length, 26);
+  assert.equal(tpb4kCatalogs.filter(item => item.id.startsWith('tpb4k.')).length, 27);
 });
 
 test('magnet and info-hash normalization accepts valid hashes and rejects HTML placeholders', () => {
@@ -251,7 +251,7 @@ test('TPDB and StashDB keys are environment-only and public status never returns
     requestTimeoutMs: 15000,
     tpdbConfigured: true,
     stashdbConfigured: true,
-    configuredDiscoverySources: ['hentai', 'pornrips', 'studio-metadata', 'sukebei', 'torrent-index', 'yesporn'],
+    configuredDiscoverySources: ['hentai', 'pornrips', 'studio-metadata', 'sukebei', 'sukebeiHentai', 'torrent-index', 'yesporn'],
     stripchatPhaseRequired: 7,
     renderPreview: false,
   });

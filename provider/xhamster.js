@@ -218,6 +218,14 @@ function directMp4Label(candidate) {
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 const pathMappings = {
+  'Best Today': '/best',
+  'Best Week': '/best/weekly',
+  'Best Month': '/best/monthly',
+  'Best 2026': '/best/year-2026',
+  'Best 2025': '/best/year-2025',
+  'Best 2024': '/best/year-2024',
+  'Best 2023': '/best/year-2023',
+  'Best 2022': '/best/year-2022',
   'Best (Daily)': '/best',
   'Best (Weekly)': '/best/weekly',
   'Best (Monthly)': '/best/monthly',

@@ -926,6 +926,7 @@ class Tpb4kProvider {
       ...(diagnostics.enrichment ? { enrichment: diagnostics.enrichment } : {}),
       ...(metadataCatalog ? { metadataCatalog } : {}),
       ...(diagnostics.sukebeiMetadata ? { sukebeiMetadata: diagnostics.sukebeiMetadata } : {}),
+      ...(diagnostics.sukebeiHentai ? { sukebeiHentai: diagnostics.sukebeiHentai } : {}),
       ...(diagnostics.platformHybrid ? { platformHybrid: diagnostics.platformHybrid } : {}),
       ...(diagnostics.hentaiMamaSeries ? { hentaiMamaSeries: diagnostics.hentaiMamaSeries } : {}),
       ...(studioPlaybackBinding ? { studioPlaybackBinding } : {}),
@@ -1037,7 +1038,7 @@ class Tpb4kProvider {
       // Metadata is a best-effort preflight; returned candidates are filtered below.
     }
 
-    const sukebeiNeedsFileSelection = decoded.source === 'sukebei'
+    const sukebeiNeedsFileSelection = ['sukebei', 'sukebei-hentai'].includes(decoded.source)
       && Array.isArray(decoded.torrents)
       && decoded.torrents.some(torrent => !Number.isInteger(torrent?.fileIdx));
     const bundledCandidates = Array.isArray(decoded.torrents) && !sukebeiNeedsFileSelection
@@ -1093,6 +1094,7 @@ class Tpb4kProvider {
         if (candidate.kind === 'invalid') return false;
         if (['p2p', 'uncached-torrent'].includes(candidate.kind)) {
           if (candidate.source === 'pornrips' && candidate.seeders === 0 && candidate.provenance.includes('pornrips-authoritative-torrent')) return true;
+          if (candidate.source === 'sukebei-hentai') return candidate.seeders >= 1;
           return candidate.seeders >= config.minimumSeeders;
         }
         return true;

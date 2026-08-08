@@ -72,7 +72,7 @@ test('native source origins are built into code and obsolete feed variables are 
   assert.equal(config.discovery.pornrips, 'https://pornrips.to/');
   assert.equal(config.discovery.yesporn, 'https://yesporn.vip/');
   assert.equal(config.discovery.hentai, 'https://hentaimama.io/');
-  assert.deepEqual(publicConfigStatus(config).configuredDiscoverySources, ['hentai', 'pornrips', 'sukebei', 'torrent-index', 'yesporn']);
+  assert.deepEqual(publicConfigStatus(config).configuredDiscoverySources, ['hentai', 'pornrips', 'sukebei', 'sukebeiHentai', 'torrent-index', 'yesporn']);
 });
 
 test('PornRips native parser returns opaque metadata records and no playable fields', () => {
@@ -167,7 +167,7 @@ test('detail parser enriches an opaque source path without changing source ident
 
 test('native adapters are configured, fetch exact origins, paginate, and fail closed without playable evidence', async () => {
   const bundle = createDiscoveryAdapters({ config: readTpb4kConfig(env()), fetchImpl: nativeFetch, checkDns: false, minRequestIntervalMs: 0 });
-  assert.deepEqual(bundle.configuredSources, ['hentai', 'platform-hybrid', 'pornrips', 'sukebei', 'torrent-index', 'yesporn']);
+  assert.deepEqual(bundle.configuredSources, ['hentai', 'platform-hybrid', 'pornrips', 'sukebei', 'sukebei-hentai', 'torrent-index', 'yesporn']);
   for (const [id, catalog] of [
     ['pornrips', { id: 'tpb4k.pornrips.recent', mode: 'recent' }],
     ['yesporn', { id: 'tpb4k.yesporn.recent', mode: 'recent' }],

@@ -1,6 +1,8 @@
 'use strict';
 
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 const test = require('node:test');
 
 const {
@@ -9,6 +11,7 @@ const {
   readSchedulerConfig,
   requestCatalogForPass,
   runCatalogPrewarm,
+  sukebeiHentaiSqliteSnapshot,
 } = require('./catalog-prewarm');
 
 function response(body, status = 200) {
@@ -124,7 +127,7 @@ test('scheduler defaults are enabled, bounded, and run every 23 hours', () => {
   assert.equal(config.enabled, true);
   assert.equal(config.concurrency, 3);
   assert.equal(config.intervalMs, 23 * 60 * 60 * 1000);
-  assert.equal(config.expectedActiveCatalogs, 33);
+  assert.equal(config.expectedActiveCatalogs, 34);
   assert.equal(config.maxPasses, 6);
 });
 
@@ -133,4 +136,23 @@ test('base URL normalization accepts the server manifest URL', () => {
     normalizeBaseUrl('http://127.0.0.1:10000/manifest.json'),
     'http://127.0.0.1:10000'
   );
+});
+
+test('public readiness proves the independent Sukebei Hentai SQLite file', () => {
+  const runtime = fs.mkdtempSync('/tmp/onlyporn-hentai-ready-test-');
+  const dbPath = path.join(runtime, 'sukebei-hentai', 'sukebei-hentai-v1.sqlite');
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  fs.writeFileSync(dbPath, Buffer.concat([
+    Buffer.from('SQLite format 3\u0000', 'binary'),
+    Buffer.alloc(128),
+  ]));
+  const enabled = sukebeiHentaiSqliteSnapshot({ ONLYPORN_RUNTIME_DIR: runtime });
+  assert.equal(enabled.ready, true);
+  assert.equal(enabled.sqlite, true);
+  assert.ok(enabled.dbBytes > 16);
+  const disabled = sukebeiHentaiSqliteSnapshot({
+    ONLYPORN_RUNTIME_DIR: runtime,
+    ONLYPORN_DISABLE_PERSISTENT_CACHE: 'true',
+  });
+  assert.equal(disabled.ready, false);
 });

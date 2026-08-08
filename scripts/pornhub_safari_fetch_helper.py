@@ -18,7 +18,12 @@ from urllib.parse import urlparse
 
 from curl_cffi import requests
 
-ALLOWED_HOSTS = {"pornhub.com", "www.pornhub.com"}
+ALLOWED_HOSTS = {
+    "pornhub.com",
+    "www.pornhub.com",
+    "pornhub.org",
+    "www.pornhub.org",
+}
 HOME_URL = "https://www.pornhub.com/"
 MAX_BYTES_HARD_LIMIT = 10 * 1024 * 1024
 MAX_BODY_CHARS = 256 * 1024
@@ -27,19 +32,22 @@ session = requests.Session(
     impersonate=os.getenv("PORNHUB_IMPERSONATE", "chrome")
 )
 
-for cookie_name, cookie_value in {
+PUBLIC_ACCESS_COOKIES = {
     "age_verified": "1",
     "accessAgeDisclaimerPH": "1",
     "accessAgeDisclaimerUK": "1",
     "accessPH": "1",
     "platform": "pc",
-}.items():
-    session.cookies.set(
-        cookie_name,
-        cookie_value,
-        domain="pornhub.com",
-        path="/",
-    )
+}
+
+for cookie_domain in ("pornhub.com", "pornhub.org"):
+    for cookie_name, cookie_value in PUBLIC_ACCESS_COOKIES.items():
+        session.cookies.set(
+            cookie_name,
+            cookie_value,
+            domain=cookie_domain,
+            path="/",
+        )
 
 
 def emit(payload: dict[str, Any]) -> None:

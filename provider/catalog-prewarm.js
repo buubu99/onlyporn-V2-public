@@ -5,6 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const logger = require('../logger');
 const { recordCatalogPrewarmResult } = require('./runtime-readiness');
+const { sukebeiHentaiDbPath } = require('./sukebei-hentai-sqlite');
 
 const DEFERRED_CATALOG_IDS = new Set([
   'tpb4k.stripchat.girls',
@@ -19,11 +20,12 @@ const DEFAULTS = Object.freeze({
   maxPasses: 6,
   retryDelayMs: 20_000,
   requestTimeoutMs: 45_000,
-  expectedActiveCatalogs: 33,
+  expectedActiveCatalogs: 34,
   verificationPasses: 1,
 });
 
 const SUKEBEI_READY_CATALOG_ID = 'tpb4k.sukebei.top';
+const SUKEBEI_HENTAI_READY_CATALOG_ID = 'tpb4k.sukebei.hentai';
 const STARTUP_PREWARM_READY_FILE = 'startup-prewarm-ready.json';
 
 function startupEnvTrue(value) {
@@ -47,6 +49,26 @@ function startupMetaTubePoster(value) {
   }
 }
 
+function sukebeiHentaiSqliteSnapshot(env = process.env) {
+  const enabled = !/^(?:0|false|off|no)$/i.test(String(
+    env.ONLYPORN_SUKEBEI_HENTAI_SQLITE_ENABLED ?? 'true'
+  ).trim()) && !startupEnvTrue(env.ONLYPORN_DISABLE_PERSISTENT_CACHE);
+  let dbBytes = 0;
+  let sqlite = false;
+  try {
+    const descriptor = fs.openSync(sukebeiHentaiDbPath(env), 'r');
+    try {
+      const header = Buffer.alloc(16);
+      const bytes = fs.readSync(descriptor, header, 0, header.length, 0);
+      sqlite = bytes === 16 && header.toString('binary') === 'SQLite format 3\u0000';
+      dbBytes = Number(fs.fstatSync(descriptor).size || 0);
+    } finally {
+      fs.closeSync(descriptor);
+    }
+  } catch {}
+  return Object.freeze({ enabled, sqlite, dbBytes, ready: enabled && sqlite && dbBytes > 0 });
+}
+
 function latestPrewarmCatalogResult(passSummaries, catalogId) {
   const summaries = Array.isArray(passSummaries) ? passSummaries : [];
   for (let index = summaries.length - 1; index >= 0; index -= 1) {
@@ -62,8 +84,8 @@ function latestPrewarmCatalogResult(passSummaries, catalogId) {
 function writeStartupPrewarmReadyMarker(result, env = process.env) {
   if (
     result?.success !== true ||
-    Number(result.activeCatalogs) !== 33 ||
-    Number(result.healthyCatalogs) !== 33 ||
+    Number(result.activeCatalogs) !== 34 ||
+    Number(result.healthyCatalogs) !== 34 ||
     !Array.isArray(result.missingCatalogs) ||
     result.missingCatalogs.length !== 0
   ) {
@@ -80,6 +102,12 @@ function writeStartupPrewarmReadyMarker(result, env = process.env) {
   const strictMetaTube =
     startupEnvTrue(env.TPB4K_METATUBE_ENABLED) &&
     startupEnvTrue(env.TPB4K_METATUBE_STRICT);
+  const sukebeiHentai = latestPrewarmCatalogResult(
+    result.passSummaries,
+    SUKEBEI_HENTAI_READY_CATALOG_ID
+  );
+  const sukebeiHentaiMetas = Number(sukebeiHentai?.metas || 0);
+  const sukebeiHentaiSqlite = sukebeiHentaiSqliteSnapshot(env);
 
   if (
     sukebei?.healthy !== true ||
@@ -94,6 +122,19 @@ function writeStartupPrewarmReadyMarker(result, env = process.env) {
       `metatubePosters=${metatubePosters} strict=${strictMetaTube})`
     );
   }
+  if (sukebeiHentai?.healthy !== true || sukebeiHentaiMetas < 18 || sukebeiHentaiMetas > 40) {
+    throw new Error(
+      `Render readiness refused: Sukebei Hentai is not fully indexed ` +
+      `(healthy=${Boolean(sukebeiHentai?.healthy)} metas=${sukebeiHentaiMetas})`
+    );
+  }
+  if (!sukebeiHentaiSqlite.ready) {
+    throw new Error(
+      `Render readiness refused: Sukebei Hentai SQLite is incomplete ` +
+      `(enabled=${sukebeiHentaiSqlite.enabled} sqlite=${sukebeiHentaiSqlite.sqlite} ` +
+      `bytes=${sukebeiHentaiSqlite.dbBytes})`
+    );
+  }
 
   const markerPath = startupPrewarmReadyPath(env);
   const temporary = `${markerPath}.${process.pid}.tmp`;
@@ -102,8 +143,8 @@ function writeStartupPrewarmReadyMarker(result, env = process.env) {
     gate: 'catalog-prewarm-success',
     latchedAt: new Date().toISOString(),
     runId: String(result.runId || ''),
-    activeCatalogs: 33,
-    healthyCatalogs: 33,
+    activeCatalogs: 34,
+    healthyCatalogs: 34,
     missingCatalogs: [],
     sukebei: {
       healthy: true,
@@ -111,6 +152,13 @@ function writeStartupPrewarmReadyMarker(result, env = process.env) {
       metatubePosters,
       generatedPosters: 0,
       strictMetaTube: true,
+    },
+    sukebeiHentai: {
+      healthy: true,
+      metas: sukebeiHentaiMetas,
+      sqliteComplete: true,
+      dbBytes: sukebeiHentaiSqlite.dbBytes,
+      category: '1_1',
     },
   };
 
@@ -122,7 +170,8 @@ function writeStartupPrewarmReadyMarker(result, env = process.env) {
   fs.renameSync(temporary, markerPath);
 
   process.stdout.write(
-    `OnlyPorn PREWARM READY: 33/33 + Sukebei ${metas} MetaTube cards; ` +
+    `OnlyPorn PREWARM READY: 34/34 + Sukebei ${metas} MetaTube cards + ` +
+    `Sukebei Hentai ${sukebeiHentaiMetas} indexed series; ` +
     `marker=${markerPath}\n`
   );
 
@@ -166,6 +215,7 @@ function activeCatalogsFromManifest(manifest) {
 
 function minimumHealthyMetas(catalogId) {
   if (catalogId === 'tpb4k.sukebei.top') return 24;
+  if (catalogId === 'tpb4k.sukebei.hentai') return 18;
   if (catalogId === 'tpb4k.studio.playboyplus.top') return 30;
   return 1;
 }
@@ -708,4 +758,5 @@ module.exports = {
   requestCatalogForPass,
   runCatalogPrewarm,
   startCatalogPrewarmScheduler,
+  sukebeiHentaiSqliteSnapshot,
 };
