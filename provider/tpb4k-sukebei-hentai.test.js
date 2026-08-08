@@ -220,6 +220,8 @@ test('adapter builds a playable six-series index and resolves the selected episo
   }));
   const rss = rssDocument([...torrents.entries()].map(([number, value]) => rssItem(number, value.hash)));
   const requests = [];
+  let torrentInFlight = 0;
+  let maximumTorrentInFlight = 0;
   const store = {
     enabled: false,
     async getMetadata() { return null; },
@@ -256,6 +258,10 @@ test('adapter builds a playable six-series index and resolves the selected episo
       requests.push(url);
       if (url.pathname.startsWith('/download/')) {
         const number = Number(url.pathname.match(/\/(\d+)\.torrent$/)?.[1]) - 8_000;
+        torrentInFlight += 1;
+        maximumTorrentInFlight = Math.max(maximumTorrentInFlight, torrentInFlight);
+        await new Promise(resolve => setTimeout(resolve, 2));
+        torrentInFlight -= 1;
         return response(torrents.get(number).body, 'application/x-bittorrent');
       }
       assert.equal(url.searchParams.get('c'), '1_1');
@@ -269,6 +275,7 @@ test('adapter builds a playable six-series index and resolves the selected episo
     limit: 40,
   });
   assert.equal(catalog.length, 6);
+  assert.equal(maximumTorrentInFlight, 1);
   assert.equal(catalog.every(item => item.videos.length === 2), true);
   assert.equal(catalog.every(item => item.tags.includes('Uncensored')), true);
   assert.equal(catalog.every(item => item.tags.includes('English Subtitles')), true);

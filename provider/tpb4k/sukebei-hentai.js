@@ -28,6 +28,8 @@ const DEFAULT_MINIMUM_CARDS = 18;
 const DEFAULT_BUILD_CANDIDATES = 80;
 const DEFAULT_STREAM_RESOLVE_BUDGET_MS = 12_000;
 const DEFAULT_RESOLVE_CONCURRENCY = 4;
+const DEFAULT_BUILD_RESOLVE_CONCURRENCY = 1;
+const DEFAULT_TORRENT_TIMEOUT_MS = 20_000;
 
 function boundedInteger(value, fallback, minimum, maximum) {
   const number = Number.parseInt(String(value ?? ''), 10);
@@ -368,6 +370,18 @@ function createSukebeiHentaiAdapter(options = {}) {
     1,
     8
   );
+  const buildResolveConcurrency = boundedInteger(
+    env.ONLYPORN_SUKEBEI_HENTAI_BUILD_RESOLVE_CONCURRENCY,
+    DEFAULT_BUILD_RESOLVE_CONCURRENCY,
+    1,
+    2
+  );
+  const torrentTimeoutMs = boundedInteger(
+    env.ONLYPORN_SUKEBEI_HENTAI_TORRENT_TIMEOUT_MS,
+    DEFAULT_TORRENT_TIMEOUT_MS,
+    8_000,
+    30_000
+  );
   let buildInFlight = null;
   let lastDiagnostics = Object.freeze({ state: 'cold', cards: 0 });
 
@@ -424,9 +438,9 @@ function createSukebeiHentaiAdapter(options = {}) {
     const startedAt = Date.now();
     const deadlineAt = startedAt + buildBudgetMs;
     const hydrationReserveMs = Math.min(
-      Math.max(Math.floor(buildBudgetMs * 0.30), 10_000),
-      150_000,
-      Math.max(buildBudgetMs - 10_000, 1_000)
+      Math.max(Math.floor(buildBudgetMs * 0.45), 30_000),
+      210_000,
+      Math.max(buildBudgetMs - 60_000, 1_000)
     );
     const discoveryDeadlineAt = deadlineAt - hydrationReserveMs;
     const candidates = (await metadataCatalog()).slice(0, buildCandidates);
@@ -443,7 +457,11 @@ function createSukebeiHentaiAdapter(options = {}) {
       sourceQueries += Math.min(metadataAliases(item).filter(alias => alias.length >= 3).length, 2);
       if (!matched.length) continue;
       discovered.push(Object.freeze({ item, matched }));
-      if (discovered.length >= 60) break;
+      const discoveryTarget = Math.min(
+        60,
+        Math.max(minimumCards + 6, Math.ceil(minimumCards * 1.35))
+      );
+      if (discovered.length >= discoveryTarget) break;
     }
     // Hydrate breadth before depth. Live Sukebei torrent downloads commonly
     // take several seconds, so processing every alternative for the first
@@ -451,7 +469,11 @@ function createSukebeiHentaiAdapter(options = {}) {
     // verified file index. Round-robin ordering gives every discovered series
     // its best release first, then uses the remaining budget for alternatives.
     const hydrationQueue = prioritizedHydrationReleases(discovered, 12);
-    const decodedTorrents = await decodeReleaseSet(hydrationQueue, deadlineAt, resolveConcurrency);
+    const decodedTorrents = await decodeReleaseSet(
+      hydrationQueue,
+      deadlineAt,
+      buildResolveConcurrency
+    );
     const seriesItems = [];
     const episodeItems = [];
     const releases = [];
@@ -479,6 +501,7 @@ function createSukebeiHentaiAdapter(options = {}) {
       releases: releases.length,
       hydratedTorrents: decodedTorrents.size,
       hydrationCandidates: hydrationQueue.length,
+      buildResolveConcurrency,
       metadataChecked,
       sourceQueries,
       category: '1_1',
@@ -606,7 +629,7 @@ function createSukebeiHentaiAdapter(options = {}) {
         fetchImpl: options.fetchImpl,
         checkDns: options.checkDns,
         timeoutMs: Math.min(
-          Math.min(Math.max(Number(config.requestTimeoutMs || 15_000), 1_000), 8_000),
+          torrentTimeoutMs,
           Math.max(remainingMs, 250)
         ),
         origin: parsed.origin,
@@ -701,12 +724,14 @@ function createSukebeiHentaiAdapter(options = {}) {
 
 module.exports = {
   CATALOG_ID,
+  DEFAULT_BUILD_RESOLVE_CONCURRENCY,
   DEFAULT_BUILD_BUDGET_MS,
   DEFAULT_BUILD_CANDIDATES,
   DEFAULT_INDEX_TTL_MS,
   DEFAULT_MINIMUM_CARDS,
   DEFAULT_RESOLVE_CONCURRENCY,
   DEFAULT_STREAM_RESOLVE_BUDGET_MS,
+  DEFAULT_TORRENT_TIMEOUT_MS,
   SOURCE_ID,
   buildSeriesRecords,
   createSukebeiHentaiAdapter,
