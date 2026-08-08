@@ -10,11 +10,12 @@ const MAX_CACHE_BYTES = 192 * 1024 * 1024;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const ALLOWED_ROOTS = Object.freeze(['javhdporn.net', 'pornfhd.com']);
 const ALLOWED_HOSTS = Object.freeze(['i0.wp.com', 'i1.wp.com', 'i2.wp.com']);
+const FC2_STORAGE_HOST = /^storage\d+\.contents\.fc2\.com$/i;
 const inFlight = new Map();
 
 function allowedHost(hostname) {
   const host = String(hostname || '').toLocaleLowerCase('en-US');
-  return ALLOWED_HOSTS.includes(host) ||
+  return ALLOWED_HOSTS.includes(host) || FC2_STORAGE_HOST.test(host) ||
     ALLOWED_ROOTS.some(root => host === root || host.endsWith(`.${root}`));
 }
 
@@ -32,7 +33,13 @@ function publicBase(env = process.env) {
 function normalizeSourceUrl(value) {
   try {
     const parsed = new URL(String(value || '').trim());
-    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || !allowedHost(parsed.hostname)) return '';
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return '';
+    if (ALLOWED_HOSTS.includes(parsed.hostname.toLocaleLowerCase('en-US'))) {
+      const embedded = parsed.pathname.match(/^\/(storage\d+\.contents\.fc2\.com)(\/.*)$/i);
+      if (!embedded) return '';
+      return new URL(`https://${embedded[1].toLocaleLowerCase('en-US')}${embedded[2]}`).toString();
+    }
+    if (!allowedHost(parsed.hostname)) return '';
     parsed.hash = '';
     return parsed.toString();
   } catch {
