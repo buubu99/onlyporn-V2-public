@@ -280,6 +280,36 @@ async function requestCatalog({
   }
 }
 
+async function requestCatalogForPass(options = {}) {
+  const first = await requestCatalog(options);
+  if (
+    first.healthy ||
+    String(options.catalog?.id || '') !== SUKEBEI_READY_CATALOG_ID
+  ) {
+    return first;
+  }
+
+  const delayMs = Math.max(
+    0,
+    Math.min(Number(options.immediateRetryDelayMs || 0), 5_000)
+  );
+  if (delayMs > 0) await (options.sleepImpl || sleep)(delayMs);
+
+  const retried = await requestCatalog({
+    ...options,
+    pass: `${options.pass}-sukebei-immediate`,
+  });
+  return {
+    ...retried,
+    immediateRetry: {
+      attempted: true,
+      firstHttpStatus: first.httpStatus,
+      firstMetas: first.metas,
+      firstError: first.error || '',
+    },
+  };
+}
+
 async function loadManifest({ baseUrl, fetchImpl, requestTimeoutMs, runId }) {
   const response = await fetchJson(
     fetchImpl,
@@ -364,13 +394,15 @@ async function runCatalogPrewarm(options = {}) {
   for (let pass = 1; pass <= maxPasses; pass += 1) {
     const targets = pending.length ? pending : [...activeCatalogs];
     const results = await mapLimited(targets, concurrency, catalog =>
-      requestCatalog({
+      requestCatalogForPass({
         baseUrl,
         catalog,
         runId,
         pass,
         fetchImpl,
         requestTimeoutMs,
+        sleepImpl,
+        immediateRetryDelayMs: Math.min(retryDelayMs, 1_000),
       })
     );
     totalRequests += results.length;
@@ -410,13 +442,15 @@ async function runCatalogPrewarm(options = {}) {
         if (retryDelayMs > 0) await sleepImpl(retryDelayMs);
 
         const verificationResults = await mapLimited(activeCatalogs, concurrency, catalog =>
-          requestCatalog({
+          requestCatalogForPass({
             baseUrl,
             catalog,
             runId,
             pass: `${pass}-verify${verification}`,
             fetchImpl,
             requestTimeoutMs,
+            sleepImpl,
+            immediateRetryDelayMs: Math.min(retryDelayMs, 1_000),
           })
         );
         totalRequests += verificationResults.length;
@@ -671,6 +705,7 @@ module.exports = {
   normalizeBaseUrl,
   readSchedulerConfig,
   requestCatalog,
+  requestCatalogForPass,
   runCatalogPrewarm,
   startCatalogPrewarmScheduler,
 };

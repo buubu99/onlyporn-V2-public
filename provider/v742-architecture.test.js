@@ -82,6 +82,8 @@ test('facet engine uses exact metadata and catalog-specific technical rules', ()
   assert.equal(applyFacet(items, { facet: 'sort', value: 'seeders_desc' })[0].seeders, 50);
   assert.equal(itemMatchesFacet({ title: 'Anal student scene' }, { facet: 'rule', value: 'anal' }), true);
   assert.equal(itemMatchesFacet({ title: 'College teacher fantasy' }, { facet: 'rule', value: 'school_student' }), true);
+  assert.equal(itemMatchesFacet({ title: 'Naked Massage With Busty Step Mom' }, { facet: 'rule', value: 'step_fantasy' }), true);
+  assert.equal(itemMatchesFacet({ title: 'Stepbro Helps With Homework' }, { facet: 'rule', value: 'step_fantasy' }), true);
 });
 
 test('every catalog response is capped to Stremio forty-card pages', () => {
@@ -111,6 +113,15 @@ test('large regenerable state is file-backed and transient memory is actively re
 
   const tpbProvider = fs.readFileSync(path.resolve(__dirname, 'tpb4k.js'), 'utf8');
   assert.match(tpbProvider, /await this\._rememberSearchPool\(/);
+});
+
+test('strict startup gives Sukebei an immediate retry and a request budget above Node default', () => {
+  const prewarm = fs.readFileSync(path.resolve(__dirname, 'catalog-prewarm.js'), 'utf8');
+  const server = fs.readFileSync(path.resolve(__dirname, '../server.js'), 'utf8');
+  assert.match(prewarm, /requestCatalogForPass/);
+  assert.match(prewarm, /sukebei-immediate/);
+  assert.match(server, /server\.requestTimeout\s*=\s*Math\.max/);
+  assert.match(server, /prewarmRequestTimeoutMs\s*\+\s*30_000/);
 });
 
 test('TPB4K genre requests use the independent facet path and return matching cards', async t => {

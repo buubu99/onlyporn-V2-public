@@ -57,7 +57,7 @@ function ruleMatch(item, rule) {
   if (rule === 'codec_hevc') return /\b(?:hevc|x265)\b/.test(text);
   if (rule === 'jav_code') return /\b[a-z]{2,10}\s*\d{2,5}\b/.test(text);
   if (rule === 'new_words') return /\b(?:new|first|fresh)\b/.test(text);
-  if (rule === 'step_fantasy') return /\bstep(?:mom|mother|dad|father|sister|brother|daughter|son|family|mommy)\b/.test(text);
+  if (rule === 'step_fantasy') return /\bstep[\s_-]*(?:mom|mother|dad|father|sister|brother|daughter|son|family|mommy|bro|sis)\b/.test(text);
   if (rule === 'pov') return /\bpov\b/.test(text);
   if (rule === 'wife_bride') return /\b(?:wife|bride|wedding)\b/.test(text);
   if (rule === 'anal') return /\banal\b/.test(text);

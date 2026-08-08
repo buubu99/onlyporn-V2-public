@@ -7,6 +7,7 @@ const {
   activeCatalogsFromManifest,
   normalizeBaseUrl,
   readSchedulerConfig,
+  requestCatalogForPass,
   runCatalogPrewarm,
 } = require('./catalog-prewarm');
 
@@ -92,12 +93,38 @@ test('catalog prewarm retries only missing rows and verifies the complete state'
   assert.equal(calls.get('catalog.c'), 4);
 });
 
+test('Sukebei receives one immediate retry before the rest of the startup pass finishes', async () => {
+  let calls = 0;
+  const posters = Array.from({ length: 24 }, (_, index) => ({
+    id: `sukebei-${index}`,
+    poster: `https://example.invalid/onlyporn/poster/metatube/${index}`,
+  }));
+  const result = await requestCatalogForPass({
+    baseUrl: 'http://127.0.0.1:10000',
+    catalog: { id: 'tpb4k.sukebei.top', type: 'movie' },
+    runId: 'startup-test',
+    pass: 1,
+    fetchImpl: async () => {
+      calls += 1;
+      return response({ metas: calls === 1 ? [] : posters });
+    },
+    requestTimeoutMs: 1_000,
+    immediateRetryDelayMs: 0,
+  });
+
+  assert.equal(calls, 2);
+  assert.equal(result.healthy, true);
+  assert.equal(result.metas, 24);
+  assert.equal(result.immediateRetry.attempted, true);
+  assert.equal(result.immediateRetry.firstMetas, 0);
+});
+
 test('scheduler defaults are enabled, bounded, and run every 23 hours', () => {
   const config = readSchedulerConfig({});
   assert.equal(config.enabled, true);
   assert.equal(config.concurrency, 3);
   assert.equal(config.intervalMs, 23 * 60 * 60 * 1000);
-  assert.equal(config.expectedActiveCatalogs, 35);
+  assert.equal(config.expectedActiveCatalogs, 33);
   assert.equal(config.maxPasses, 6);
 });
 
