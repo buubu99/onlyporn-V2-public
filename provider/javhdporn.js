@@ -485,7 +485,7 @@ class JavHdPornProvider extends Provider {
         if (
           parsed.protocol !== 'https:' ||
           !this.allowedPageHosts.has(parsed.hostname.toLowerCase()) ||
-          !parsed.pathname.startsWith('/video/')
+          !/^\/(?:[a-z]{2}(?:-[a-z]{2})?\/)?video\//i.test(parsed.pathname)
         ) return;
         parsed.search = '';
         parsed.hash = '';

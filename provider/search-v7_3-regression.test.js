@@ -14,7 +14,7 @@ test('JAV search cards ignore data placeholders and choose the largest real srcs
   const provider = createJavHdPorn();
   const html = `
     <article class="thumb-block loop-video">
-      <a href="/video/test-search-poster/" title="FC2 PPV Uncensored Test">
+      <a href="/ja/video/test-search-poster/" title="FC2 PPV Uncensored Test">
         <picture>
           <source data-srcset="
             https://pics.pornfhd.com/test-640.jpg 640w,
@@ -35,6 +35,7 @@ test('JAV search cards ignore data placeholders and choose the largest real srcs
     'https://www.javhdporn.net/search/uncensored/'
   );
   assert.equal(metas.length, 1);
+  assert.equal(metas[0].id, 'https://www.javhdporn.net/ja/video/test-search-poster/');
   assert.match(metas[0].poster, /\/onlyporn\/poster\/javhdporn\//);
   assert.equal(decodeSource(metas[0].poster.split('/').pop()), 'https://pics.pornfhd.com/test-1280.jpg');
   assert.notEqual(metas[0].poster, 'https://pics.pornfhd.com/404.jpeg');
