@@ -194,6 +194,15 @@ test('JAV poster relay only accepts HTTPS allowlisted image hosts', () => {
   const relayed = javPosterProxyUrl(source, { ONLYPORN_PUBLIC_BASE_URL: 'https://onlyporn.example' });
   assert.match(relayed, /^https:\/\/onlyporn\.example\/onlyporn\/poster\/javhdporn\//);
   assert.equal(decodeSource(relayed.split('/').pop()), source);
+  assert.match(
+    javPosterProxyUrl('https://i2.wp.com/storage61000.contents.fc2.com/file/poster.jpg', {
+      ONLYPORN_PUBLIC_BASE_URL: 'https://onlyporn.example',
+    }),
+    /^https:\/\/onlyporn\.example\/onlyporn\/poster\/javhdporn\//
+  );
+  assert.equal(normalizeSourceUrl('https://evil.i2.wp.com/poster.jpg'), '');
+  assert.equal(normalizeSourceUrl('https://i2.wp.com.evil.example/poster.jpg'), '');
+  assert.equal(normalizeSourceUrl('https://wp.com/poster.jpg'), '');
   assert.equal(normalizeSourceUrl('https://evil.example/poster.jpg'), '');
   assert.equal(normalizeSourceUrl('http://pics.pornfhd.com/poster.jpg'), '');
 });

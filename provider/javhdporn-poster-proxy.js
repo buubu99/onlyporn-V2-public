@@ -9,11 +9,13 @@ const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 const MAX_CACHE_BYTES = 192 * 1024 * 1024;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const ALLOWED_ROOTS = Object.freeze(['javhdporn.net', 'pornfhd.com']);
+const ALLOWED_HOSTS = Object.freeze(['i0.wp.com', 'i1.wp.com', 'i2.wp.com']);
 const inFlight = new Map();
 
 function allowedHost(hostname) {
   const host = String(hostname || '').toLocaleLowerCase('en-US');
-  return ALLOWED_ROOTS.some(root => host === root || host.endsWith(`.${root}`));
+  return ALLOWED_HOSTS.includes(host) ||
+    ALLOWED_ROOTS.some(root => host === root || host.endsWith(`.${root}`));
 }
 
 function publicBase(env = process.env) {
@@ -188,6 +190,7 @@ function installJavHdPornPosterProxyRoute(app, env = process.env) {
 }
 
 module.exports = {
+  ALLOWED_HOSTS,
   ALLOWED_ROOTS,
   MAX_CACHE_BYTES,
   MAX_IMAGE_BYTES,
