@@ -273,11 +273,21 @@ function decodeTorrent(buffer) {
       ? [Object.freeze({ index: 0, path: filename || 'file-0', length: info.length })]
       : []);
   const size = files.reduce((total, file) => total + file.length, 0);
+  const trackerValues = [
+    root.announce,
+    ...(Array.isArray(root['announce-list']) ? root['announce-list'].flat(4) : []),
+  ];
+  const trackers = [...new Set(trackerValues
+    .filter(Buffer.isBuffer)
+    .map(value => cleanText(value.toString('utf8')))
+    .filter(value => /^(?:https?|udp):\/\//i.test(value)))]
+    .slice(0, 32);
   return {
     infoHash: crypto.createHash('sha1').update(buffer.subarray(infoStart, infoEnd)).digest('hex'),
     filename,
     size,
     files: Object.freeze(files),
+    trackers: Object.freeze(trackers),
   };
 }
 

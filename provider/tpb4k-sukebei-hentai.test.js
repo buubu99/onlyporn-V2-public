@@ -131,6 +131,9 @@ test('release parsing recognizes uncensored, subtitles, complete batches, resolu
   assert.equal(classification.resolution, '1080p');
   assert.equal(extractEpisodeNumber('Show 第03話.mkv'), 3);
   assert.ok(titleSimilarity('Show Episode 2 1080p', 'Show') >= 0.9);
+  assert.deepEqual(decodeTorrent(episodeTorrent('Tracker Fixture')).trackers, [
+    'udp://tracker.example:80/announce',
+  ]);
 });
 
 test('metadata matching is confidence-gated and exact episode file selection never chooses the largest wrong episode', () => {
@@ -259,13 +262,79 @@ test('adapter builds a playable six-series index and resolves the selected episo
   assert.equal(identity.catalogId, 'tpb4k.sukebei.hentai');
   assert.equal(episodeFromSourceId(identity.sourceId), 2);
   assert.ok(identity.torrents.length >= 1);
-  assert.equal(identity.torrents.every(row => row.fileIdx === null), true);
+  assert.equal(identity.torrents.every(row => Number.isInteger(row.fileIdx)), true);
+  assert.equal(identity.torrents[0].fileIdx, 1);
+  const torrentRequestsBeforeResolve = requests.filter(url => url.pathname.startsWith('/download/')).length;
   const episodeItem = await adapter.meta({ sourceId: identity.sourceId });
   const streams = await adapter.resolve({ sourceId: identity.sourceId, item: episodeItem });
   assert.ok(streams.length >= 1);
   assert.equal(streams[0].fileIdx, 1);
   assert.match(streams[0].filename, /S01E02/);
+  assert.equal(
+    requests.filter(url => url.pathname.startsWith('/download/')).length,
+    torrentRequestsBeforeResolve
+  );
   assert.equal(requests.every(url => url.hostname === 'sukebei.nyaa.si'), true);
+});
+
+test('stale multi-release playback fallback inspects torrents concurrently inside the Stremio budget', async () => {
+  const torrentRows = Array.from({ length: 3 }, (_, index) => {
+    const number = index + 1;
+    const body = episodeTorrent(`Parallel Fixture ${number}`);
+    return {
+      number,
+      body,
+      release: normalizeRelease({
+        id: `https://sukebei.nyaa.si/view/${9_000 + number}`,
+        title: `[Team ${number}] Parallel Fixture Episode 1-2 Complete 1080p`,
+        link: `https://sukebei.nyaa.si/view/${9_000 + number}`,
+        infoHash: decodeTorrent(body).infoHash,
+        seeders: 20 - number,
+      }),
+    };
+  });
+  let inFlight = 0;
+  let maxInFlight = 0;
+  const adapter = createSukebeiHentaiAdapter({
+    config: {
+      discovery: { sukebeiHentai: 'https://sukebei.nyaa.si/?page=rss&c=1_1&f=0' },
+      requestTimeoutMs: 5_000,
+    },
+    env: {
+      ONLYPORN_SUKEBEI_HENTAI_RESOLVE_CONCURRENCY: '3',
+      ONLYPORN_SUKEBEI_HENTAI_STREAM_RESOLVE_BUDGET_MS: '2000',
+    },
+    checkDns: false,
+    sukebeiHentaiStore: { enabled: false },
+    sukebeiHentaiMetadataClients: {
+      anilist: { configured: true },
+      jikan: { configured: true },
+    },
+    fetchImpl: async value => {
+      const url = new URL(String(value));
+      const number = Number(url.pathname.match(/\/(\d+)\.torrent$/)?.[1]) - 9_000;
+      const row = torrentRows.find(candidate => candidate.number === number);
+      assert.ok(row);
+      inFlight += 1;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise(resolve => setTimeout(resolve, 25));
+      inFlight -= 1;
+      return response(row.body, 'application/x-bittorrent');
+    },
+  });
+  const streams = await adapter.resolve({
+    sourceId: 'anilist:parallel:episode:2',
+    item: {
+      sukebeiHentai: {
+        episode: 2,
+        releases: torrentRows.map(row => row.release),
+      },
+    },
+  });
+  assert.equal(maxInFlight, 3);
+  assert.equal(streams.length, 3);
+  assert.equal(streams.every(stream => stream.fileIdx === 1), true);
+  assert.equal(streams.every(stream => stream.trackers.includes('udp://tracker.example:80/announce')), true);
 });
 
 test('series records do not become catalog cards without a real matched torrent', () => {
