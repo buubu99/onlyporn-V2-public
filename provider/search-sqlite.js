@@ -47,6 +47,18 @@ class SearchSqliteStore {
     const rows=(Array.isArray(items)?items:[]).map((item,index)=>({itemId:searchItemId(item,index),searchText:visibleSearchText(item),item})).filter(r=>r.itemId&&r.searchText);
     if(!rows.length)return null; try{return await this._request('upsert_pool',{catalogId:String(catalogId||''),rows},10000);}catch{return null;}
   }
+  async countPool(catalogId){
+    try{
+      const value=await this._request('count_pool',{catalogId:String(catalogId||'')});
+      return Math.max(Number(value||0),0);
+    }catch{return 0;}
+  }
+  async listPool(catalogId,limit=300){
+    try{
+      const value=await this._request('list_pool',{catalogId:String(catalogId||''),limit});
+      return Array.isArray(value)?value:[];
+    }catch{return[];}
+  }
   async searchPool(catalogId,query,limit=160){
     const normalized=normalizeForMatch(normalizeSearchQuery(query));const tokens=normalized.split(' ').filter(Boolean);if(!tokens.length)return[];
     try{const result=await this._request('search_pool',{catalogId:String(catalogId||''),tokens,limit});return Array.isArray(result)?result:[];}catch{return[];}

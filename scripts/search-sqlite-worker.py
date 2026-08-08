@@ -115,6 +115,28 @@ def handle(msg):
         except Exception:
             conn.execute('ROLLBACK'); raise
         prune(); return {'written':True,'count':count}
+    if op=='count_pool':
+        cid=str(p.get('catalogId') or '')
+        if not cid: return 0
+        return int(conn.execute(
+            'SELECT COUNT(*) FROM pool_items WHERE catalog_id=? AND expires_at>=?',
+            (cid,now)
+        ).fetchone()[0])
+    if op=='list_pool':
+        cid=str(p.get('catalogId') or '')
+        limit=min(max(int(p.get('limit') or 300),1),500)
+        if not cid: return []
+        rows=conn.execute(
+            'SELECT item_json FROM pool_items WHERE catalog_id=? AND expires_at>=? ORDER BY seen_at DESC LIMIT ?',
+            (cid,now,limit)
+        ).fetchall()
+        out=[]
+        for (body,) in rows:
+            try:
+                item=json.loads(body)
+                if isinstance(item,dict): out.append(item)
+            except Exception: pass
+        return out
     if op=='search_pool':
         cid=str(p.get('catalogId') or ''); tokens=[str(x or '').strip() for x in (p.get('tokens') or []) if str(x or '').strip()][:12]
         limit=min(max(int(p.get('limit') or 160),1),500)

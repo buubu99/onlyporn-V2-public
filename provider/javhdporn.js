@@ -62,6 +62,92 @@ function normalizePoster(value, baseUrl) {
   return url;
 }
 
+function normalizePosterCandidate(value, baseUrl) {
+  const raw = cleanText(value);
+  if (!raw || /^(?:data|blob|javascript):/i.test(raw)) return '';
+  const url = normalizeAbsoluteUrl(raw, baseUrl);
+  if (!url || /^(?:data|blob|javascript):/i.test(url)) return '';
+  return url;
+}
+
+function posterFromSrcset(value, baseUrl) {
+  const entries = String(value || '')
+    .split(',')
+    .map(part => part.trim())
+    .filter(Boolean);
+  let best = '';
+  let bestScore = -1;
+  entries.forEach((entry, index) => {
+    const match = entry.match(/^(\S+)(?:\s+(\d+(?:\.\d+)?)(w|x))?/i);
+    if (!match) return;
+    const url = normalizePosterCandidate(match[1], baseUrl);
+    if (!url) return;
+    const amount = Number(match[2] || 0);
+    const unit = String(match[3] || '').toLowerCase();
+    const score = unit === 'w'
+      ? amount
+      : unit === 'x'
+        ? amount * 10_000
+        : index;
+    if (score >= bestScore) {
+      best = url;
+      bestScore = score;
+    }
+  });
+  return best;
+}
+
+function extractCatalogPoster($, root, pageUrl) {
+  const image = root.find('img').first();
+  const directAttrs = [
+    'data-lazy-src',
+    'data-src',
+    'data-wpsrc',
+    'data-original',
+    'data-lazy',
+    'data-thumb',
+    'data-image',
+    'data-poster',
+  ];
+  for (const attr of directAttrs) {
+    const candidate = normalizePosterCandidate(image.attr(attr), pageUrl);
+    if (candidate) return candidate;
+  }
+
+  let bestSrcset = '';
+  const srcsetValues = [
+    image.attr('data-lazy-srcset'),
+    image.attr('data-srcset'),
+    image.attr('srcset'),
+  ];
+  root.find('picture source, source').each((_, element) => {
+    const source = $(element);
+    srcsetValues.push(
+      source.attr('data-lazy-srcset'),
+      source.attr('data-srcset'),
+      source.attr('srcset')
+    );
+  });
+  for (const value of srcsetValues) {
+    const candidate = posterFromSrcset(value, pageUrl);
+    if (candidate) bestSrcset = candidate;
+  }
+  if (bestSrcset) return bestSrcset;
+
+  const src = normalizePosterCandidate(image.attr('src'), pageUrl);
+  if (src) return src;
+
+  const styled = image.add(root.find('[style*="background"]').first());
+  for (const element of styled.toArray()) {
+    const style = String($(element).attr('style') || '');
+    const match = style.match(/(?:background(?:-image)?\s*:[^;]*url\(\s*['"]?)([^'")\s]+)[^)]*\)/i);
+    const candidate = normalizePosterCandidate(match?.[1], pageUrl);
+    if (candidate) return candidate;
+  }
+
+  return DEFAULT_POSTER;
+}
+
 function structuredDataFromPage($) {
   return parseStructuredDataBlocks(
     $('script[type="application/ld+json"]')
@@ -410,13 +496,7 @@ class JavHdPornProvider extends Provider {
       seen.add(id);
 
       const image = root.find('img').first();
-      const poster = normalizePoster(
-        image.attr('data-lazy-src') ||
-          image.attr('data-src') ||
-          image.attr('data-wpsrc') ||
-          image.attr('src'),
-        pageUrl
-      );
+      const poster = extractCatalogPoster($, root, pageUrl);
       const title = cleanTitle(
         anchor.attr('title') ||
           image.attr('alt') ||
@@ -824,6 +904,9 @@ create._test = {
   isLikelyPlayerPage,
   isoDurationToRuntime,
   normalizePoster,
+  normalizePosterCandidate,
+  posterFromSrcset,
+  extractCatalogPoster,
   normalizeSourceValue,
   prioritizePlayerCandidates,
   decodeReservePlayers,

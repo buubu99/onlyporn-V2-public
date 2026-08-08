@@ -372,7 +372,13 @@ class Tpb4kProvider {
   _rememberSearchPool(catalogId, items) {
     if (!Array.isArray(items) || !items.length || !this.searchStore?.enabled) return;
     // Search indexing must never delay browse/prewarm/readiness.
-    Promise.resolve(this.searchStore.upsertPool(catalogId, items)).catch(() => {});
+    const writes = [this.searchStore.upsertPool(catalogId, items)];
+    // All/New/Top are views of the same Hentai source. Searching them against
+    // three isolated browse windows caused false misses and unnecessary fetches.
+    if (String(catalogId || '').startsWith('tpb4k.hentai.')) {
+      writes.push(this.searchStore.upsertPool('tpb4k.source.hentai', items));
+    }
+    Promise.allSettled(writes).catch(() => {});
   }
 
   async _handleCatalogSearch(args, definition, query) {
@@ -430,10 +436,18 @@ class Tpb4kProvider {
       100
     );
     const poolLimit = Math.min(
-      Math.max(Number.parseInt(String(this.env.ONLYPORN_SEARCH_POOL_LIMIT || 160), 10) || 160, 40),
-      300
+      Math.max(Number.parseInt(String(this.env.ONLYPORN_SEARCH_POOL_LIMIT || 300), 10) || 300, 80),
+      400
     );
-    const cachedPool = await this.searchStore.searchPool(definition.id, query, poolLimit);
+    const poolCatalogId = definition.source === 'hentai'
+      ? 'tpb4k.source.hentai'
+      : definition.id;
+
+    const [cachedPool, poolCount] = await Promise.all([
+      this.searchStore.searchPool(poolCatalogId, query, poolLimit),
+      this.searchStore.countPool(poolCatalogId),
+    ]);
+
     let rawItems = [];
     let searchMode = 'sqlite-pool';
     let studioSearchRecovery;
@@ -445,13 +459,50 @@ class Tpb4kProvider {
       const resolverAdapter = getAdapter(definition.lookupSource);
       if (!resolverAdapter) return { metas: [] };
 
-      const cachedMatches = rankSearchItems(cachedPool, query);
-      const cachedPlayable = cachedMatches.filter(item => torrentBundle(item).length > 0);
-      if (cachedPlayable.length) {
-        rawItems = cachedPlayable.slice(0, 40);
-      } else {
-        searchMode = 'studio-upstream-query';
-        let metadataItems = cachedMatches;
+      const allPool = await this.searchStore.listPool(definition.id, 400);
+      const alreadyPlayable = rankSearchItems(allPool, query)
+        .filter(item => torrentBundle(item).length > 0 && Boolean(realStudioPoster(item?.poster)));
+
+      const metadataPool = allPool.filter(item =>
+        ['studio-metadata', 'platform-hybrid'].includes(String(item?.source || ''))
+        && Boolean(realStudioPoster(item?.poster))
+      );
+      const torrentPool = allPool.filter(item => torrentBundle(item).length > 0);
+      const matchingMetadata = rankSearchItems(metadataPool, query);
+      const matchingTorrents = rankSearchItems(torrentPool, query);
+      const poolWarm = metadataPool.length >= 20 && torrentPool.length >= 20;
+
+      if (alreadyPlayable.length) {
+        rawItems = alreadyPlayable.slice(0, 40);
+      } else if (matchingMetadata.length || matchingTorrents.length) {
+        searchMode = 'sqlite-local-binding';
+        const binding = bindStudioPlayback({
+          catalog: definition,
+          metadataItems: matchingMetadata.length ? matchingMetadata : metadataPool,
+          torrentItems: matchingTorrents.length ? matchingTorrents : torrentPool,
+          skip: 0,
+          limit: 40,
+        });
+        rawItems = [...binding.items];
+        studioSearchRecovery = Object.freeze({
+          attempted: 0,
+          completed: 0,
+          recoveredCandidates: 0,
+          timedOut: 0,
+          reason: 'sqlite-local-binding',
+          finalCards: rawItems.length,
+          finalCandidates: Number(binding?.stats?.returnedCandidates || rawItems.length),
+        });
+      }
+
+      // A prewarmed studio already has the broad metadata+torrent pool. A real
+      // miss must be returned immediately; running many simultaneous TPDB /
+      // torrent recovery jobs is what made Stremio rows sit as skeletons.
+      if (!rawItems.length && poolWarm) {
+        searchMode = 'sqlite-warm-miss';
+      } else if (!rawItems.length) {
+        searchMode = 'studio-cold-upstream-query';
+        let metadataItems = matchingMetadata;
         if (!metadataItems.length) {
           metadataItems = await this._withSearchNetworkSlot(() => adapter.catalog({
             catalog: {
@@ -468,22 +519,20 @@ class Tpb4kProvider {
           metadataItems = rankSearchItems(metadataItems, query);
         }
 
-        // Resolve only metadata that actually matched the user query. This is
-        // the key difference from the old first-40 browse filter.
-        metadataItems = metadataItems.slice(0, 24);
-        if (!metadataItems.length) return { metas: [] };
-
-        const binding = await this._withSearchNetworkSlot(() => recoverStudioPlayback({
-          catalog: { ...definition, searchMode: true, searchQuery: query },
-          metadataItems,
-          torrentItems: [],
-          resolverAdapter,
-          config,
-          skip: 0,
-          limit: 40,
-        }));
-        studioSearchRecovery = binding.recovery;
-        rawItems = [...binding.items];
+        metadataItems = metadataItems.slice(0, 16);
+        if (metadataItems.length) {
+          const binding = await this._withSearchNetworkSlot(() => recoverStudioPlayback({
+            catalog: { ...definition, searchMode: true, searchQuery: query },
+            metadataItems,
+            torrentItems: torrentPool,
+            resolverAdapter,
+            config,
+            skip: 0,
+            limit: 40,
+          }));
+          studioSearchRecovery = binding.recovery;
+          rawItems = [...binding.items];
+        }
       }
     } else if (definition.id === 'tpb4k.sukebei.top') {
       const cachedMatches = rankSearchItems(cachedPool, query);
@@ -502,8 +551,14 @@ class Tpb4kProvider {
       }
     } else {
       let matches = rankSearchItems(cachedPool, query);
-      if (matches.length < 8) {
-        searchMode = 'bounded-source-expansion';
+      const warmThreshold = definition.source === 'hentai' ? 60 : 30;
+
+      if (!matches.length && poolCount >= warmThreshold) {
+        searchMode = 'sqlite-warm-miss';
+      } else if (matches.length) {
+        searchMode = definition.source === 'hentai' ? 'sqlite-shared-pool' : 'sqlite-pool';
+      } else {
+        searchMode = 'cold-bounded-source-expansion';
         const fetched = await this._withSearchNetworkSlot(() => adapter.catalog({
           catalog: { ...definition, searchMode: true, searchQuery: query },
           skip: 0,
@@ -515,8 +570,6 @@ class Tpb4kProvider {
       }
       rawItems = matches.slice(0, generalResultLimit);
 
-      // PornRips enrichment used to run over an unrelated browse pool. Search
-      // now filters first and only enriches the matching rows.
       if (definition.id === 'tpb4k.pornrips.recent' && rawItems.length) {
         const enrichmentAdapter = getAdapter('torrent-index');
         if (typeof enrichmentAdapter?.enrichMetadata === 'function') {
@@ -536,7 +589,8 @@ class Tpb4kProvider {
       })
       .filter(Boolean)
       .filter(item => definition.id !== 'tpb4k.sukebei.top' || Boolean(safePoster(item.poster)))
-      .filter(item => !['studio-metadata', 'platform-hybrid'].includes(definition.source) || Boolean(realStudioPoster(item.poster)));
+      .filter(item => !['studio-metadata', 'platform-hybrid'].includes(definition.source)
+        || Boolean(realStudioPoster(item.poster)));
 
     const contentFiltered = filterItems(normalizedItems, this.contentFilter);
     const ranked = rankSearchItems(contentFiltered.items, query);
@@ -544,7 +598,6 @@ class Tpb4kProvider {
     const finalItems = ranked.slice(0, resultLimit);
     const metas = finalItems.map(item => toMetaPreview(item, definition.id, config));
 
-    // Final normalized/playable rows also improve later related queries.
     this._rememberSearchPool(definition.id, finalItems);
 
     logger().info({
@@ -553,6 +606,7 @@ class Tpb4kProvider {
       source: definition.source,
       search: query,
       searchMode,
+      poolCount,
       metas: metas.length,
       sqliteSearch: Boolean(this.searchStore?.enabled),
       ...(studioSearchRecovery ? { studioSearchRecovery } : {}),
@@ -619,7 +673,10 @@ class Tpb4kProvider {
             config,
           }) : Promise.resolve([]),
         ]);
-        this._rememberSearchPool(definition.id, metadataItems);
+        this._rememberSearchPool(
+          definition.id,
+          mergeSearchItems(metadataItems, torrentItems, enrichedTorrentItems)
+        );
         let binding = bindStudioPlayback({
           catalog: definition,
           metadataItems,
