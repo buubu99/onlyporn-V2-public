@@ -67,6 +67,11 @@ function logFiltered(resource, args, result) {
   );
 }
 
+function capCatalogResponse(response, limit = 40) {
+  const metas = Array.isArray(response?.metas) ? response.metas : [];
+  return { ...(response || {}), metas: metas.slice(0, limit) };
+}
+
 builder.defineCatalogHandler(async args => {
   try {
     args = normalizeCatalogFacetArgs(args);
@@ -77,7 +82,7 @@ builder.defineCatalogHandler(async args => {
     const searched = tpb4kSearch ? response : applyTpb4kCatalogSearch(response, args);
     const filtered = filterCatalogResponse(searched, contentFilter);
     logFiltered('catalog', args, filtered);
-    return filtered.response;
+    return capCatalogResponse(filtered.response);
   } catch (error) {
     logger.error({ error: error.message, catalogId: args.id }, 'Catalog handler failed');
     return { metas: [] };

@@ -8,7 +8,10 @@ db_path = Path(sys.argv[1]).resolve()
 db_path.parent.mkdir(parents=True, exist_ok=True)
 try: os.chmod(db_path.parent, 0o700)
 except OSError: pass
-hard_max = max(int(os.environ.get("ONLYPORN_SEARCH_DB_MAX_BYTES", str(100*1024*1024))), 4*1024*1024)
+# Search pools and exact-query results belong on Render's ephemeral filesystem,
+# not in the Node heap. Keep a generous but finite default while preserving a
+# 4 GiB free-space floor for MetaTube, logs, posters, and OS headroom.
+hard_max = max(int(os.environ.get("ONLYPORN_SEARCH_DB_MAX_BYTES", str(2*1024*1024*1024))), 4*1024*1024)
 min_free = max(int(os.environ.get("ONLYPORN_SEARCH_MIN_FREE_BYTES", str(4*1024*1024*1024))), 64*1024*1024)
 query_ttl = max(int(os.environ.get("ONLYPORN_SEARCH_QUERY_TTL_MS", str(30*60*1000))), 60000)
 negative_ttl = max(int(os.environ.get("ONLYPORN_SEARCH_NEGATIVE_TTL_MS", str(5*60*1000))), 30000)

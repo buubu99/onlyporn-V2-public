@@ -376,9 +376,11 @@ class Tpb4kProvider {
     }
   }
 
-  _rememberSearchPool(catalogId, items) {
-    if (!Array.isArray(items) || !items.length || !this.searchStore?.enabled) return;
-    // Search indexing must never delay browse/prewarm/readiness.
+  async _rememberSearchPool(catalogId, items) {
+    if (!Array.isArray(items) || !items.length || !this.searchStore?.enabled) return [];
+    // Persistent search/facet indexing is part of a complete catalogue build.
+    // Fresh catalogue requests await it so Render cannot declare the new
+    // instance ready while its search database is still incomplete.
     const remember = async id => {
       await this.searchStore.upsertPool(id, items);
       await this.searchStore.rebuildFacets(id);
@@ -389,7 +391,7 @@ class Tpb4kProvider {
     if (String(catalogId || '').startsWith('tpb4k.hentai.')) {
       writes.push(remember('tpb4k.source.hentai'));
     }
-    Promise.allSettled(writes).catch(() => {});
+    return Promise.allSettled(writes);
   }
 
   async _handleCatalogFacet(args, definition, selectedFacet) {
@@ -779,7 +781,7 @@ class Tpb4kProvider {
             config,
           }) : Promise.resolve([]),
         ]);
-        this._rememberSearchPool(
+        await this._rememberSearchPool(
           definition.id,
           mergeSearchItems(metadataItems, torrentItems, enrichedTorrentItems)
         );
@@ -894,7 +896,7 @@ class Tpb4kProvider {
       logger().warn({ provider: this.name, catalogId: definition.id, source: definition.source, error: redactSecrets(error?.message || error, this.env) }, 'OnlyPorn catalog adapter failed safely');
     }
 
-    this._rememberSearchPool(definition.id, rawItems);
+    await this._rememberSearchPool(definition.id, rawItems);
     const normalizedItems = (Array.isArray(rawItems) ? rawItems : [])
       .map(item => {
         const itemAdapter = getAdapter(item?.source) || adapter;

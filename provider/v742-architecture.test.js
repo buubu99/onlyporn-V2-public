@@ -75,9 +75,42 @@ test('facet engine uses exact metadata and catalog-specific technical rules', ()
   ];
   assert.equal(itemMatchesFacet(items[0], { facet: 'tag', value: 'Real Life' }), true);
   assert.equal(itemMatchesFacet(items[1], { facet: 'tag', value: 'Real Life' }), false);
+  assert.equal(itemMatchesFacet({ quality: 'Top by seeders' }, { facet: 'tag', value: 'Top by seeders' }), true);
+  assert.equal(itemMatchesFacet({ series: 'Secretaries In Heat' }, { facet: 'tag', value: 'Secretaries In Heat' }), true);
   assert.equal(applyFacet(items, { facet: 'rule', value: 'jav_code' }).length, 1);
   assert.equal(applyFacet(items, { facet: 'rule', value: 'cast_available' }).length, 1);
   assert.equal(applyFacet(items, { facet: 'sort', value: 'seeders_desc' })[0].seeders, 50);
+  assert.equal(itemMatchesFacet({ title: 'Anal student scene' }, { facet: 'rule', value: 'anal' }), true);
+  assert.equal(itemMatchesFacet({ title: 'College teacher fantasy' }, { facet: 'rule', value: 'school_student' }), true);
+});
+
+test('every catalog response is capped to Stremio forty-card pages', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../addon.js'), 'utf8');
+  assert.match(source, /function capCatalogResponse\(response, limit = 40\)/);
+  assert.match(source, /metas:\s*metas\.slice\(0, limit\)/);
+  assert.match(source, /return capCatalogResponse\(filtered\.response\)/);
+});
+
+test('large regenerable state is file-backed and transient memory is actively retired', () => {
+  const worker = fs.readFileSync(path.resolve(__dirname, '../scripts/search-sqlite-worker.py'), 'utf8');
+  assert.match(worker, /2\*1024\*1024\*1024/);
+  assert.match(worker, /PRAGMA temp_store=FILE/);
+  assert.match(worker, /PRAGMA mmap_size=0/);
+
+  const providerCache = fs.readFileSync(path.resolve(__dirname, 'cache.js'), 'utf8');
+  const tpbCache = fs.readFileSync(path.resolve(__dirname, 'tpb4k/cache.js'), 'utf8');
+  assert.match(providerCache, /setInterval\(\(\) => this\.pruneExpired\(\)/);
+  assert.match(tpbCache, /setInterval\(\(\) => this\.pruneExpired\(\)/);
+
+  for (const file of ['safari-impersonation.js', 'javhdporn-safari-impersonation.js', 'pornhub-safari-impersonation.js']) {
+    const source = fs.readFileSync(path.resolve(__dirname, file), 'utf8');
+    assert.match(source, /ONLYPORN_HELPER_IDLE_MS/);
+    assert.match(source, /scheduleIdleStop\(\)/);
+    assert.match(source, /child\.kill\('SIGTERM'\)/);
+  }
+
+  const tpbProvider = fs.readFileSync(path.resolve(__dirname, 'tpb4k.js'), 'utf8');
+  assert.match(tpbProvider, /await this\._rememberSearchPool\(/);
 });
 
 test('TPB4K genre requests use the independent facet path and return matching cards', async t => {

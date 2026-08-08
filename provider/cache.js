@@ -10,6 +10,9 @@ class BoundedTtlCache {
     this.maxEntries = maxEntries;
     this.ttlMs = ttlMs;
     this.store = new Map();
+    const pruneIntervalMs = Math.min(Math.max(Math.floor(ttlMs), 1_000), 60_000);
+    this.pruneTimer = setInterval(() => this.pruneExpired(), pruneIntervalMs);
+    this.pruneTimer.unref?.();
   }
 
   get size() {
@@ -60,6 +63,11 @@ class BoundedTtlCache {
 
   clear() {
     this.store.clear();
+  }
+
+  close() {
+    clearInterval(this.pruneTimer);
+    this.clear();
   }
 
   pruneExpired(now = Date.now()) {

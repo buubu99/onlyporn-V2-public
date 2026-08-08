@@ -60,6 +60,8 @@ function ruleMatch(item, rule) {
   if (rule === 'step_fantasy') return /\bstep(?:mom|mother|dad|father|sister|brother|daughter|son|family|mommy)\b/.test(text);
   if (rule === 'pov') return /\bpov\b/.test(text);
   if (rule === 'wife_bride') return /\b(?:wife|bride|wedding)\b/.test(text);
+  if (rule === 'anal') return /\banal\b/.test(text);
+  if (rule === 'school_student') return /\b(?:school|student|teacher|college)\b/.test(text);
   if (rule === 'cast_available') return performers(item).length > 0;
   if (rule === 'long_form') return numberFromDescription(item, 'Duration') >= 1800 || Number(item?.duration || 0) >= 1800;
   if (rule === 'compact_file') {
@@ -91,7 +93,11 @@ function itemMatchesFacet(item = {}, selected = {}) {
       .some(itemValue => normalizeForMatch(itemValue) === wanted);
   }
   if (facet === 'tag' || facet === 'genre') {
-    return [...strings(item.tags), ...strings(item.genres), ...strings(item.contentTags)]
+    // Preview genres are assembled from these top-level metadata fields plus
+    // tags. Match the same visible evidence when the dynamic profile was
+    // derived from a playable preview card.
+    return [item.quality, item.resolution, item.studio, item.series,
+      ...strings(item.tags), ...strings(item.genres), ...strings(item.contentTags)]
       .some(itemValue => normalizeForMatch(itemValue) === wanted);
   }
   if (facet === 'studio' || facet === 'series') return normalizeForMatch(item[facet]) === wanted;

@@ -5,6 +5,8 @@ class BoundedTtlCache {
     this.maxEntries = Math.max(Number.parseInt(String(options.maxEntries || 500), 10) || 500, 1);
     this.now = typeof options.now === 'function' ? options.now : Date.now;
     this.entries = new Map();
+    this.pruneTimer = setInterval(() => this.pruneExpired(), 60_000);
+    this.pruneTimer.unref?.();
   }
 
   _deleteExpired(key, entry) {
@@ -60,8 +62,17 @@ class BoundedTtlCache {
     this.entries.clear();
   }
 
-  get size() {
+  pruneExpired() {
     for (const [key, entry] of this.entries) this._deleteExpired(key, entry);
+  }
+
+  close() {
+    clearInterval(this.pruneTimer);
+    this.clear();
+  }
+
+  get size() {
+    this.pruneExpired();
     return this.entries.size;
   }
 }

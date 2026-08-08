@@ -16,6 +16,18 @@ class SafariImpersonationClient {
     this.child = null;
     this.sequence = 0;
     this.pending = new Map();
+    this.idleTimer = null;
+  }
+
+  scheduleIdleStop() {
+    clearTimeout(this.idleTimer);
+    if (!this.child || this.pending.size) return;
+    const idleMs = Math.min(Math.max(Number(process.env.ONLYPORN_HELPER_IDLE_MS || 120_000), 60_000), 900_000);
+    this.idleTimer = setTimeout(() => {
+      this.idleTimer = null;
+      if (!this.pending.size && this.child && !this.child.killed) this.child.kill('SIGTERM');
+    }, idleMs);
+    this.idleTimer.unref?.();
   }
 
   start() {
@@ -49,6 +61,8 @@ class SafariImpersonationClient {
 
   onExit(child, error) {
     if (this.child !== child) return;
+    clearTimeout(this.idleTimer);
+    this.idleTimer = null;
     this.child = null;
     if (child?.stdout) child.stdout.removeAllListeners();
 
@@ -77,10 +91,12 @@ class SafariImpersonationClient {
       const error = new Error(message.error || `HTTP ${message.status || 'unknown'}`);
       if (message.status) error.status = message.status;
       error.headers = message.headers || {};
+      this.scheduleIdleStop();
       pending.reject(error);
       return;
     }
 
+    this.scheduleIdleStop();
     pending.resolve({
       data: Buffer.from(message.bodyBase64 || '', 'base64').toString('utf8'),
       status: message.status,
@@ -91,6 +107,8 @@ class SafariImpersonationClient {
 
   async fetchText(url, options = {}) {
     this.start();
+    clearTimeout(this.idleTimer);
+    this.idleTimer = null;
     if (!this.child?.stdin?.writable) throw new Error('Safari helper is unavailable');
 
     const id = ++this.sequence;
@@ -118,6 +136,7 @@ class SafariImpersonationClient {
         if (!pending) return;
         this.pending.delete(id);
         clearTimeout(timer);
+        this.scheduleIdleStop();
         reject(error);
       });
     });
