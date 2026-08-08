@@ -82,6 +82,8 @@ test('facet engine uses exact metadata and catalog-specific technical rules', ()
   assert.equal(applyFacet(items, { facet: 'sort', value: 'seeders_desc' })[0].seeders, 50);
   assert.equal(itemMatchesFacet({ title: 'Anal student scene' }, { facet: 'rule', value: 'anal' }), true);
   assert.equal(itemMatchesFacet({ title: 'College teacher fantasy' }, { facet: 'rule', value: 'school_student' }), true);
+  assert.equal(itemMatchesFacet({ title: 'Naked Massage With Busty Step Mom' }, { facet: 'rule', value: 'step_fantasy' }), true);
+  assert.equal(itemMatchesFacet({ title: 'Stepbro Helps With Homework' }, { facet: 'rule', value: 'step_fantasy' }), true);
 });
 
 test('every catalog response is capped to Stremio forty-card pages', () => {
