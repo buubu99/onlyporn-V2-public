@@ -172,6 +172,27 @@ function releasesForEpisode(releases, episode) {
     .slice(0, 12);
 }
 
+function prioritizedHydrationReleases(discovered = [], alternativesPerSeries = 12) {
+  const groups = (Array.isArray(discovered) ? discovered : [])
+    .map(entry => (Array.isArray(entry?.matched) ? entry.matched : [])
+      .filter(release => normalizeInfoHash(release?.infoHash))
+      .slice(0, Math.max(Number(alternativesPerSeries || 0), 1)))
+    .filter(group => group.length);
+  const output = [];
+  const seen = new Set();
+  const depth = Math.max(0, ...groups.map(group => group.length));
+  for (let index = 0; index < depth; index += 1) {
+    for (const group of groups) {
+      const release = group[index];
+      const infoHash = normalizeInfoHash(release?.infoHash);
+      if (!infoHash || seen.has(infoHash)) continue;
+      seen.add(infoHash);
+      output.push(release);
+    }
+  }
+  return output;
+}
+
 function buildSeriesRecords(metadata, matchedReleases, options = {}) {
   const releases = [...(Array.isArray(matchedReleases) ? matchedReleases : [])]
     .filter(release => release?.infoHash)
@@ -413,7 +434,6 @@ function createSukebeiHentaiAdapter(options = {}) {
     let latestFeed = [];
     try { latestFeed = await fetchReleases('', discoveryDeadlineAt); } catch { latestFeed = []; }
     const discovered = [];
-    const uniqueReleases = new Map();
     let metadataChecked = 0;
     let sourceQueries = 1;
     for (const item of candidates) {
@@ -423,10 +443,15 @@ function createSukebeiHentaiAdapter(options = {}) {
       sourceQueries += Math.min(metadataAliases(item).filter(alias => alias.length >= 3).length, 2);
       if (!matched.length) continue;
       discovered.push(Object.freeze({ item, matched }));
-      for (const release of matched) uniqueReleases.set(normalizeInfoHash(release.infoHash), release);
       if (discovered.length >= 60) break;
     }
-    const decodedTorrents = await decodeReleaseSet([...uniqueReleases.values()], deadlineAt, resolveConcurrency);
+    // Hydrate breadth before depth. Live Sukebei torrent downloads commonly
+    // take several seconds, so processing every alternative for the first
+    // title can exhaust the build budget before later series receive even one
+    // verified file index. Round-robin ordering gives every discovered series
+    // its best release first, then uses the remaining budget for alternatives.
+    const hydrationQueue = prioritizedHydrationReleases(discovered, 12);
+    const decodedTorrents = await decodeReleaseSet(hydrationQueue, deadlineAt, resolveConcurrency);
     const seriesItems = [];
     const episodeItems = [];
     const releases = [];
@@ -439,7 +464,10 @@ function createSukebeiHentaiAdapter(options = {}) {
       releases.push(...records.releaseRecords);
     }
     if (seriesItems.length < minimumCards) {
-      throw new Error(`Sukebei Hentai built ${seriesItems.length}/${minimumCards} required playable series`);
+      throw new Error(
+        `Sukebei Hentai built ${seriesItems.length}/${minimumCards} required playable series `
+        + `(${discovered.length} matched, ${decodedTorrents.size}/${hydrationQueue.length} torrents hydrated)`
+      );
     }
     const build = Object.freeze({
       status: 'complete',
@@ -450,6 +478,7 @@ function createSukebeiHentaiAdapter(options = {}) {
       episodes: episodeItems.length,
       releases: releases.length,
       hydratedTorrents: decodedTorrents.size,
+      hydrationCandidates: hydrationQueue.length,
       metadataChecked,
       sourceQueries,
       category: '1_1',
@@ -513,15 +542,17 @@ function createSukebeiHentaiAdapter(options = {}) {
     }
     const discoveryDeadlineAt = Math.max(Date.now(), deadlineAt - streamResolveBudgetMs);
     const discovered = [];
-    const uniqueReleases = new Map();
     for (const item of rankMetadata(metadataRows).slice(0, 4)) {
       if (Date.now() >= discoveryDeadlineAt) break;
       const matched = await releasesForMetadata(item, [], discoveryDeadlineAt);
       if (!matched.length) continue;
       discovered.push(Object.freeze({ item, matched }));
-      for (const release of matched) uniqueReleases.set(normalizeInfoHash(release.infoHash), release);
     }
-    const decodedTorrents = await decodeReleaseSet([...uniqueReleases.values()], deadlineAt, resolveConcurrency);
+    const decodedTorrents = await decodeReleaseSet(
+      prioritizedHydrationReleases(discovered, 12),
+      deadlineAt,
+      resolveConcurrency
+    );
     const output = [];
     for (const { item, matched } of discovered) {
       const records = buildSeriesRecords(item, matched, { decodedTorrents, requireResolved: true });
@@ -684,6 +715,7 @@ module.exports = {
   episodeSourceId,
   matchReleases,
   normalizeRelease,
+  prioritizedHydrationReleases,
   releasesForEpisode,
   rssUrl,
   verifiedReleaseCandidate,

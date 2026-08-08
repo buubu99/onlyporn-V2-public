@@ -15,6 +15,7 @@ const {
   episodeFromSourceId,
   matchReleases,
   normalizeRelease,
+  prioritizedHydrationReleases,
   rssUrl,
 } = require('./tpb4k/sukebei-hentai');
 const {
@@ -158,6 +159,20 @@ test('metadata matching is confidence-gated and exact episode file selection nev
     { index: 1, path: 'Show S01E02.mkv', length: 500_000_000 },
   ], 2);
   assert.equal(selected.index, 1);
+});
+
+test('build hydration prioritizes one release per series before additional alternatives', () => {
+  const release = (hash, seeders) => ({ infoHash: hash.repeat(40), seeders });
+  const shared = release('f', 5);
+  const queue = prioritizedHydrationReleases([
+    { matched: [release('a', 30), release('b', 20), shared] },
+    { matched: [release('c', 29), release('d', 19), shared] },
+    { matched: [release('e', 28), shared] },
+  ]);
+  assert.deepEqual(queue.map(row => row.infoHash[0]), [
+    'a', 'c', 'e',
+    'b', 'd', 'f',
+  ]);
 });
 
 test('isolated SQLite persists series, episodes, releases, metadata and a completed build state under /tmp', async t => {
