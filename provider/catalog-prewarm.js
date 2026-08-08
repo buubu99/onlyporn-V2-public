@@ -625,11 +625,17 @@ function readSchedulerConfig(env = process.env) {
       1_000,
       900_000
     ),
-    expectedActiveCatalogs: toInteger(
-      env.ONLYPORN_PREWARM_EXPECTED_ACTIVE,
+    // A Render environment value survives deployments. Never let a stale
+    // value from the previous release weaken the catalog contract compiled
+    // into this release; an environment value may only tighten the minimum.
+    expectedActiveCatalogs: Math.max(
       DEFAULTS.expectedActiveCatalogs,
-      1,
-      1_000
+      toInteger(
+        env.ONLYPORN_PREWARM_EXPECTED_ACTIVE,
+        DEFAULTS.expectedActiveCatalogs,
+        1,
+        1_000
+      )
     ),
     verificationPasses: toInteger(
       env.ONLYPORN_PREWARM_VERIFICATION_PASSES,

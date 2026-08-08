@@ -130,6 +130,17 @@ test('interval configuration remains compatible but runtime has no interval resc
   assert.match(source, /startupOnly:\s*true/);
 });
 
+test('stale deployment environment cannot lower the compiled catalog contract', () => {
+  assert.equal(
+    readSchedulerConfig({ ONLYPORN_PREWARM_EXPECTED_ACTIVE: '33' }).expectedActiveCatalogs,
+    34
+  );
+  assert.equal(
+    readSchedulerConfig({ ONLYPORN_PREWARM_EXPECTED_ACTIVE: '35' }).expectedActiveCatalogs,
+    35
+  );
+});
+
 test('successful startup runs once and never schedules a recurring timer', async () => {
   const timers = fakeTimers();
   const harness = healthyHarness();

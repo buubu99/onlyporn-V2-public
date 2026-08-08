@@ -2,13 +2,17 @@
 'use strict';
 
 const logger = require('../logger');
-const { runCatalogPrewarm } = require('../provider/catalog-prewarm');
+const {
+  readSchedulerConfig,
+  runCatalogPrewarm,
+} = require('../provider/catalog-prewarm');
 
 const baseUrl = String(
   process.env.ONLYPORN_PREWARM_BASE_URL ||
   process.env.DIAGNOSTIC_BASE_URL ||
   'https://onlyporn-v2-public-k143.onrender.com'
 ).replace(/\/+$/, '');
+const schedulerConfig = readSchedulerConfig(process.env);
 
 runCatalogPrewarm({
   baseUrl,
@@ -16,7 +20,7 @@ runCatalogPrewarm({
   maxPasses: process.env.ONLYPORN_PREWARM_MAX_PASSES,
   retryDelayMs: process.env.ONLYPORN_PREWARM_RETRY_DELAY_MS,
   requestTimeoutMs: process.env.ONLYPORN_PREWARM_REQUEST_TIMEOUT_MS,
-  expectedActiveCatalogs: process.env.ONLYPORN_PREWARM_EXPECTED_ACTIVE,
+  expectedActiveCatalogs: schedulerConfig.expectedActiveCatalogs,
   verificationPasses: process.env.ONLYPORN_PREWARM_VERIFICATION_PASSES,
 })
   .then(result => {

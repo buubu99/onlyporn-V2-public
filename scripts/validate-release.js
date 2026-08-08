@@ -87,7 +87,11 @@ for (const forbidden of ['.env', '.env.production', 'id_rsa', 'id_ed25519']) {
 
 const catalogJsonFiles = fs
   .readdirSync(path.join(ROOT, 'catalog'))
-  .filter(name => name.endsWith('.json'));
+  .filter(name => name.endsWith('.json'))
+  // Generated discovery facets are a catalog-keyed data map, not a base
+  // catalog descriptor. Validate its JSON syntax above, but do not apply the
+  // descriptor schema to it.
+  .filter(name => name !== 'discovery-profiles.generated.json');
 const catalogIds = catalogJsonFiles.map(name => {
   const value = JSON.parse(fs.readFileSync(path.join(ROOT, 'catalog', name), 'utf8'));
   if (!value.id || !value.name || value.type !== 'movie') {
