@@ -25,8 +25,8 @@ const {
   normalizeSourceUrl,
 } = require('./javhdporn-poster-proxy');
 
-test('all nine legacy catalogs have six distinct source-native options', () => {
-  const ids = ['pornhub', 'xvideos', 'xnxx', 'xhamster.trending', 'xhamster.best', 'eporner', 'spankbang', 'porntrex', 'javhdporn'];
+test('eight general web catalogs have six distinct source-native options', () => {
+  const ids = ['pornhub', 'xvideos', 'xnxx', 'xhamster.trending', 'xhamster.best', 'eporner', 'spankbang', 'porntrex'];
   const menus = new Set();
   for (const id of ids) {
     const options = profileOptions(id);
@@ -34,6 +34,24 @@ test('all nine legacy catalogs have six distinct source-native options', () => {
     menus.add(options.map(item => item.label).join('|'));
   }
   assert.equal(menus.size, ids.length);
+});
+
+test('JAVHDPorn exposes every verified native discovery route', () => {
+  assert.deepEqual(
+    profileOptions('javhdporn').map(item => [item.label, item.value]),
+    [
+      ['Newest', 'Latest'],
+      ['Most Viewed', 'Most Viewed'],
+      ['Censored', 'Censored'],
+      ['Uncensored', 'Uncensored'],
+      ['FC2 PPV', 'FC2 PPV'],
+      ['Tokyo Hot', 'Tokyo Hot'],
+      ['Amateur', 'Amateur'],
+      ['English Subtitle', 'English Subtitle'],
+      ['Chinese Subtitle', 'Chinese Subtitle'],
+      ['Indonesian Subtitle', 'Subtitle Indonesia'],
+    ]
+  );
 });
 
 test('24 TPB4K catalogs expose only evidence-backed profiles', () => {
@@ -51,6 +69,8 @@ test('24 TPB4K catalogs expose only evidence-backed profiles', () => {
 test('legacy labels map to native values while TPB4K browse facets remain genres', () => {
   const legacy = normalizeCatalogFacetArgs({ id: 'xnxx', type: 'movie', extra: { genre: 'Most Viewed' } });
   assert.equal(legacy.extra.genre, 'hits');
+  const jav = normalizeCatalogFacetArgs({ id: 'javhdporn', type: 'movie', extra: { genre: 'Indonesian Subtitle' } });
+  assert.equal(jav.extra.genre, 'Subtitle Indonesia');
   const input = { id: 'tpb4k.studio.vixen.top', type: 'movie', extra: { genre: 'Blowjob' } };
   assert.deepEqual(normalizeCatalogFacetArgs(input), input);
   assert.deepEqual(

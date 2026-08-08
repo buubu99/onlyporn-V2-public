@@ -36,8 +36,9 @@ const STATIC = Object.freeze({
     option('Most Popular'), option('Top Rated'), option('4K', '4K porn'), option('Fantasy'), option('Japanese'), option('Celebrities'),
   ]),
   javhdporn: Object.freeze([
-    option('Newest', 'Latest'), option('Most Viewed'), option('Uncensored'), option('FC2 PPV'),
-    option('Tokyo Hot'), option('English Subtitle'),
+    option('Newest', 'Latest'), option('Most Viewed'), option('Censored'), option('Uncensored'),
+    option('FC2 PPV'), option('Tokyo Hot'), option('Amateur'), option('English Subtitle'),
+    option('Chinese Subtitle'), option('Indonesian Subtitle', 'Subtitle Indonesia'),
   ]),
 });
 
