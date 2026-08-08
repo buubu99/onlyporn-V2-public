@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import json, os, shutil, sqlite3, sys, time
+import json, os, re, shutil, sqlite3, sys, time
 from pathlib import Path
 
 if len(sys.argv) != 2:
@@ -36,6 +36,11 @@ CREATE TABLE IF NOT EXISTS pool_items (
  PRIMARY KEY(catalog_id, item_id));
 CREATE INDEX IF NOT EXISTS pool_catalog_expiry ON pool_items(catalog_id, expires_at);
 CREATE INDEX IF NOT EXISTS pool_seen ON pool_items(catalog_id, seen_at DESC);
+CREATE TABLE IF NOT EXISTS catalog_facets (
+ catalog_id TEXT NOT NULL, facet TEXT NOT NULL, value TEXT NOT NULL,
+ item_count INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+ PRIMARY KEY(catalog_id, facet, value));
+CREATE INDEX IF NOT EXISTS catalog_facets_rank ON catalog_facets(catalog_id, facet, item_count DESC);
 ''')
 try: os.chmod(db_path, 0o600)
 except OSError: pass
@@ -54,6 +59,7 @@ def prune():
     now=now_ms()
     conn.execute("DELETE FROM query_cache WHERE stale_until < ?", (now,))
     conn.execute("DELETE FROM pool_items WHERE expires_at < ?", (now,))
+    conn.execute("DELETE FROM catalog_facets WHERE updated_at < ?", (now-pool_ttl,))
     # Enforce a real upper bound. Prefer discarding old broad-pool rows first;
     # if necessary, discard the oldest exact-query rows next. All data here is
     # a regenerable cache, never authoritative application data.
@@ -69,6 +75,55 @@ def prune():
     return {'dbBytes':db_bytes(),'queryRows':conn.execute('SELECT COUNT(*) FROM query_cache').fetchone()[0],
             'poolRows':conn.execute('SELECT COUNT(*) FROM pool_items').fetchone()[0]}
 def like_escape(v): return v.replace('\\','\\\\').replace('%','\\%').replace('_','\\_')
+
+def facet_strings(value):
+    if not isinstance(value,list): return []
+    output=[]
+    for item in value[:80]:
+        if isinstance(item,dict): item=item.get('name') or item.get('title') or item.get('value') or ''
+        text=' '.join(str(item or '').split()).strip()
+        if 2 <= len(text) <= 80 and '[object object]' not in text.lower(): output.append(text)
+    return output
+
+def item_facets(item):
+    found=set()
+    for value in facet_strings(item.get('tags')): found.add(('tag',value))
+    for value in facet_strings(item.get('genres')):
+        found.add(('quality' if value.lower() in {'4k','2160p','1080p','720p'} else 'genre',value))
+    for value in facet_strings(item.get('performers')): found.add(('performer',value))
+    for link in item.get('links') or []:
+        if isinstance(link,dict) and str(link.get('category') or '').lower()=='cast':
+            value=' '.join(str(link.get('name') or '').split()).strip()
+            if 2 <= len(value) <= 80: found.add(('performer',value))
+    for key in ('studio','quality','resolution','series'):
+        value=' '.join(str(item.get(key) or '').split()).strip()
+        if 2 <= len(value) <= 80: found.add((key,value))
+    date=str(item.get('releaseDate') or item.get('released') or item.get('date') or item.get('publishedAt') or '')
+    year=re.search(r'\b((?:19|20)\d{2})\b',date)
+    if year: found.add(('year',year.group(1)))
+    return found
+
+def rebuild_catalog_facets(catalog_id):
+    from collections import Counter
+    counts=Counter()
+    rows=conn.execute('SELECT item_json FROM pool_items WHERE catalog_id=? AND expires_at>=?',(catalog_id,now_ms())).fetchall()
+    for (body,) in rows:
+        try: item=json.loads(body)
+        except Exception: continue
+        if not isinstance(item,dict): continue
+        for facet in item_facets(item): counts[facet]+=1
+    stamp=now_ms()
+    conn.execute('BEGIN IMMEDIATE')
+    try:
+        conn.execute('DELETE FROM catalog_facets WHERE catalog_id=?',(catalog_id,))
+        conn.executemany(
+            'INSERT INTO catalog_facets(catalog_id,facet,value,item_count,updated_at) VALUES(?,?,?,?,?)',
+            [(catalog_id,facet,value,int(amount),stamp) for (facet,value),amount in counts.items()]
+        )
+        conn.execute('COMMIT')
+    except Exception:
+        conn.execute('ROLLBACK'); raise
+    return len(counts)
 
 def handle(msg):
     op=str(msg.get('op') or ''); p=msg.get('payload') or {}; now=now_ms()
@@ -122,6 +177,17 @@ def handle(msg):
             'SELECT COUNT(*) FROM pool_items WHERE catalog_id=? AND expires_at>=?',
             (cid,now)
         ).fetchone()[0])
+    if op=='rebuild_facets':
+        cid=str(p.get('catalogId') or '')
+        return {'catalogId':cid,'facets':rebuild_catalog_facets(cid) if cid else 0}
+    if op=='get_facets':
+        cid=str(p.get('catalogId') or ''); limit=min(max(int(p.get('limit') or 20),1),100)
+        if not cid: return []
+        rows=conn.execute(
+            'SELECT facet,value,item_count,updated_at FROM catalog_facets WHERE catalog_id=? ORDER BY item_count DESC,value ASC LIMIT ?',
+            (cid,limit)
+        ).fetchall()
+        return [{'facet':row[0],'value':row[1],'itemCount':row[2],'updatedAt':row[3]} for row in rows]
     if op=='list_pool':
         cid=str(p.get('catalogId') or '')
         limit=min(max(int(p.get('limit') or 300),1),500)

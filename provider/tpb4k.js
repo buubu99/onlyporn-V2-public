@@ -1,6 +1,7 @@
 'use strict';
 
 const { getCatalogDefinition, isTpb4kEnabled } = require('../catalog/tpb4k');
+const { resolveTpb4kFacet } = require('../catalog/discovery-profiles');
 const {
   dedupeCandidates,
   normalizeCandidate,
@@ -11,6 +12,7 @@ const { readTpb4kConfig, publicConfigStatus, redactSecrets } = require('./tpb4k/
 const { fillCatalogWithMetadata } = require('./tpb4k/catalog-metadata-fill');
 const { createCatalogResponseStore } = require('./tpb4k/catalog-response-store');
 const { createSearchSqliteStore } = require('./search-sqlite');
+const { applyFacet } = require('./tpb4k/facet-engine');
 const {
   mergeSearchItems,
   normalizeSearchQuery,
@@ -264,6 +266,7 @@ class Tpb4kProvider {
     this.catalogResponseStore = options.catalogResponseStore || createCatalogResponseStore({ env: this.env });
     this.searchStore = options.searchStore || createSearchSqliteStore({ env: this.env });
     this.searchInFlight = new Map();
+    this.facetInFlight = new Map();
     this.searchNetworkActive = 0;
     this.searchNetworkWaiters = [];
     this.searchNetworkConcurrency = Math.min(
@@ -288,6 +291,10 @@ class Tpb4kProvider {
     const searchQuery = normalizeSearchQuery(args?.extra?.search);
     if (searchQuery && definition.source !== 'stripchat') {
       return this._handleCatalogSearch(args, definition, searchQuery);
+    }
+    const selectedFacet = resolveTpb4kFacet(definition.id, args?.extra?.genre);
+    if (selectedFacet && definition.source !== 'stripchat') {
+      return this._handleCatalogFacet(args, definition, selectedFacet);
     }
     // The explicit cache revision invalidates incompatible catalogue formats.
     // Package releases using the same revision reuse last-known-good rows so a
@@ -372,13 +379,112 @@ class Tpb4kProvider {
   _rememberSearchPool(catalogId, items) {
     if (!Array.isArray(items) || !items.length || !this.searchStore?.enabled) return;
     // Search indexing must never delay browse/prewarm/readiness.
-    const writes = [this.searchStore.upsertPool(catalogId, items)];
+    const remember = async id => {
+      await this.searchStore.upsertPool(id, items);
+      await this.searchStore.rebuildFacets(id);
+    };
+    const writes = [remember(catalogId)];
     // All/New/Top are views of the same Hentai source. Searching them against
     // three isolated browse windows caused false misses and unnecessary fetches.
     if (String(catalogId || '').startsWith('tpb4k.hentai.')) {
-      writes.push(this.searchStore.upsertPool('tpb4k.source.hentai', items));
+      writes.push(remember('tpb4k.source.hentai'));
     }
     Promise.allSettled(writes).catch(() => {});
+  }
+
+  async _handleCatalogFacet(args, definition, selectedFacet) {
+    const skip = Math.max(Number.parseInt(String(args?.extra?.skip || 0), 10) || 0, 0);
+    const pageSize = 40;
+    const facetKey = `${selectedFacet.facet}:${selectedFacet.value}`;
+    const cacheQuery = `onlyporn facet ${facetKey}`;
+    const operationKey = `${definition.id}\0${facetKey}`;
+    const slice = metas => ({ metas: (Array.isArray(metas) ? metas : []).slice(skip, skip + pageSize) });
+    const cached = await this.searchStore.getQuery(definition.id, cacheQuery);
+    if (cached?.fresh && cached.metas?.length) return slice(cached.metas);
+    if (this.facetInFlight.has(operationKey)) {
+      if (cached?.metas?.length) return slice(cached.metas);
+      return slice((await this.facetInFlight.get(operationKey))?.metas);
+    }
+    const operation = this._handleCatalogFacetFresh(definition, selectedFacet)
+      .then(async value => {
+        const metas = Array.isArray(value?.metas) ? value.metas : [];
+        if (metas.length) await this.searchStore.putQuery(definition.id, cacheQuery, metas);
+        return { metas };
+      })
+      .catch(error => {
+        logger().warn({
+          provider: this.name,
+          catalogId: definition.id,
+          facet: selectedFacet.label,
+          error: redactSecrets(error?.message || error, this.env),
+        }, 'OnlyPorn catalog facet failed safely');
+        return cached?.metas?.length ? { metas: cached.metas } : { metas: [] };
+      })
+      .finally(() => this.facetInFlight.delete(operationKey));
+    this.facetInFlight.set(operationKey, operation);
+    if (cached?.metas?.length) {
+      operation.catch(() => {});
+      return slice(cached.metas);
+    }
+    return slice((await operation).metas);
+  }
+
+  async _handleCatalogFacetFresh(definition, selectedFacet) {
+    const config = readTpb4kConfig(this.env);
+    const poolCatalogId = definition.source === 'hentai' ? 'tpb4k.source.hentai' : definition.id;
+    const pool = await this.searchStore.listPool(poolCatalogId, 500);
+    const requiresPlayableBinding = ['studio-metadata', 'platform-hybrid'].includes(definition.source)
+      && definition.lookupSource === 'torrent-index';
+    let rawItems = [];
+    let bindingStats;
+    if (requiresPlayableBinding) {
+      const alreadyPlayable = applyFacet(
+        pool.filter(item => torrentBundle(item).length > 0 && Boolean(realStudioPoster(item?.poster))),
+        selectedFacet
+      );
+      if (alreadyPlayable.length) {
+        rawItems = alreadyPlayable.slice(0, 120);
+      } else {
+        const metadataPool = pool.filter(item =>
+          ['studio-metadata', 'platform-hybrid'].includes(String(item?.source || ''))
+          && Boolean(realStudioPoster(item?.poster))
+        );
+        const torrentPool = pool.filter(item => torrentBundle(item).length > 0);
+        const matchingMetadata = applyFacet(metadataPool, selectedFacet);
+        if (matchingMetadata.length && torrentPool.length) {
+          const binding = bindStudioPlayback({
+            catalog: definition,
+            metadataItems: matchingMetadata,
+            torrentItems: torrentPool,
+            skip: 0,
+            limit: 120,
+          });
+          rawItems = [...binding.items];
+          bindingStats = binding.stats;
+        }
+      }
+    } else {
+      rawItems = applyFacet(pool, selectedFacet).slice(0, 120);
+    }
+    const adapter = getAdapter(definition.source);
+    const normalizedItems = rawItems
+      .map(item => normalizeDiscoveryItem(getAdapter(item?.source) || adapter, { ...item, catalogId: definition.id }))
+      .filter(Boolean)
+      .filter(item => definition.id !== 'tpb4k.sukebei.top' || Boolean(safePoster(item.poster)))
+      .filter(item => !['studio-metadata', 'platform-hybrid'].includes(definition.source) || Boolean(realStudioPoster(item.poster)));
+    const contentFiltered = filterItems(normalizedItems, this.contentFilter);
+    const metas = contentFiltered.items.slice(0, 120).map(item => toMetaPreview(item, definition.id, config));
+    logger().info({
+      provider: this.name,
+      catalogId: definition.id,
+      facet: selectedFacet.label,
+      facetType: selectedFacet.facet,
+      poolItems: pool.length,
+      matchedItems: rawItems.length,
+      metas: metas.length,
+      ...(bindingStats ? { facetPlaybackBinding: bindingStats } : {}),
+    }, 'OnlyPorn catalog facet completed from SQLite pool');
+    return { metas };
   }
 
   async _handleCatalogSearch(args, definition, query) {

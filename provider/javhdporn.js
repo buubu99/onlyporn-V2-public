@@ -1,5 +1,6 @@
 const { load } = require('cheerio');
 const logger = require('../logger');
+const { javPosterProxyUrl } = require('./javhdporn-poster-proxy');
 const BoundedTtlCache = require('./cache');
 const mediaRelay = require('../media-relay');
 const { meta } = require('../model');
@@ -496,7 +497,7 @@ class JavHdPornProvider extends Provider {
       seen.add(id);
 
       const image = root.find('img').first();
-      const poster = extractCatalogPoster($, root, pageUrl);
+      const poster = javPosterProxyUrl(extractCatalogPoster($, root, pageUrl));
       const title = cleanTitle(
         anchor.attr('title') ||
           image.attr('alt') ||

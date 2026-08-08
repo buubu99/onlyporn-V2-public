@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const createJavHdPorn = require('./javhdporn');
+const { decodeSource } = require('./javhdporn-poster-proxy');
 const { createSearchSqliteStore } = require('./search-sqlite');
 
 test('JAV search cards ignore data placeholders and choose the largest real srcset poster', () => {
@@ -34,7 +35,8 @@ test('JAV search cards ignore data placeholders and choose the largest real srcs
     'https://www.javhdporn.net/search/uncensored/'
   );
   assert.equal(metas.length, 1);
-  assert.equal(metas[0].poster, 'https://pics.pornfhd.com/test-1280.jpg');
+  assert.match(metas[0].poster, /\/onlyporn\/poster\/javhdporn\//);
+  assert.equal(decodeSource(metas[0].poster.split('/').pop()), 'https://pics.pornfhd.com/test-1280.jpg');
   assert.notEqual(metas[0].poster, 'https://pics.pornfhd.com/404.jpeg');
 });
 

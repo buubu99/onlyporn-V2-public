@@ -7,6 +7,7 @@ const mediaRelay = require('../media-relay');
 const { catalogs, catalogNames, getActiveProvider } = require('../catalog');
 const { loadProvider } = require('./index');
 const createJavHdPorn = require('./javhdporn');
+const { decodeSource } = require('./javhdporn-poster-proxy');
 const { dex, playerKey, rc4 } = require('./javhdporn-player');
 
 const fixture = name => fs.readFileSync(
@@ -35,7 +36,8 @@ test('JAVHDPorn catalog parser accepts same-origin videos and rejects external l
   assert.equal(results.length, 1);
   assert.equal(results[0].id, 'https://www.javhdporn.net/video/seo-001/');
   assert.equal(results[0].posterShape, 'landscape');
-  assert.match(results[0].poster, /pics\.pornfhd\.com/);
+  assert.match(results[0].poster, /\/onlyporn\/poster\/javhdporn\//);
+  assert.match(decodeSource(results[0].poster.split('/').pop()), /pics\.pornfhd\.com/);
 });
 
 test('JAVHDPorn metadata uses JSON-LD and preserves player bootstrap values', () => {

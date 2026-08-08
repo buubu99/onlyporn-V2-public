@@ -1,4 +1,5 @@
 const shuffle = require('fisher-yates');
+const { applyDiscoveryProfile } = require('./discovery-profiles');
 const porntrexCatalog = require('./porntrex');
 const { spankbangCatalogs } = require('./spankbang');
 const xhamsterCatalogs = require('./xhamster');
@@ -14,6 +15,9 @@ const {
 function randomize(catalogs) {
   const arr = catalogs.map((_e, i) => i);
   return shuffle(arr).map(i => catalogs[i]);
+}
+function compactCatalogName(value) {
+  return String(value || '').replace(/^OnlyPorn:\s*/i, '').trim();
 }
 
 const catalogNames = [
@@ -59,7 +63,7 @@ const COMPACT_SPANKBANG_GENRES = [
 ];
 
 function compactLegacyCatalog(catalog) {
-  const compact = { ...catalog };
+  const compact = { ...catalog, name: compactCatalogName(catalog.name) };
 
   // `extraSupported` duplicates the entries already declared in `extra`.
   delete compact.extraSupported;
@@ -92,7 +96,7 @@ function compactTpb4kCatalog(catalog) {
   return {
     id: catalog.id,
     type: catalog.type,
-    name: catalog.name,
+    name: compactCatalogName(catalog.name),
     extra: [...names].map(name => ({ name })),
   };
 }
@@ -112,7 +116,7 @@ const tpb4kCatalogs = sourceTpb4kCatalogs.map(compactTpb4kCatalog);
 const catalogs = [
   ...legacyCatalogs,
   ...(isTpb4kEnabled() ? tpb4kCatalogs : []),
-];
+].map(applyDiscoveryProfile);
 
 const addonEnabled = id => getActiveProvider(id) !== null;
 

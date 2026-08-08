@@ -1,0 +1,1058 @@
+{
+  "tpb4k.pornrips.recent": [
+    {
+      "label": "Newest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "seen_desc",
+      "count": 119
+    },
+    {
+      "label": "1080p",
+      "mode": "facet",
+      "facet": "rule",
+      "value": "quality_1080",
+      "count": 117
+    },
+    {
+      "label": "HEVC / x265",
+      "mode": "facet",
+      "facet": "rule",
+      "value": "codec_hevc",
+      "count": 119
+    },
+    {
+      "label": "Long Form",
+      "mode": "facet",
+      "facet": "rule",
+      "value": "long_form",
+      "count": 67
+    },
+    {
+      "label": "Compact Files",
+      "mode": "facet",
+      "facet": "rule",
+      "value": "compact_file",
+      "count": 61
+    },
+    {
+      "label": "Large Files",
+      "mode": "facet",
+      "facet": "rule",
+      "value": "large_file",
+      "count": 12
+    }
+  ],
+  "tpb4k.hentai.all": [
+    {
+      "label": "Recently Added",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "seen_desc",
+      "count": 120
+    },
+    {
+      "label": "Highest Rated",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "rating_desc",
+      "count": 120
+    },
+    {
+      "label": "Modern (2020s)",
+      "mode": "facet",
+      "facet": "year",
+      "value": "2020-2029",
+      "count": 92
+    },
+    {
+      "label": "Classics",
+      "mode": "facet",
+      "facet": "year",
+      "value": "1900-2014",
+      "count": 3
+    },
+    {
+      "label": "Large Breasts",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Large Breasts",
+      "count": 85
+    },
+    {
+      "label": "Harem",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Harem",
+      "count": 74
+    }
+  ],
+  "tpb4k.hentai.new": [
+    {
+      "label": "Newest First",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "seen_desc",
+      "count": 120
+    },
+    {
+      "label": "Highest Rated",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "rating_desc",
+      "count": 120
+    },
+    {
+      "label": "2020s",
+      "mode": "facet",
+      "facet": "year",
+      "value": "2020-2029",
+      "count": 7
+    },
+    {
+      "label": "2010s",
+      "mode": "facet",
+      "facet": "year",
+      "value": "2010-2019",
+      "count": 88
+    },
+    {
+      "label": "School Girls",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "School Girls",
+      "count": 63
+    },
+    {
+      "label": "Tits Fuck",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Tits Fuck",
+      "count": 57
+    }
+  ],
+  "tpb4k.hentai.top": [
+    {
+      "label": "Highest Rated",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "seen_desc",
+      "count": 120
+    },
+    {
+      "label": "3D",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "3D",
+      "count": 120
+    },
+    {
+      "label": "Uncensored",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Uncensored",
+      "count": 120
+    },
+    {
+      "label": "Large Breasts",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Large Breasts",
+      "count": 85
+    },
+    {
+      "label": "Harem",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Harem",
+      "count": 74
+    },
+    {
+      "label": "School Girls",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "School Girls",
+      "count": 63
+    }
+  ],
+  "tpb4k.yesporn.recent": [
+    {
+      "label": "Newest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "seen_desc",
+      "count": 119
+    },
+    {
+      "label": "A–Z",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "title_asc",
+      "count": 119
+    },
+    {
+      "label": "New Releases",
+      "mode": "facet",
+      "facet": "rule",
+      "value": "new_words",
+      "count": 7
+    },
+    {
+      "label": "Step Fantasy",
+      "mode": "facet",
+      "facet": "rule",
+      "value": "step_fantasy",
+      "count": 5
+    },
+    {
+      "label": "POV",
+      "mode": "facet",
+      "facet": "rule",
+      "value": "pov",
+      "count": 3
+    },
+    {
+      "label": "Wife / Bride",
+      "mode": "facet",
+      "facet": "rule",
+      "value": "wife_bride",
+      "count": 2
+    }
+  ],
+  "tpb4k.sukebei.top": [
+    {
+      "label": "Most Seeded",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "seeders_desc",
+      "count": 56
+    },
+    {
+      "label": "Newest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 56
+    },
+    {
+      "label": "JAV Codes",
+      "mode": "facet",
+      "facet": "rule",
+      "value": "jav_code",
+      "count": 56
+    },
+    {
+      "label": "1080p / FHD",
+      "mode": "facet",
+      "facet": "rule",
+      "value": "quality_1080",
+      "count": 47
+    },
+    {
+      "label": "Real Life",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Real Life",
+      "count": 50
+    },
+    {
+      "label": "Named Performers",
+      "mode": "facet",
+      "facet": "rule",
+      "value": "cast_available",
+      "count": 55
+    }
+  ],
+  "tpb4k.studio.brazzersexxtra.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 27
+    },
+    {
+      "label": "Blowjob",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Blowjob",
+      "count": 27
+    },
+    {
+      "label": "Cowgirl",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Cowgirl",
+      "count": 27
+    },
+    {
+      "label": "Big Dick",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Big Dick",
+      "count": 26
+    },
+    {
+      "label": "Cumshot",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Cumshot",
+      "count": 26
+    },
+    {
+      "label": "Doggystyle",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Doggystyle",
+      "count": 26
+    }
+  ],
+  "tpb4k.studio.cum4k.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 50
+    },
+    {
+      "label": "1080p",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "1080p",
+      "count": 23
+    },
+    {
+      "label": "4K",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "4K",
+      "count": 13
+    },
+    {
+      "label": "Creampie",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Creampie",
+      "count": 49
+    },
+    {
+      "label": "Teen (18-22)",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Teen (18-22)",
+      "count": 16
+    },
+    {
+      "label": "Latin Woman",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Latin Woman",
+      "count": 6
+    }
+  ],
+  "tpb4k.studio.devilsfilm.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 9
+    },
+    {
+      "label": "4K",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "4K",
+      "count": 3
+    },
+    {
+      "label": "Blowjob",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Blowjob",
+      "count": 9
+    },
+    {
+      "label": "Caucasian",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Caucasian",
+      "count": 9
+    },
+    {
+      "label": "Doggystyle",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Doggystyle",
+      "count": 9
+    },
+    {
+      "label": "Deepthroat",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Deepthroat",
+      "count": 8
+    }
+  ],
+  "tpb4k.studio.digitalplayground.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 40
+    },
+    {
+      "label": "Blowjob",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Blowjob",
+      "count": 27
+    },
+    {
+      "label": "Cumshot",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Cumshot",
+      "count": 23
+    },
+    {
+      "label": "Big Tits",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Big Tits",
+      "count": 20
+    },
+    {
+      "label": "Pornstar",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Pornstar",
+      "count": 19
+    },
+    {
+      "label": "Big Dick",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Big Dick",
+      "count": 18
+    }
+  ],
+  "tpb4k.studio.dorcelclub.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 43
+    },
+    {
+      "label": "matthew meier",
+      "mode": "facet",
+      "facet": "performer",
+      "value": "matthew meier",
+      "count": 10
+    },
+    {
+      "label": "francis x",
+      "mode": "facet",
+      "facet": "performer",
+      "value": "francis x",
+      "count": 8
+    },
+    {
+      "label": "kristof cale",
+      "mode": "facet",
+      "facet": "performer",
+      "value": "kristof cale",
+      "count": 7
+    },
+    {
+      "label": "lea pam",
+      "mode": "facet",
+      "facet": "performer",
+      "value": "lea pam",
+      "count": 6
+    },
+    {
+      "label": "milan cheek",
+      "mode": "facet",
+      "facet": "performer",
+      "value": "milan cheek",
+      "count": 6
+    }
+  ],
+  "tpb4k.studio.metart.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 26
+    },
+    {
+      "label": "4K",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "4K",
+      "count": 18
+    },
+    {
+      "label": "1080p",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "1080p",
+      "count": 5
+    },
+    {
+      "label": "Spread Legs",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Spread Legs",
+      "count": 24
+    },
+    {
+      "label": "Striptease",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Striptease",
+      "count": 23
+    },
+    {
+      "label": "European",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "European",
+      "count": 22
+    }
+  ],
+  "tpb4k.studio.metartx.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 40
+    },
+    {
+      "label": "1080p",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "1080p",
+      "count": 18
+    },
+    {
+      "label": "4K",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "4K",
+      "count": 12
+    },
+    {
+      "label": "Spread Legs",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Spread Legs",
+      "count": 38
+    },
+    {
+      "label": "Masturbation",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Masturbation",
+      "count": 36
+    },
+    {
+      "label": "Medium Tits",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Medium Tits",
+      "count": 35
+    }
+  ],
+  "tpb4k.studio.milfty.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 8
+    },
+    {
+      "label": "American",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "American",
+      "count": 8
+    },
+    {
+      "label": "Blowjob",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Blowjob",
+      "count": 8
+    },
+    {
+      "label": "Cumshot",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Cumshot",
+      "count": 8
+    },
+    {
+      "label": "Indoors",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Indoors",
+      "count": 8
+    },
+    {
+      "label": "Missionary",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Missionary",
+      "count": 8
+    }
+  ],
+  "tpb4k.studio.milfy.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 28
+    },
+    {
+      "label": "Blowjob",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Blowjob",
+      "count": 28
+    },
+    {
+      "label": "Big Tits",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Big Tits",
+      "count": 26
+    },
+    {
+      "label": "MILF (30+)",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "MILF (30+)",
+      "count": 26
+    },
+    {
+      "label": "Deepthroat",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Deepthroat",
+      "count": 25
+    },
+    {
+      "label": "Riding",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Riding",
+      "count": 25
+    }
+  ],
+  "tpb4k.studio.newsensations.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 26
+    },
+    {
+      "label": "4K",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "4K",
+      "count": 7
+    },
+    {
+      "label": "1080p",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "1080p",
+      "count": 4
+    },
+    {
+      "label": "Interactive",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Interactive",
+      "count": 11
+    },
+    {
+      "label": "Deepthroat",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Deepthroat",
+      "count": 10
+    },
+    {
+      "label": "Doggy Style",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Doggy Style",
+      "count": 9
+    }
+  ],
+  "tpb4k.studio.pornmegaload.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 27
+    },
+    {
+      "label": "4K",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "4K",
+      "count": 13
+    },
+    {
+      "label": "1080p",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "1080p",
+      "count": 3
+    },
+    {
+      "label": "Blowjob",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Blowjob",
+      "count": 17
+    },
+    {
+      "label": "Brown Hair",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Brown Hair",
+      "count": 16
+    },
+    {
+      "label": "Doggystyle",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Doggystyle",
+      "count": 15
+    }
+  ],
+  "tpb4k.studio.onlyfans.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 56
+    },
+    {
+      "label": "720p",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "720p",
+      "count": 5
+    },
+    {
+      "label": "Blowjob",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Blowjob",
+      "count": 16
+    },
+    {
+      "label": "Big Tits",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Big Tits",
+      "count": 15
+    },
+    {
+      "label": "Top by seeders",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Top by seeders",
+      "count": 12
+    },
+    {
+      "label": "Big Ass",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Big Ass",
+      "count": 11
+    }
+  ],
+  "tpb4k.studio.playboyplus.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 41
+    },
+    {
+      "label": "4K",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "4K",
+      "count": 18
+    },
+    {
+      "label": "1080p",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "1080p",
+      "count": 10
+    },
+    {
+      "label": "Remaster",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Remaster",
+      "count": 6
+    },
+    {
+      "label": "20+",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "20+",
+      "count": 3
+    },
+    {
+      "label": "30 FPS",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "30 FPS",
+      "count": 2
+    }
+  ],
+  "tpb4k.studio.sexmex.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 11
+    },
+    {
+      "label": "720p",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "720p",
+      "count": 9
+    },
+    {
+      "label": "Top by seeders",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Top by seeders",
+      "count": 11
+    },
+    {
+      "label": "Latina Woman",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Latina Woman",
+      "count": 6
+    },
+    {
+      "label": "Big Ass",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Big Ass",
+      "count": 3
+    },
+    {
+      "label": "Big Tits",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Big Tits",
+      "count": 3
+    }
+  ],
+  "tpb4k.studio.thelifeerotic.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 35
+    },
+    {
+      "label": "1080p",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "1080p",
+      "count": 17
+    },
+    {
+      "label": "4K",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "4K",
+      "count": 7
+    },
+    {
+      "label": "Ass Fetish",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Ass Fetish",
+      "count": 35
+    },
+    {
+      "label": "Big Nipples",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Big Nipples",
+      "count": 34
+    },
+    {
+      "label": "Indoors",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Indoors",
+      "count": 33
+    }
+  ],
+  "tpb4k.studio.vixen.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 42
+    },
+    {
+      "label": "Blowjob",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Blowjob",
+      "count": 42
+    },
+    {
+      "label": "Reverse Cowgirl",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Reverse Cowgirl",
+      "count": 42
+    },
+    {
+      "label": "Riding",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Riding",
+      "count": 42
+    },
+    {
+      "label": "Doggystyle",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Doggystyle",
+      "count": 41
+    },
+    {
+      "label": "Deepthroat",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Deepthroat",
+      "count": 40
+    }
+  ],
+  "tpb4k.studio.wowgirls.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 7
+    },
+    {
+      "label": "1080p",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "1080p",
+      "count": 3
+    },
+    {
+      "label": "Hairless Pussy",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Hairless Pussy",
+      "count": 7
+    },
+    {
+      "label": "Masturbation",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Masturbation",
+      "count": 5
+    },
+    {
+      "label": "Hardcore",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Hardcore",
+      "count": 4
+    },
+    {
+      "label": "Solo",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Solo",
+      "count": 3
+    }
+  ],
+  "tpb4k.studio.sexart.top": [
+    {
+      "label": "Latest",
+      "mode": "facet",
+      "facet": "sort",
+      "value": "release_desc",
+      "count": 41
+    },
+    {
+      "label": "4K",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "4K",
+      "count": 12
+    },
+    {
+      "label": "1080p",
+      "mode": "facet",
+      "facet": "quality",
+      "value": "1080p",
+      "count": 11
+    },
+    {
+      "label": "European",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "European",
+      "count": 40
+    },
+    {
+      "label": "Indoors",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Indoors",
+      "count": 34
+    },
+    {
+      "label": "Spread Legs",
+      "mode": "facet",
+      "facet": "tag",
+      "value": "Spread Legs",
+      "count": 34
+    }
+  ]
+}

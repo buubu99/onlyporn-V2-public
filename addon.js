@@ -8,6 +8,7 @@ const {
   toProviderCatalogArgs,
 } = require('./provider/tpb4k/catalog-search');
 const { catalogs: sourceCatalogs } = require('./catalog');
+const { normalizeCatalogFacetArgs } = require('./catalog/discovery-profiles');
 const logger = require('./logger');
 const {
   filterCatalogResponse,
@@ -68,6 +69,7 @@ function logFiltered(resource, args, result) {
 
 builder.defineCatalogHandler(async args => {
   try {
+    args = normalizeCatalogFacetArgs(args);
     args = normalizeCatalogSearchArgs(args);
     const tpb4kSearch = isTpb4kSearchRequest(args);
     const providerArgs = tpb4kSearch ? args : toProviderCatalogArgs(args);

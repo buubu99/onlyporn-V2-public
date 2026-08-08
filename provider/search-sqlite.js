@@ -59,6 +59,12 @@ class SearchSqliteStore {
       return Array.isArray(value)?value:[];
     }catch{return[];}
   }
+  async rebuildFacets(catalogId){
+    try{return await this._request('rebuild_facets',{catalogId:String(catalogId||'')},15000);}catch{return null;}
+  }
+  async facets(catalogId,limit=20){
+    try{const value=await this._request('get_facets',{catalogId:String(catalogId||''),limit});return Array.isArray(value)?value:[];}catch{return[];}
+  }
   async searchPool(catalogId,query,limit=160){
     const normalized=normalizeForMatch(normalizeSearchQuery(query));const tokens=normalized.split(' ').filter(Boolean);if(!tokens.length)return[];
     try{const result=await this._request('search_pool',{catalogId:String(catalogId||''),tokens,limit});return Array.isArray(result)?result:[];}catch{return[];}

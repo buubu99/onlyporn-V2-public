@@ -18,6 +18,7 @@ function visibleSearchFields(item = {}) {
   return [
     [item.title || item.name,180], [listText(item.tags),140], [listText(item.genres),130],
     [listText(item.performers),130], [listText(item.links),110], [item.studio,110],
+    [item.resolution,125], [item.quality,120],
     [item.creator,100], [item.username,100], [item.channel,100], [item.account,100],
     [item.sceneCode || onlyporn.sceneCode,170], [listText(onlyporn.tags),130], [item.description,45],
   ].map(([value,weight]) => ({text:normalizeForMatch(value),weight})).filter(x => x.text);
