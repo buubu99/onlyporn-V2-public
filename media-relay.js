@@ -623,6 +623,97 @@ async function upstreamRequest(entry, { method = 'GET', range, text = false, buf
   throw new Error('Media relay request failed');
 }
 
+
+function mediaUsageLoggingEnabled(env = process.env) {
+  return !/^(?:0|false|off|no)$/i.test(
+    String(env.ONLYPORN_MEDIA_USAGE_LOGGING ?? 'true').trim()
+  );
+}
+
+function responseChunkBytes(value, encoding) {
+  if (value == null) return 0;
+  if (Buffer.isBuffer(value)) return value.length;
+  if (value instanceof Uint8Array) return value.byteLength;
+  try {
+    return Buffer.byteLength(String(value), encoding || 'utf8');
+  } catch {
+    return Buffer.byteLength(String(value));
+  }
+}
+
+function relaySessionFingerprint(token) {
+  return crypto
+    .createHmac('sha256', CHILD_TOKEN_SECRET)
+    .update(String(token || ''))
+    .digest('hex')
+    .slice(0, 16);
+}
+
+function relayUpstreamHostname(entry) {
+  try {
+    return new URL(String(entry?.url || '')).hostname;
+  } catch {
+    return '';
+  }
+}
+
+function attachRelayUsageLogging(req, res, entry) {
+  if (!mediaUsageLoggingEnabled()) return;
+
+  let bytesSent = 0;
+  let logged = false;
+  const startedAt = Date.now();
+  const originalWrite = res.write;
+  const originalEnd = res.end;
+
+  res.write = function countedWrite(chunk) {
+    const encoding =
+      typeof arguments[1] === 'string'
+        ? arguments[1]
+        : undefined;
+    bytesSent += responseChunkBytes(chunk, encoding);
+    return originalWrite.apply(this, arguments);
+  };
+
+  res.end = function countedEnd(chunk) {
+    const encoding =
+      typeof arguments[1] === 'string'
+        ? arguments[1]
+        : undefined;
+    bytesSent += responseChunkBytes(chunk, encoding);
+    return originalEnd.apply(this, arguments);
+  };
+
+  const logOnce = completed => {
+    if (logged) return;
+    logged = true;
+
+    logger.info(
+      {
+        event: 'media_relay_usage',
+        method: req.method,
+        provider: entry.provider,
+        kind: entry.kind,
+        status: res.statusCode,
+        requestRange: req.headers.range || '',
+        responseContentRange: res.getHeader('content-range') || '',
+        responseContentLength: res.getHeader('content-length') || '',
+        bytesSent,
+        durationMs: Date.now() - startedAt,
+        completed: Boolean(completed),
+        session: relaySessionFingerprint(entry.sessionToken),
+        upstreamHostname: relayUpstreamHostname(entry),
+      },
+      'Media relay usage'
+    );
+  };
+
+  if (typeof res.once === 'function') {
+    res.once('finish', () => logOnce(true));
+    res.once('close', () => logOnce(res.writableEnded));
+  }
+}
+
 function setCorsHeaders(res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,OPTIONS');
@@ -637,11 +728,19 @@ async function handleRequest(req, res) {
     return;
   }
 
+  if (!['GET', 'HEAD'].includes(req.method)) {
+    res.setHeader('Allow', 'GET, HEAD, OPTIONS');
+    res.status(405).type('text/plain').send('Method Not Allowed');
+    return;
+  }
+
   const entry = resolveRelayEntry(req.params.token);
   if (!entry) {
     res.status(410).type('text/plain').send('Media relay link expired');
     return;
   }
+
+  attachRelayUsageLogging(req, res, entry);
 
   try {
     if (
