@@ -52,7 +52,7 @@ function latchStartupReadyMarkerIfNeeded() {
   startupReadyLatched = true;
 
   process.stdout.write(
-    `OnlyPorn startup readiness latched: 33/33 + strict Sukebei + indexed Sukebei Hentai; marker=${markerPath}\n`
+    `OnlyPorn startup readiness latched: 34/34 + strict Sukebei + indexed Sukebei Hentai; marker=${markerPath}\n`
   );
   return true;
 }
@@ -169,8 +169,8 @@ function snapshot() {
     sukebeiState.cards <= SUKEBEI_MAX_CARDS;
   const ready = Boolean(
     catalogState.success &&
-    catalogState.activeCatalogs === 33 &&
-    catalogState.healthyCatalogs === 33 &&
+    catalogState.activeCatalogs === 34 &&
+    catalogState.healthyCatalogs === 34 &&
     sukebeiState.ready &&
     cardsInRange &&
     sukebeiState.metatubePosters === sukebeiState.cards &&

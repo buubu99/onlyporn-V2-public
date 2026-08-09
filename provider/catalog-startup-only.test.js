@@ -119,9 +119,9 @@ function createScheduler(timers, harness) {
 
 test('interval configuration remains compatible but runtime has no interval reschedule', () => {
   assert.equal(DEFAULTS.intervalMs, 23 * 60 * 60 * 1000);
-  assert.equal(DEFAULTS.expectedActiveCatalogs, 33);
+  assert.equal(DEFAULTS.expectedActiveCatalogs, 34);
   assert.equal(readSchedulerConfig({}).intervalMs, 23 * 60 * 60 * 1000);
-  assert.equal(readSchedulerConfig({}).expectedActiveCatalogs, 33);
+  assert.equal(readSchedulerConfig({}).expectedActiveCatalogs, 34);
   assert.equal(readSchedulerConfig({ ONLYPORN_PREWARM_INTERVAL_MS: '7200000' }).intervalMs, 7_200_000);
 
   const source = fs.readFileSync(path.join(__dirname, 'catalog-prewarm.js'), 'utf8');
@@ -133,7 +133,7 @@ test('interval configuration remains compatible but runtime has no interval resc
 test('stale deployment environment cannot lower the compiled catalog contract', () => {
   assert.equal(
     readSchedulerConfig({ ONLYPORN_PREWARM_EXPECTED_ACTIVE: '33' }).expectedActiveCatalogs,
-    33
+    34
   );
   assert.equal(
     readSchedulerConfig({ ONLYPORN_PREWARM_EXPECTED_ACTIVE: '35' }).expectedActiveCatalogs,

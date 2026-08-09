@@ -12,23 +12,23 @@ function source(relativePath) {
   return fs.readFileSync(path.join(root, relativePath), 'utf8');
 }
 
-test('deployment readiness contract is 33 active and 33 healthy', () => {
+test('deployment readiness contract is 34 active and 34 healthy', () => {
   const prewarm = source('provider/catalog-prewarm.js');
   const runtime = source('provider/runtime-readiness.js');
   const gate = source('scripts/public-gate-proxy.js');
 
-  assert.match(prewarm, /expectedActiveCatalogs:\s*33/);
-  assert.match(prewarm, /Number\(result\.activeCatalogs\)\s*!==\s*33/);
-  assert.match(prewarm, /Number\(result\.healthyCatalogs\)\s*!==\s*33/);
-  assert.match(prewarm, /activeCatalogs:\s*33/);
-  assert.match(prewarm, /healthyCatalogs:\s*33/);
+  assert.match(prewarm, /expectedActiveCatalogs:\s*34/);
+  assert.match(prewarm, /Number\(result\.activeCatalogs\)\s*!==\s*34/);
+  assert.match(prewarm, /Number\(result\.healthyCatalogs\)\s*!==\s*34/);
+  assert.match(prewarm, /activeCatalogs:\s*34/);
+  assert.match(prewarm, /healthyCatalogs:\s*34/);
 
-  assert.match(runtime, /catalogState\.activeCatalogs\s*===\s*33/);
-  assert.match(runtime, /catalogState\.healthyCatalogs\s*===\s*33/);
+  assert.match(runtime, /catalogState\.activeCatalogs\s*===\s*34/);
+  assert.match(runtime, /catalogState\.healthyCatalogs\s*===\s*34/);
 
-  assert.match(gate, /activeCatalogs[^\n]*33/);
-  assert.match(gate, /healthyCatalogs[^\n]*33/);
-  assert.match(gate, /33\/33 prewarm/);
+  assert.match(gate, /activeCatalogs[^\n]*34/);
+  assert.match(gate, /healthyCatalogs[^\n]*34/);
+  assert.match(gate, /34\/34 prewarm/);
 });
 
 test('media relay hardening and bandwidth observability are present', () => {

@@ -20,7 +20,7 @@ const DEFAULTS = Object.freeze({
   maxPasses: 6,
   retryDelayMs: 20_000,
   requestTimeoutMs: 45_000,
-  expectedActiveCatalogs: 33,
+  expectedActiveCatalogs: 34,
   verificationPasses: 1,
 });
 
@@ -84,8 +84,8 @@ function latestPrewarmCatalogResult(passSummaries, catalogId) {
 function writeStartupPrewarmReadyMarker(result, env = process.env) {
   if (
     result?.success !== true ||
-    Number(result.activeCatalogs) !== 33 ||
-    Number(result.healthyCatalogs) !== 33 ||
+    Number(result.activeCatalogs) !== 34 ||
+    Number(result.healthyCatalogs) !== 34 ||
     !Array.isArray(result.missingCatalogs) ||
     result.missingCatalogs.length !== 0
   ) {
@@ -143,8 +143,8 @@ function writeStartupPrewarmReadyMarker(result, env = process.env) {
     gate: 'catalog-prewarm-success',
     latchedAt: new Date().toISOString(),
     runId: String(result.runId || ''),
-    activeCatalogs: 33,
-    healthyCatalogs: 33,
+    activeCatalogs: 34,
+    healthyCatalogs: 34,
     missingCatalogs: [],
     sukebei: {
       healthy: true,
@@ -170,7 +170,7 @@ function writeStartupPrewarmReadyMarker(result, env = process.env) {
   fs.renameSync(temporary, markerPath);
 
   process.stdout.write(
-    `OnlyPorn PREWARM READY: 33/33 + Sukebei ${metas} MetaTube cards + ` +
+    `OnlyPorn PREWARM READY: 34/34 + Sukebei ${metas} MetaTube cards + ` +
     `Sukebei Hentai ${sukebeiHentaiMetas} indexed series; ` +
     `marker=${markerPath}\n`
   );
