@@ -232,6 +232,24 @@ function torrentHashes(identity = {}) {
     .map(torrent => String(torrent?.infoHash || '').toLowerCase())
     .filter(hash => /^[a-f0-9]{40}$/.test(hash)));
 }
+
+function isCatalogBoundSukebeiTorrent(decoded = {}, candidate = {}) {
+  if (decoded.source !== 'sukebei') return false;
+  const hash = String(candidate?.infoHash || '').trim().toLowerCase();
+  if (!/^[a-f0-9]{40}$/.test(hash)) return false;
+  return torrentHashes(decoded).has(hash);
+}
+
+function passesTorrentSeederGate(candidate = {}, decoded = {}, config = {}) {
+  // A clicked Sukebei catalog card already carries a concrete upstream torrent
+  // identity. Preserve that exact torrent so downstream AIOStreams/Real-Debrid
+  // can evaluate it; do not erase it solely because the live swarm is below the
+  // generic seeder floor.
+  if (isCatalogBoundSukebeiTorrent(decoded, candidate)) return true;
+
+  // Every non-Sukebei / non-bound candidate keeps the pre-existing rule.
+  return candidate.seeders >= config.minimumSeeders;
+}
 function sameCatalogIdentity(meta, decoded) {
   const identity = decodeTpb4kId(meta?.id);
   if (!identity || identity.catalogId !== decoded.catalogId) return false;
@@ -1095,7 +1113,7 @@ class Tpb4kProvider {
         if (['p2p', 'uncached-torrent'].includes(candidate.kind)) {
           if (candidate.source === 'pornrips' && candidate.seeders === 0 && candidate.provenance.includes('pornrips-authoritative-torrent')) return true;
           if (candidate.source === 'sukebei-hentai') return candidate.seeders >= 1;
-          return candidate.seeders >= config.minimumSeeders;
+          return passesTorrentSeederGate(candidate, decoded, config);
         }
         return true;
       });
@@ -1133,3 +1151,7 @@ module.exports = options => Tpb4kProvider.create(options);
 module.exports.Tpb4kProvider = Tpb4kProvider;
 module.exports.catalogCacheKey = catalogCacheKey;
 module.exports.legacyCatalogCacheSuffix = legacyCatalogCacheSuffix;
+
+// Test-only exports for deterministic Sukebei playback-gate regression coverage.
+module.exports.__testOnlyIsCatalogBoundSukebeiTorrent = isCatalogBoundSukebeiTorrent;
+module.exports.__testOnlyPassesTorrentSeederGate = passesTorrentSeederGate;
