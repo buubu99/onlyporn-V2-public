@@ -787,7 +787,28 @@ class Tpb4kProvider {
     const config = readTpb4kConfig(this.env);
     const requestedSkip = Math.max(0, Number(args?.extra?.skip) || 0);
     const pageSize = Math.max(1, Number(config.catalogLimit) || 40);
-    const queries = Array.from(new Set((searchQueries || []).filter(Boolean))).slice(0, 6);
+    // Sukebei's upstream text search is unreliable when a JAV code is ANDed
+    // with the English word "uncensored" (or its Japanese aliases). For a
+    // code-shaped query such as "SONE 620 UNCENSORED", search the stable JAV
+    // code first and then enforce the uncensored qualifier locally.
+    const requestedSearch = String(args?.extra?.search || '').trim();
+    const uncensoredCodeMatch = /\b([a-z]{2,12})[\s_-]*(\d{2,6})\b/i.exec(requestedSearch);
+    const uncensoredCodeSearch = (
+      /\buncensored\b/i.test(requestedSearch) && uncensoredCodeMatch
+    )
+      ? `${uncensoredCodeMatch[1].toUpperCase()} ${uncensoredCodeMatch[2]}`
+      : '';
+    const uncensoredMarkers = [
+      'uncensored',
+      '無修正',
+      'モザイクなし',
+      'モザイク除去',
+      'モザイク破壊',
+      '破壊版',
+    ];
+    const queries = uncensoredCodeSearch
+      ? [uncensoredCodeSearch]
+      : Array.from(new Set((searchQueries || []).filter(Boolean))).slice(0, 6);
     const responses = [];
 
     // Two at a time avoids a six-request burst against Sukebei while still
@@ -797,7 +818,7 @@ class Tpb4kProvider {
 
       const batchResponses = await Promise.all(batch.map(async search => {
         try {
-          return await this.handleCatalog({
+          const response = await this.handleCatalog({
             ...args,
             __onlypornSukebeiAliasExpanded: true,
             extra: {
@@ -806,6 +827,63 @@ class Tpb4kProvider {
               skip: 0,
             },
           });
+
+          if (uncensoredCodeSearch) {
+            const metas = Array.isArray(response?.metas) ? response.metas : [];
+            const seenUncensored = new Set();
+            const filteredMetas = metas.filter(meta => {
+              const searchableParts = [
+                meta?.name,
+                meta?.title,
+                meta?.description,
+              ];
+              let dedupeKey = String(meta?.id || '');
+
+              // OnlyPorn TPB4K IDs embed the original Sukebei payload. Decode it
+              // too, because the uncensored marker may exist in the source title
+              // even when a presentation field was normalized.
+              try {
+                const id = String(meta?.id || '');
+                const encoded = id.split(':').slice(2).join(':');
+                if (encoded) {
+                  const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+                  searchableParts.push(payload?.t, payload?.i, payload?.c);
+                  dedupeKey = String(payload?.h || payload?.i || id);
+                }
+              } catch (_error) {
+                // Visible metadata is still sufficient when an id is not decodable.
+              }
+
+              const searchable = searchableParts
+                .filter(Boolean)
+                .join(' ')
+                .toLocaleLowerCase('en-US');
+
+              const isUncensored = uncensoredMarkers.some(marker =>
+                searchable.includes(marker.toLocaleLowerCase('en-US'))
+              );
+              if (!isUncensored) return false;
+              if (seenUncensored.has(dedupeKey)) return false;
+              seenUncensored.add(dedupeKey);
+              return true;
+            });
+
+            logger().info({
+              provider: this.name,
+              catalogId: args?.id,
+              search: requestedSearch,
+              fallbackSearch: uncensoredCodeSearch,
+              candidates: metas.length,
+              matches: filteredMetas.length,
+            }, 'OnlyPorn Sukebei uncensored JAV code fallback filtered');
+
+            return {
+              ...(response || {}),
+              metas: filteredMetas,
+            };
+          }
+
+          return response;
         } catch (error) {
           logger().warn({
             provider: this.name,
@@ -1149,14 +1227,20 @@ class Tpb4kProvider {
     const sukebeiNeedsFileSelection = ['sukebei', 'sukebei-hentai'].includes(decoded.source)
       && Array.isArray(decoded.torrents)
       && decoded.torrents.some(torrent => !Number.isInteger(torrent?.fileIdx));
-    const bundledCandidates = Array.isArray(decoded.torrents) && !sukebeiNeedsFileSelection
+    // Keep every catalog-bound torrent as a final playback fallback.
+    // If Sukebei lacks fileIdx, prefer its resolver first so it can inspect the
+    // .torrent and choose the main video. Search/persistent cards may not exist
+    // in the new process-local Sukebei index; the encoded infoHash is still a
+    // valid Stremio torrent stream when that resolver returns nothing.
+    const allBundledCandidates = Array.isArray(decoded.torrents)
       ? decoded.torrents.map(torrent => ({
         ...torrent,
-        source: torrent.indexer || 'torrent-index',
+        source: torrent.indexer || decoded.source || 'torrent-index',
         sourceId: decoded.sourceId,
         provenance: ['catalog-bound-torrent', 'multi-candidate-bundle'],
       }))
       : [];
+    const bundledCandidates = sukebeiNeedsFileSelection ? [] : allBundledCandidates;
     let rawCandidates = [...bundledCandidates];
     if (!rawCandidates.length) {
       try {
@@ -1171,6 +1255,20 @@ class Tpb4kProvider {
         logger().warn({ provider: this.name, source: decoded.source, resolver: resolverAdapter.id, error: redactSecrets(error?.message || error, this.env) }, 'OnlyPorn stream adapter failed safely');
       }
     }
+    if (
+      !rawCandidates.length
+      && sukebeiNeedsFileSelection
+      && allBundledCandidates.length
+    ) {
+      rawCandidates = [...allBundledCandidates];
+      logger().warn({
+        provider: this.name,
+        source: decoded.source,
+        sourceId: decoded.sourceId,
+        candidates: allBundledCandidates.length,
+      }, 'OnlyPorn Sukebei playback fell back to catalog-bound infohash');
+    }
+
     if (decoded.source === 'pornrips' && rawItem) {
       const alternateResolver = getAdapter('torrent-index');
       if (alternateResolver && alternateResolver !== resolverAdapter) {
@@ -1201,6 +1299,10 @@ class Tpb4kProvider {
       .filter(candidate => {
         if (candidate.kind === 'invalid') return false;
         if (['p2p', 'uncached-torrent'].includes(candidate.kind)) {
+          if (
+            decoded.source === 'sukebei'
+            && candidate.provenance.includes('catalog-bound-torrent')
+          ) return true;
           if (candidate.source === 'pornrips' && candidate.seeders === 0 && candidate.provenance.includes('pornrips-authoritative-torrent')) return true;
           if (candidate.source === 'sukebei-hentai') return candidate.seeders >= 1;
           return passesTorrentSeederGate(candidate, decoded, config);
