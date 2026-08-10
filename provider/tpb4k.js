@@ -1182,6 +1182,57 @@ class Tpb4kProvider {
         }, 'OnlyPorn metadata recovered from catalog response');
         return { meta: recovered };
       }
+
+      // Sukebei search cards can still carry a valid catalog-bound torrent even
+      // when the process-local metadata index no longer has the source record.
+      // AIOStreams rejects { meta: {} }, so recover the minimum valid Stremio
+      // metadata directly from the title already encoded with that torrent.
+      const encodedTorrent = decoded.source === 'sukebei'
+        && Array.isArray(decoded.torrents)
+        ? decoded.torrents.find(torrent =>
+          String(torrent?.title || torrent?.filename || '').trim()
+        )
+        : null;
+      const encodedName = String(
+        encodedTorrent?.title || encodedTorrent?.filename || ''
+      ).trim();
+
+      if (encodedTorrent && encodedName) {
+        const fallbackMeta = {
+          id: args.id,
+          type: catalogType(decoded.catalogId),
+          name: encodedName,
+          posterShape: 'landscape',
+          genres: [],
+          tags: [],
+          description: encodedName,
+          links: [],
+          extra: {
+            onlyporn: {
+              source: decoded.source,
+              sourceId: decoded.sourceId,
+              identity: '',
+              releaseDate: '',
+              sceneCode: '',
+              tags: [],
+              metadataProvider: 'encoded-catalog-torrent',
+              lookupSource: '',
+              playbackCandidates: decoded.torrents.length,
+            },
+          },
+        };
+
+        logger().info({
+          provider: this.name,
+          catalogId: decoded.catalogId,
+          source: decoded.source,
+          sourceId: decoded.sourceId,
+          playbackCandidates: decoded.torrents.length,
+        }, 'OnlyPorn metadata recovered from encoded Sukebei torrent');
+
+        return { meta: fallbackMeta };
+      }
+
       return { meta: {} };
     }
     const catalogPoster = realStudioPoster(preview?.poster);
