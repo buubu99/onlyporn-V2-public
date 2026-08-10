@@ -1,5 +1,7 @@
 'use strict';
 
+const { expandSukebeiSearchQueries } = require('./tpb4k/sukebei-search-aliases');
+
 const { getCatalogDefinition, isTpb4kEnabled } = require('../catalog/tpb4k');
 const { resolveTpb4kFacet } = require('../catalog/discovery-profiles');
 const {
@@ -273,6 +275,33 @@ function isRegressedStudioRefresh(args = {}, cachedValue, freshValue) {
     && freshCount < Math.max(2, Math.floor(cachedCount * 0.35));
 }
 
+
+function mergeSukebeiAliasResponses(responses = [], skip = 0, limit = 40) {
+  const seen = new Set();
+  const metas = [];
+  let base = null;
+
+  for (const response of responses) {
+    if (!response || typeof response !== 'object') continue;
+    if (!base) base = response;
+
+    for (const meta of Array.isArray(response.metas) ? response.metas : []) {
+      const id = String(meta?.id || '').trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      metas.push(meta);
+    }
+  }
+
+  const safeSkip = Math.max(0, Number(skip) || 0);
+  const safeLimit = Math.max(1, Number(limit) || 40);
+
+  return {
+    ...(base || {}),
+    metas: metas.slice(safeSkip, safeSkip + safeLimit),
+  };
+}
+
 class Tpb4kProvider {
   constructor(options = {}) {
     this.name = 'tpb4k';
@@ -303,6 +332,15 @@ class Tpb4kProvider {
   enabled() { return isTpb4kEnabled(this.env); }
 
   async handleCatalog(args) {
+    if (!args?.__onlypornSukebeiAliasExpanded) {
+      const aliasQueries = expandSukebeiSearchQueries(args?.extra?.search, {
+        catalogId: args?.id,
+      });
+
+      if (aliasQueries.length > 1) {
+        return this._handleSukebeiAliasCatalog(args, aliasQueries);
+      }
+    }
     if (!this.enabled()) return { metas: [] };
     const definition = getCatalogDefinition(args.id);
     if (!definition || args.type !== (definition.type || MOVIE_TYPE)) return { metas: [] };
@@ -743,6 +781,58 @@ class Tpb4kProvider {
     }, 'OnlyPorn source-aware search completed');
 
     return { metas };
+  }
+
+  async _handleSukebeiAliasCatalog(args, searchQueries) {
+    const config = readTpb4kConfig(this.env);
+    const requestedSkip = Math.max(0, Number(args?.extra?.skip) || 0);
+    const pageSize = Math.max(1, Number(config.catalogLimit) || 40);
+    const queries = Array.from(new Set((searchQueries || []).filter(Boolean))).slice(0, 6);
+    const responses = [];
+
+    // Two at a time avoids a six-request burst against Sukebei while still
+    // keeping the expanded search inside the existing Stremio/AIO timeout budget.
+    for (let offset = 0; offset < queries.length; offset += 2) {
+      const batch = queries.slice(offset, offset + 2);
+
+      const batchResponses = await Promise.all(batch.map(async search => {
+        try {
+          return await this.handleCatalog({
+            ...args,
+            __onlypornSukebeiAliasExpanded: true,
+            extra: {
+              ...(args?.extra || {}),
+              search,
+              skip: 0,
+            },
+          });
+        } catch (error) {
+          logger().warn({
+            provider: this.name,
+            catalogId: args?.id,
+            search,
+            error: error?.message || String(error),
+          }, 'OnlyPorn Sukebei alias search variant failed safely');
+
+          return { metas: [] };
+        }
+      }));
+
+      responses.push(...batchResponses);
+    }
+
+    const merged = mergeSukebeiAliasResponses(responses, requestedSkip, pageSize);
+
+    logger().info({
+      provider: this.name,
+      catalogId: args?.id,
+      search: args?.extra?.search,
+      searchAliases: queries.slice(1),
+      searchVariants: queries.length,
+      metas: Array.isArray(merged.metas) ? merged.metas.length : 0,
+    }, 'OnlyPorn Sukebei alias search merged');
+
+    return merged;
   }
 
   async _handleCatalogFresh(args) {
