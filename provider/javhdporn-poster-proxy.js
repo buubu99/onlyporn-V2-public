@@ -21,7 +21,13 @@ function allowedHost(hostname) {
 
 function publicBase(env = process.env) {
   try {
-    const parsed = new URL(String(env.ONLYPORN_PUBLIC_BASE_URL || env.RENDER_EXTERNAL_URL || DEFAULT_PUBLIC_BASE));
+    const parsed = new URL(String(
+      env.ONLYPORN_PUBLIC_BASE_URL ||
+      env.ADDON_BASE_URL ||
+      env.PUBLIC_URL ||
+      env.RENDER_EXTERNAL_URL ||
+      DEFAULT_PUBLIC_BASE
+    ));
     return parsed.protocol === 'https:' && !parsed.username && !parsed.password
       ? parsed.origin
       : DEFAULT_PUBLIC_BASE;
