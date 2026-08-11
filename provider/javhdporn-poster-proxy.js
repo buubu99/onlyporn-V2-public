@@ -8,8 +8,8 @@ const DEFAULT_PUBLIC_BASE = 'https://onlyv2.51-79-157-182.sslip.io';
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 const MAX_CACHE_BYTES = 192 * 1024 * 1024;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
-const ALLOWED_ROOTS = Object.freeze(['javhdporn.net', 'pornfhd.com', 'javfun.me']);
-const ALLOWED_HOSTS = Object.freeze(['i0.wp.com', 'i1.wp.com', 'i2.wp.com', 'i3.wp.com']);
+const ALLOWED_ROOTS = Object.freeze(['javhdporn.net', 'pornfhd.com']);
+const ALLOWED_HOSTS = Object.freeze(['i0.wp.com', 'i1.wp.com', 'i2.wp.com']);
 const FC2_STORAGE_HOST = /^storage\d+\.contents\.fc2\.com$/i;
 const inFlight = new Map();
 

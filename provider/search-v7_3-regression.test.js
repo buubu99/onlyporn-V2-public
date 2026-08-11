@@ -7,7 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const createJavHdPorn = require('./javhdporn');
-const { decodeSource, javPosterProxyUrl, normalizeSourceUrl } = require('./javhdporn-poster-proxy');
+const { decodeSource } = require('./javhdporn-poster-proxy');
 const { createSearchSqliteStore } = require('./search-sqlite');
 
 test('JAV search cards ignore data placeholders and choose the largest real srcset poster', () => {
@@ -75,45 +75,4 @@ test('V7.3 warm search paths are present and studio prewarm seeds torrent pools'
   assert.match(source, /sqlite-local-binding/);
   assert.match(source, /mergeSearchItems\(metadataItems, torrentItems, enrichedTorrentItems\)/);
   assert.match(source, /countPool\(poolCatalogId\)/);
-});
-
-test('JAV live wp.com wrappers use the existing normalizer and decode to accepted JAVFun origins', () => {
-  const direct =
-    'https://www9.javfun.me/Cms_Data/Contents/admin/example-direct.jpg';
-
-  assert.equal(
-    normalizeSourceUrl(direct),
-    direct,
-    'direct JAVFun origin must be allowlisted as an image root'
-  );
-
-  const samples = [
-    ['i0.wp.com', 'a'],
-    ['i1.wp.com', 'b'],
-    ['i2.wp.com', 'c'],
-    ['i3.wp.com', 'd'],
-  ];
-
-  for (const [wpHost, suffix] of samples) {
-    const source =
-      `https://${wpHost}/www9.javfun.me/Cms_Data/Contents/admin/example-${suffix}.jpg?resize=300%2C450&ssl=1`;
-    const expected =
-      `https://www9.javfun.me/Cms_Data/Contents/admin/example-${suffix}.jpg`;
-
-    assert.equal(
-      normalizeSourceUrl(source),
-      expected,
-      `${wpHost} wrapper must unwrap to the exact JAVFun source`
-    );
-
-    const proxied = javPosterProxyUrl(source, {
-      ADDON_BASE_URL: 'https://onlyporn.example',
-    });
-
-    assert.match(
-      proxied,
-      /^https:\/\/onlyporn\.example\/onlyporn\/poster\/javhdporn\//
-    );
-    assert.equal(decodeSource(proxied.split('/').pop()), expected);
-  }
 });
