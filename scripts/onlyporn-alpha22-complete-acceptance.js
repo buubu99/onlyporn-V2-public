@@ -4,7 +4,7 @@
 const { decodeTpb4kId } = require('../provider/tpb4k/id-codec');
 const { validateImageResponse } = require('../provider/tpb4k/sukebei-image-validator');
 
-const BASE = String(process.env.ONLYPORN_RENDER_BASE_URL || 'https://onlyporn-v2-public-k143.onrender.com').replace(/\/$/, '');
+const BASE = String(process.env.ONLYPORN_PUBLIC_BASE_URL || 'https://onlyv2.51-79-157-182.sslip.io').replace(/\/$/, '');
 const EXPECTED = process.env.EXPECTED_VERSION || '2.7.0-alpha.22';
 const CATALOG_TIMEOUT_MS = Number(process.env.ONLYPORN_ACCEPTANCE_CATALOG_TIMEOUT_MS || 90_000);
 const CONCURRENT_MAX_MS = Number(process.env.ONLYPORN_ACCEPTANCE_CONCURRENT_MAX_MS || 20_000);

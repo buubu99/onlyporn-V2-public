@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 'use strict';
 
-const BASE = String(process.env.TPB4K_RENDER_BASE_URL || '').trim().replace(/\/$/, '');
+const BASE = String(process.env.TPB4K_PUBLIC_BASE_URL || '').trim().replace(/\/$/, '');
 if (!/^https:\/\//i.test(BASE)) {
-  console.error('Set TPB4K_RENDER_BASE_URL to the HTTPS URL of the Render feature preview.');
+  console.error('Set TPB4K_PUBLIC_BASE_URL to the HTTPS URL of the live addon.');
   process.exit(2);
 }
 

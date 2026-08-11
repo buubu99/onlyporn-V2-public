@@ -2,10 +2,15 @@
 
 const crypto = require('node:crypto');
 
-const DEFAULT_PUBLIC_BASE = 'https://onlyporn-v2-public-k143.onrender.com';
+const DEFAULT_PUBLIC_BASE = 'https://onlyv2.51-79-157-182.sslip.io';
 
 function publicBase(env = process.env) {
-  const value = String(env.ONLYPORN_PUBLIC_BASE_URL || env.RENDER_EXTERNAL_URL || DEFAULT_PUBLIC_BASE).trim();
+  const value = String(
+    env.ONLYPORN_PUBLIC_BASE_URL ||
+    env.ADDON_BASE_URL ||
+    env.PUBLIC_URL ||
+    DEFAULT_PUBLIC_BASE
+  ).trim();
   try {
     const parsed = new URL(value);
     if (parsed.protocol !== 'https:' || parsed.username || parsed.password) return DEFAULT_PUBLIC_BASE;

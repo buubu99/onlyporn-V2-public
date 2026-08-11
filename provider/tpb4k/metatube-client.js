@@ -6,7 +6,7 @@ const { validateImageResponse } = require('./sukebei-image-validator');
 
 const EXCLUDED_PROVIDER = /^(?:theporndb|tpdb)$/i;
 const DEFAULT_INTERNAL_BASE = 'http://127.0.0.1:18080';
-const DEFAULT_PUBLIC_BASE = 'https://onlyporn-v2-public-k143.onrender.com';
+const DEFAULT_PUBLIC_BASE = 'https://onlyv2.51-79-157-182.sslip.io';
 
 function compactText(value, max = 500) {
   return String(value || '').normalize('NFKC').replace(/\s+/g, ' ').trim().slice(0, max);
@@ -116,7 +116,8 @@ function createMetaTubeClient(options = {}) {
   const publicBase = parsePublicBase(
     env.TPB4K_METATUBE_PUBLIC_URL ||
     env.ONLYPORN_PUBLIC_BASE_URL ||
-    env.RENDER_EXTERNAL_URL ||
+    env.ADDON_BASE_URL ||
+    env.PUBLIC_URL ||
     DEFAULT_PUBLIC_BASE
   );
   const proxySecret = compactText(env.TPB4K_METATUBE_PROXY_SECRET, 500);

@@ -1,10 +1,16 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const DEFAULT_PUBLIC_BASE = 'https://onlyporn-v2-public-k143.onrender.com';
+const DEFAULT_PUBLIC_BASE = 'https://onlyv2.51-79-157-182.sslip.io';
 function compact(value, max = 180) { return String(value || '').normalize('NFKC').replace(/\s+/g, ' ').trim().slice(0, max); }
 function publicBase(config = {}, env = process.env) {
-  const value = compact(config.publicBaseUrl || env.ONLYPORN_PUBLIC_BASE_URL || env.RENDER_EXTERNAL_URL || DEFAULT_PUBLIC_BASE);
+  const value = compact(
+    config.publicBaseUrl ||
+    env.ONLYPORN_PUBLIC_BASE_URL ||
+    env.ADDON_BASE_URL ||
+    env.PUBLIC_URL ||
+    DEFAULT_PUBLIC_BASE
+  );
   try { const url = new URL(value); return url.protocol === 'https:' && !url.username && !url.password ? url.origin : DEFAULT_PUBLIC_BASE; }
   catch { return DEFAULT_PUBLIC_BASE; }
 }

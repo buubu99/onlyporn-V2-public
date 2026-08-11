@@ -3,7 +3,7 @@
 
 const { decodeTpb4kId } = require('../provider/tpb4k/id-codec');
 
-const BASE = String(process.env.ONLYPORN_RENDER_BASE_URL || 'https://onlyporn-v2-public-k143.onrender.com').replace(/\/$/, '');
+const BASE = String(process.env.ONLYPORN_PUBLIC_BASE_URL || 'https://onlyv2.51-79-157-182.sslip.io').replace(/\/$/, '');
 const EXPECTED = process.env.EXPECTED_VERSION || '2.7.0-alpha.20';
 const CONCURRENCY = Math.min(Math.max(Number(process.env.ONLYPORN_ACCEPTANCE_CONCURRENCY || 5), 1), 10);
 const STUDIOS = [

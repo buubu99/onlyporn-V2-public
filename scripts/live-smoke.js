@@ -2,7 +2,7 @@
 
 const packageInfo = require('../package.json');
 
-const baseInput = process.argv[2] || process.env.LIVE_BASE_URL || 'https://onlyporn-v2-public-k143.onrender.com';
+const baseInput = process.argv[2] || process.env.LIVE_BASE_URL || 'https://onlyv2.51-79-157-182.sslip.io';
 const expectedVersion = process.argv[3] || process.env.EXPECTED_VERSION || packageInfo.version;
 const baseUrl = new URL(baseInput);
 const knownEmpty = new Set(

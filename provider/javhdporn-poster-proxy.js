@@ -4,7 +4,7 @@ const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const DEFAULT_PUBLIC_BASE = 'https://onlyporn-v2-public-k143.onrender.com';
+const DEFAULT_PUBLIC_BASE = 'https://onlyv2.51-79-157-182.sslip.io';
 const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 const MAX_CACHE_BYTES = 192 * 1024 * 1024;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
@@ -25,7 +25,6 @@ function publicBase(env = process.env) {
       env.ONLYPORN_PUBLIC_BASE_URL ||
       env.ADDON_BASE_URL ||
       env.PUBLIC_URL ||
-      env.RENDER_EXTERNAL_URL ||
       DEFAULT_PUBLIC_BASE
     ));
     return parsed.protocol === 'https:' && !parsed.username && !parsed.password

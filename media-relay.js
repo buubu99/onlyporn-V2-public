@@ -64,12 +64,10 @@ function normalizePublicBase(value) {
 
 function configuredPublicBase() {
   return normalizePublicBase(
-    process.env.ADDON_BASE_URL ||
+    process.env.ONLYPORN_PUBLIC_BASE_URL ||
+      process.env.ADDON_BASE_URL ||
       process.env.PUBLIC_URL ||
-      process.env.RENDER_EXTERNAL_URL ||
-      (process.env.RENDER_EXTERNAL_HOSTNAME
-        ? `https://${process.env.RENDER_EXTERNAL_HOSTNAME}`
-        : '')
+      ''
   );
 }
 

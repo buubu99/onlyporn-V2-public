@@ -10,7 +10,7 @@ const {
 const baseUrl = String(
   process.env.ONLYPORN_PREWARM_BASE_URL ||
   process.env.DIAGNOSTIC_BASE_URL ||
-  'https://onlyporn-v2-public-k143.onrender.com'
+  'https://onlyv2.51-79-157-182.sslip.io'
 ).replace(/\/+$/, '');
 const schedulerConfig = readSchedulerConfig(process.env);
 
