@@ -9,7 +9,7 @@ const MAX_IMAGE_BYTES = 6 * 1024 * 1024;
 const MAX_CACHE_BYTES = 192 * 1024 * 1024;
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const ALLOWED_ROOTS = Object.freeze(['javhdporn.net', 'pornfhd.com']);
-const ALLOWED_HOSTS = Object.freeze(['i0.wp.com', 'i1.wp.com', 'i2.wp.com', 'www9.javfun.me']);
+const ALLOWED_HOSTS = Object.freeze(['i0.wp.com', 'i1.wp.com', 'i2.wp.com']);
 const FC2_STORAGE_HOST = /^storage\d+\.contents\.fc2\.com$/i;
 const inFlight = new Map();
 
@@ -62,35 +62,8 @@ function decodeSource(value) {
   catch { return ''; }
 }
 
-function canonicalJavPosterSource(value) {
-  const input = String(value || '').trim();
-  let parsed;
-  try {
-    parsed = new URL(input);
-  } catch {
-    return input;
-  }
-
-  // Live JAVHDPorn search cards currently expose Jetpack/WordPress image
-  // wrappers such as:
-  //   https://i1.wp.com/www9.javfun.me/Cms_Data/Contents/admin/...jpg?...
-  // Those wrapper URLs return 404, while the embedded JAVFun origin is the
-  // actual image source. Keep this rewrite deliberately narrow.
-  if (!/^i[0-3]\.wp\.com$/i.test(parsed.hostname)) return input;
-
-  const firstSlash = parsed.pathname.indexOf('/', 1);
-  if (firstSlash <= 1) return input;
-
-  const embeddedHost = parsed.pathname.slice(1, firstSlash).toLowerCase();
-  if (embeddedHost !== 'www9.javfun.me') return input;
-
-  const embeddedPath = parsed.pathname.slice(firstSlash);
-  return `https://${embeddedHost}${embeddedPath}`;
-}
-
 function javPosterProxyUrl(value, env = process.env) {
-  const source = canonicalJavPosterSource(value);
-  const token = encodeSource(source);
+  const token = encodeSource(value);
   return token ? `${publicBase(env)}/onlyporn/poster/javhdporn/${token}` : value;
 }
 

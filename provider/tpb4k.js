@@ -916,12 +916,12 @@ class Tpb4kProvider {
       : Array.from(new Set((searchQueries || []).filter(Boolean))).slice(0, 6);
     const responses = [];
 
-    // AIOStreams enforces a 30-second catalog deadline. The prior 2-at-a-time
-    // loop created three serial network waves and was measured at ~48-52s cold.
-    // Preserve the exact deterministic query set, but run all variants in one
-    // concurrent wave so the overall latency is bounded by the slowest variant
-    // rather than the sum of three batches.
-    const batchResponses = await Promise.all(queries.map(async search => {
+    // Two at a time avoids a six-request burst against Sukebei while still
+    // keeping the expanded search inside the existing Stremio/AIO timeout budget.
+    for (let offset = 0; offset < queries.length; offset += 2) {
+      const batch = queries.slice(offset, offset + 2);
+
+      const batchResponses = await Promise.all(batch.map(async search => {
         try {
           const response = await this.handleCatalog({
             ...args,
@@ -999,9 +999,10 @@ class Tpb4kProvider {
 
           return { metas: [] };
         }
-    }));
+      }));
 
-    responses.push(...batchResponses);
+      responses.push(...batchResponses);
+    }
 
     const merged = mergeSukebeiAliasResponses(responses, requestedSkip, pageSize);
 
