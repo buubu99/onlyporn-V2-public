@@ -118,3 +118,19 @@ test('provider source wires the alias expander into handleCatalog and merge help
   assert.match(source, /OnlyPorn Sukebei alias search merged/);
   assert.match(source, /__onlypornSukebeiAliasExpanded/);
 });
+
+test('Sukebei alias fanout is one concurrent wave, not three sequential 2-request batches', () => {
+  const fs = require('node:fs');
+  const source = fs.readFileSync(require.resolve('./tpb4k'), 'utf8');
+  const start = source.indexOf('async _handleSukebeiAliasCatalog(args, searchQueries)');
+  const end = source.indexOf('async _handleCatalogFresh(args)', start);
+
+  assert.ok(start >= 0 && end > start);
+  const method = source.slice(start, end);
+
+  assert.match(method, /Promise\.all\(queries\.map\(async search =>/);
+  assert.doesNotMatch(method, /offset \+= 2/);
+  assert.doesNotMatch(method, /queries\.slice\(offset/);
+  assert.match(method, /OnlyPorn Sukebei uncensored JAV code fallback filtered/);
+  assert.match(method, /mergeSukebeiAliasResponses/);
+});
