@@ -82,6 +82,15 @@ function getPublicBase() {
   return configuredPublicBase() || observedPublicBase;
 }
 
+function mediaPathPrefix(env = process.env) {
+  const slot = String(env.ONLYPORN_MEDIA_SLOT || '').trim().toLowerCase();
+  if (!slot) return '/media';
+  if (!/^(?:blue|green)$/.test(slot)) {
+    throw new Error('ONLYPORN_MEDIA_SLOT must be blue or green');
+  }
+  return `/media/${slot}`;
+}
+
 function hostnameAllowed(hostname, provider) {
   const suffixes = PROVIDER_SUFFIXES[provider] || [];
   const normalized = String(hostname || '').toLowerCase().replace(/\.$/, '');
@@ -190,7 +199,7 @@ function register({ url, headers = {}, provider, kind, ttlMs = SESSION_TTL_MS })
   if (!publicBase) throw new Error('Media relay public base URL is not initialized');
 
   const entry = createSessionEntry({ url, headers, provider, kind, ttlMs });
-  return `${publicBase}/media/${entry.sessionToken}/${filenameFor(entry.kind)}`;
+  return `${publicBase}${mediaPathPrefix()}/${entry.sessionToken}/${filenameFor(entry.kind)}`;
 }
 
 function ensureSessionEntry(entry, parentUrl) {
@@ -291,7 +300,7 @@ function relayChild(entry, parentUrl, value, kind) {
     const sessionEntry = ensureSessionEntry(entry, parentUrl);
     const resolvedKind = kind || kindFromUrl(resolved);
     const token = createChildToken(sessionEntry, resolved, resolvedKind);
-    return `${publicBase}/media/${token}/${filenameFor(resolvedKind)}`;
+    return `${publicBase}${mediaPathPrefix()}/${token}/${filenameFor(resolvedKind)}`;
   } catch (error) {
     if (error instanceof PlaylistChildRelayError) throw error;
     throw new PlaylistChildRelayError(
@@ -897,6 +906,7 @@ module.exports = {
   _test: {
     entries,
     MAX_SESSIONS,
+    mediaPathPrefix,
     PLAYLIST_CHILD_ERROR_CODE,
     SESSION_TTL_MS,
     createChildToken,
