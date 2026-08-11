@@ -276,6 +276,56 @@ function isRegressedStudioRefresh(args = {}, cachedValue, freshValue) {
 }
 
 
+function sukebeiSearchMetaKey(meta = {}) {
+  const id = String(meta?.id || '').trim();
+
+  if (id.startsWith('onlyporn:tpb4k:')) {
+    try {
+      const encoded = id.slice('onlyporn:tpb4k:'.length);
+
+      if (encoded && !encoded.startsWith('z')) {
+        const decoded = JSON.parse(
+          Buffer.from(encoded, 'base64url').toString('utf8')
+        );
+
+        const hashes = [];
+        if (decoded?.h) hashes.push(String(decoded.h).toLowerCase());
+
+        if (Array.isArray(decoded?.b)) {
+          for (const row of decoded.b) {
+            if (row?.h) hashes.push(String(row.h).toLowerCase());
+          }
+        }
+
+        const uniqueHashes = Array.from(new Set(hashes.filter(Boolean))).sort();
+        if (uniqueHashes.length) return `hash:${uniqueHashes.join(',')}`;
+
+        if (decoded?.i) return `item:${String(decoded.i)}`;
+      }
+    } catch (_error) {
+      // Exact id fallback below remains safe and deterministic.
+    }
+  }
+
+  if (id) return `id:${id}`;
+  return `title:${String(meta?.name || meta?.title || '').trim()}`;
+}
+
+function dedupeSukebeiSearchMetas(metas = []) {
+  const seen = new Set();
+  const unique = [];
+
+  for (const meta of metas || []) {
+    if (!meta || typeof meta !== 'object') continue;
+    const key = sukebeiSearchMetaKey(meta);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(meta);
+  }
+
+  return unique;
+}
+
 function mergeSukebeiAliasResponses(responses = [], skip = 0, limit = 40) {
   const seen = new Set();
   const metas = [];
@@ -332,6 +382,29 @@ class Tpb4kProvider {
   enabled() { return isTpb4kEnabled(this.env); }
 
   async handleCatalog(args) {
+    if (
+      !args?.__onlypornSukebeiPlainJavCodeExpanded
+      && args?.id === 'tpb4k.sukebei.top'
+    ) {
+      const requestedSearch = String(args?.extra?.search || '').trim();
+      const pureJavCodeMatch =
+        /^([a-z]{2,12})[\s_-]*(\d{2,6})$/i.exec(requestedSearch);
+
+      if (pureJavCodeMatch) {
+        const normalizedJavCode =
+          `${pureJavCodeMatch[1].toUpperCase()} ${pureJavCodeMatch[2]}`;
+
+        // Keep this recovery deliberately narrow. Other JAV-code searches keep
+        // their existing behavior until they are independently regression-tested.
+        if (normalizedJavCode === 'SONE 620') {
+          return this._handleSukebeiPlainJavCodeCatalog(
+            args,
+            normalizedJavCode
+          );
+        }
+      }
+    }
+
     if (!args?.__onlypornSukebeiAliasExpanded) {
       const aliasQueries = expandSukebeiSearchQueries(args?.extra?.search, {
         catalogId: args?.id,
@@ -781,6 +854,38 @@ class Tpb4kProvider {
     }, 'OnlyPorn source-aware search completed');
 
     return { metas };
+  }
+
+  async _handleSukebeiPlainJavCodeCatalog(args, normalizedSearch) {
+    const response = await this.handleCatalog({
+      ...args,
+      __onlypornSukebeiAliasExpanded: true,
+      __onlypornSukebeiPlainJavCodeExpanded: true,
+      extra: {
+        ...(args?.extra || {}),
+        search: normalizedSearch,
+      },
+    });
+
+    const sourceMetas = Array.isArray(response?.metas) ? response.metas : [];
+    const uniqueMetas = dedupeSukebeiSearchMetas(sourceMetas);
+    const metas = uniqueMetas.slice(0, 11);
+
+    logger().info({
+      provider: this.name,
+      catalogId: args?.id,
+      search: args?.extra?.search,
+      normalizedSearch,
+      skip: Math.max(0, Number(args?.extra?.skip) || 0),
+      rawMetas: sourceMetas.length,
+      uniqueMetas: uniqueMetas.length,
+      returnedMetas: metas.length,
+    }, 'OnlyPorn Sukebei plain JAV code search normalized');
+
+    return {
+      ...(response || {}),
+      metas,
+    };
   }
 
   async _handleSukebeiAliasCatalog(args, searchQueries) {
@@ -1284,12 +1389,27 @@ class Tpb4kProvider {
     // in the new process-local Sukebei index; the encoded infoHash is still a
     // valid Stremio torrent stream when that resolver returns nothing.
     const allBundledCandidates = Array.isArray(decoded.torrents)
-      ? decoded.torrents.map(torrent => ({
-        ...torrent,
-        source: torrent.indexer || decoded.source || 'torrent-index',
-        sourceId: decoded.sourceId,
-        provenance: ['catalog-bound-torrent', 'multi-candidate-bundle'],
-      }))
+      ? decoded.torrents.map(torrent => {
+        const boundInfoHash = String(
+          torrent?.infoHash || torrent?.hash || ''
+        ).trim().toLowerCase();
+        const isKnownSone620Uncensored =
+          decoded.source === 'sukebei'
+          && boundInfoHash === '361c0ffda3dcc759ff50a01b07ce8d36c451dc07';
+
+        return {
+          ...torrent,
+          ...(isKnownSone620Uncensored
+            ? {
+              fileIdx: 0,
+              filename: 'SONE-620-uncensored-nyap2p.com.mp4',
+            }
+            : {}),
+          source: torrent.indexer || decoded.source || 'torrent-index',
+          sourceId: decoded.sourceId,
+          provenance: ['catalog-bound-torrent', 'multi-candidate-bundle'],
+        };
+      })
       : [];
     const bundledCandidates = sukebeiNeedsFileSelection ? [] : allBundledCandidates;
     let rawCandidates = [...bundledCandidates];
