@@ -164,6 +164,55 @@ test('all approved pending-title source families survive stream registration', a
   }
 });
 
+test('subtitle cards without an MPU recover through the canonical JAV player page', async () => {
+  assert.equal(
+    createJavHdPorn._test.subtitleCanonicalPlaybackUrl(
+      'https://www.javhdporn.net/video/sone-670-sub/'
+    ),
+    'https://www.javhdporn.net/video/sone-670/'
+  );
+  assert.equal(
+    createJavHdPorn._test.subtitleCanonicalPlaybackUrl(
+      'https://www.javhdporn.net/v3/video/siro-4651-sub/?ignored=1'
+    ),
+    'https://www.javhdporn.net/v3/video/siro-4651/'
+  );
+  assert.equal(
+    createJavHdPorn._test.subtitleCanonicalPlaybackUrl(
+      'https://www.javhdporn.net/video/sone-670/'
+    ),
+    ''
+  );
+
+  const provider = createJavHdPorn();
+  const subtitleUrl = 'https://www.javhdporn.net/video/sone-670-sub/';
+  const canonicalUrl = 'https://www.javhdporn.net/video/sone-670/';
+  const fetched = [];
+
+  provider.fetchHtml = async url => {
+    fetched.push(url);
+    return url === subtitleUrl
+      ? '<div id="video-player-area" data-video-id="887534"></div><div id="video-player" data-mpu="" data-ver="2"></div>'
+      : '<div id="video-player-area" data-video-id="683026"></div><div id="video-player" data-mpu="canonical-payload" data-ver="2"></div>';
+  };
+  provider.requestPlayerSources = async (url, bootstrap) => {
+    assert.equal(url, canonicalUrl);
+    assert.deepEqual(bootstrap, {
+      videoId: '683026',
+      mpu: 'canonical-payload',
+      version: '2',
+    });
+    return [];
+  };
+  provider.discoverMedia = async (_sources, url) => {
+    assert.equal(url, canonicalUrl);
+    return [];
+  };
+
+  assert.deepEqual(await provider.processStreams({ id: subtitleUrl }), { streams: [] });
+  assert.deepEqual(fetched, [subtitleUrl, canonicalUrl]);
+});
+
 test('disguised JAV transport decoding from position 32 remains active', () => {
   const source = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
   assert.match(source, /tiktokcdn\.com/);

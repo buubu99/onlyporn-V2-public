@@ -57,6 +57,34 @@ function cleanTitle(value) {
     .trim();
 }
 
+function subtitleCanonicalPlaybackUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    const host = url.hostname.toLowerCase();
+    if (
+      url.protocol !== 'https:' ||
+      (host !== 'javhdporn.net' && host !== 'www.javhdporn.net')
+    ) {
+      return '';
+    }
+
+    const parts = url.pathname.split('/').filter(Boolean);
+    const videoIndex = parts.lastIndexOf('video');
+    if (videoIndex < 0 || videoIndex !== parts.length - 2) return '';
+
+    const slug = parts[parts.length - 1];
+    if (!/-sub$/i.test(slug)) return '';
+
+    parts[parts.length - 1] = slug.replace(/-sub$/i, '');
+    url.pathname = `/${parts.join('/')}/`;
+    url.search = '';
+    url.hash = '';
+    return url.toString();
+  } catch {
+    return '';
+  }
+}
+
 function normalizePoster(value, baseUrl) {
   const url = normalizeAbsoluteUrl(value, baseUrl);
   if (!url || /^data:/i.test(url)) return DEFAULT_POSTER;
@@ -871,12 +899,44 @@ class JavHdPornProvider extends Provider {
 
   async processStreams({ id }) {
     try {
-      const html = await this.fetchHtml(id, { cache: false });
-      const bootstrap = this.playerBootstrap(html);
+      let videoPageUrl = id;
+      let html = await this.fetchHtml(videoPageUrl, { cache: false });
+      let bootstrap = this.playerBootstrap(html);
+
+      const canonicalFallback = subtitleCanonicalPlaybackUrl(videoPageUrl);
+      if ((!bootstrap.videoId || !bootstrap.mpu) && canonicalFallback) {
+        try {
+          const fallbackHtml = await this.fetchHtml(canonicalFallback, { cache: false });
+          const fallbackBootstrap = this.playerBootstrap(fallbackHtml);
+          if (fallbackBootstrap.videoId && fallbackBootstrap.mpu) {
+            logger.info(
+              {
+                provider: this.name,
+                subtitleUrl: sanitizeUrlForLogs(videoPageUrl),
+                canonicalUrl: sanitizeUrlForLogs(canonicalFallback),
+              },
+              'JAVHDPorn subtitle card recovered through canonical player page'
+            );
+            videoPageUrl = canonicalFallback;
+            html = fallbackHtml;
+            bootstrap = fallbackBootstrap;
+          }
+        } catch (error) {
+          logger.debug(
+            {
+              provider: this.name,
+              canonicalUrl: sanitizeUrlForLogs(canonicalFallback),
+              error: error.message,
+            },
+            'JAVHDPorn canonical subtitle fallback was unavailable'
+          );
+        }
+      }
+
       if (!bootstrap.videoId || !bootstrap.mpu) return { streams: [] };
 
-      const apiSources = await this.requestPlayerSources(id, bootstrap);
-      const media = await this.discoverMedia(apiSources, id);
+      const apiSources = await this.requestPlayerSources(videoPageUrl, bootstrap);
+      const media = await this.discoverMedia(apiSources, videoPageUrl);
       logger.debug(
         { provider: this.name, mediaCandidates: media.length },
         'JAVHDPorn media discovery completed'
@@ -908,6 +968,7 @@ create._test = {
   normalizePoster,
   normalizePosterCandidate,
   posterFromSrcset,
+  subtitleCanonicalPlaybackUrl,
   extractCatalogPoster,
   normalizeSourceValue,
   prioritizePlayerCandidates,
