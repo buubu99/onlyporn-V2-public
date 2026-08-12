@@ -7,7 +7,6 @@ const { parseAssignedObjectStringValues } = require('./js-literal');
 const { isBlockedSpankbangHtml } = require('./challenge-detection');
 const safariImpersonation = require('./safari-impersonation');
 const { assertSafeHttpsUrl, sanitizeUrlForLogs } = require('./url-security');
-const { filterCatalogResponse } = require('./search-relevance');
 const {
   cleanMediaUrl,
   extractResolution,
@@ -136,7 +135,6 @@ class SpankbangProvider extends Provider {
       !extra.search && !extra.genre && Number(extra.skip || 0) <= 0;
 
     const primary = await super.handleCatalog(args);
-    if (extra.search) return filterCatalogResponse(primary, extra.search);
     if (!defaultFirstPage || primary.metas.length) return primary;
 
     for (const genre of DEFAULT_CATALOG_FALLBACK_GENRES) {
