@@ -103,6 +103,8 @@ function sourceLabel(candidate) {
   return `${candidate.label || 'Direct'} MP4`;
 }
 
+const { filterCatalogResponse } = require('./search-relevance');
+
 class XvideosProvider extends Provider {
   constructor() {
     super('https://www.xvideos.com', 'xvideos', 50);
@@ -110,6 +112,12 @@ class XvideosProvider extends Provider {
 
   static create() {
     return new XvideosProvider();
+  }
+
+  async handleCatalog(args) {
+    const response = await super.handleCatalog(args);
+    const search = String(args?.extra?.search || '').trim();
+    return search ? filterCatalogResponse(response, search) : response;
   }
 
   async fetchHtml(url) {
