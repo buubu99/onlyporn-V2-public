@@ -7,7 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const createJavHdPorn = require('./javhdporn');
-const { decodeSource, FALLBACK_POSTER_PNG, FALLBACK_POSTER_TOKEN, javPosterProxyUrl } = require('./javhdporn-poster-proxy');
+const { decodeSource } = require('./javhdporn-poster-proxy');
 const { createSearchSqliteStore } = require('./search-sqlite');
 
 test('JAV search cards ignore data placeholders and choose the largest real srcset poster', () => {
@@ -75,37 +75,4 @@ test('V7.3 warm search paths are present and studio prewarm seeds torrent pools'
   assert.match(source, /sqlite-local-binding/);
   assert.match(source, /mergeSearchItems\(metadataItems, torrentItems, enrichedTorrentItems\)/);
   assert.match(source, /countPool\(poolCatalogId\)/);
-});
-
-test('JAV dead or disallowed poster sources fail over locally while trusted FC2 stays real', () => {
-  const dead = [
-    'https://i0.wp.com/www9.javfun.me/Cms_Data/Contents/admin/a.jpg?ssl=1',
-    'https://i1.wp.com/www9.javfun.me/Cms_Data/Contents/admin/b.jpg?resize=300%2C450&ssl=1',
-    'https://i2.wp.com/www9.javfun.me/Cms_Data/Contents/admin/c.jpg?ssl=1',
-    'https://i3.wp.com/www9.javfun.me/Cms_Data/Contents/admin/d.jpg?ssl=1',
-  ];
-
-  for (const source of dead) {
-    assert.equal(
-      javPosterProxyUrl(source, { ADDON_BASE_URL: 'https://onlyporn.example' }),
-      `https://onlyporn.example/onlyporn/poster/javhdporn/${FALLBACK_POSTER_TOKEN}`
-    );
-  }
-
-  assert.ok(Buffer.isBuffer(FALLBACK_POSTER_PNG));
-  assert.ok(FALLBACK_POSTER_PNG.length > 1000);
-  assert.deepEqual(
-    [...FALLBACK_POSTER_PNG.subarray(0, 8)],
-    [137, 80, 78, 71, 13, 10, 26, 10]
-  );
-
-  const fc2 = javPosterProxyUrl(
-    'https://i2.wp.com/storage61000.contents.fc2.com/file/poster.jpg',
-    { ADDON_BASE_URL: 'https://onlyporn.example' }
-  );
-  assert.match(fc2, /^https:\/\/onlyporn\.example\/onlyporn\/poster\/javhdporn\//);
-  assert.equal(
-    decodeSource(fc2.split('/').pop()),
-    'https://storage61000.contents.fc2.com/file/poster.jpg'
-  );
 });

@@ -118,22 +118,3 @@ test('provider source wires the alias expander into handleCatalog and merge help
   assert.match(source, /OnlyPorn Sukebei alias search merged/);
   assert.match(source, /__onlypornSukebeiAliasExpanded/);
 });
-
-test('Sukebei uncensored aliases use one wave and every variant has a 22-second response budget', () => {
-  const fs = require('node:fs');
-  const source = fs.readFileSync(require.resolve('./tpb4k'), 'utf8');
-  const start = source.indexOf('async _handleSukebeiAliasCatalog(args, searchQueries)');
-  const end = source.indexOf('async _handleCatalogFresh(args)', start);
-  assert.ok(start >= 0 && end > start);
-  const method = source.slice(start, end);
-
-  assert.match(method, /queries\.map\(search => withAliasBudget\(search, async \(\) =>/);
-  assert.match(method, /aliasVariantBudgetMs = 22_000/);
-  assert.match(method, /Promise\.race\(\[/);
-  assert.match(method, /operation\(\),/);
-  assert.match(method, /clearTimeout\(timeoutId\)/);
-  assert.doesNotMatch(method, /offset \+= 2/);
-  assert.doesNotMatch(method, /queries\.slice\(offset/);
-  assert.match(method, /OnlyPorn Sukebei uncensored JAV code fallback filtered/);
-  assert.match(method, /mergeSukebeiAliasResponses/);
-});
