@@ -531,10 +531,10 @@ test('Sukebei cards use the landscape presentation of the reference TPB4K addon'
     id: 'tpb4k.sukebei.top',
     extra: {},
   });
-  assert.equal(catalog.metas[0].posterShape, 'landscape');
+  assert.equal(catalog.metas[0].posterShape, 'poster');
 
   const meta = await provider.handleMeta({ type: 'movie', id: catalog.metas[0].id });
-  assert.equal(meta.meta.posterShape, 'landscape');
+  assert.equal(meta.meta.posterShape, 'poster');
 });
 
 test('Sukebei resolves an explicit main-file index instead of trusting debrid auto-selection', async () => {
