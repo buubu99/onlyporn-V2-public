@@ -213,5 +213,5 @@ test('Pornhub routes, manifest wiring, and release version are deterministic', (
 
   const pkg = require('../package.json');
   assert.equal(versionAtLeast(pkg.version, '2.6.0'), true);
-  assert.match(pkg.scripts['test:release'], /phase6\.test\.js/);
+  assert.equal(pkg.scripts['test:release'], 'npm test');
 });

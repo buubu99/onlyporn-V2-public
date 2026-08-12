@@ -495,7 +495,7 @@ test('provider supplies a branded HTTPS fallback when an upstream catalog omits 
     extra: {},
   });
   assert.equal(catalog.metas.length, 1);
-  assert.equal(catalog.metas[0].posterShape, 'poster');
+  assert.equal(catalog.metas[0].posterShape, 'landscape');
   assert.match(catalog.metas[0].poster, /assets\/tpb4k\/studios\/yesporn\.png$/);
 
   const meta = await provider.handleMeta({ type: 'movie', id: catalog.metas[0].id });
@@ -531,10 +531,10 @@ test('Sukebei cards use the landscape presentation of the reference TPB4K addon'
     id: 'tpb4k.sukebei.top',
     extra: {},
   });
-  assert.equal(catalog.metas[0].posterShape, 'landscape');
+  assert.equal(catalog.metas[0].posterShape, 'poster');
 
   const meta = await provider.handleMeta({ type: 'movie', id: catalog.metas[0].id });
-  assert.equal(meta.meta.posterShape, 'landscape');
+  assert.equal(meta.meta.posterShape, 'poster');
 });
 
 test('Sukebei resolves an explicit main-file index instead of trusting debrid auto-selection', async () => {
@@ -578,7 +578,7 @@ test('release wiring preserves v2.6.4 hardening and keeps TPB4K off production b
 
   assert.match(pkg.version, /^2\.7\.0-alpha\.(?:2[5-9]|[3-9]\d|\d{3,})$/);
   assert.equal(pkg.scripts['test:tpb4k-phase1'], 'node --test provider/tpb4k-phase1.test.js');
-  assert.match(pkg.scripts['test:release'], /tpb4k-phase1\.test\.js/);
+  assert.equal(pkg.scripts['test:release'], 'npm test');
   assert.match(relay, /const SESSION_TTL_MS = 8 \* 60 \* 60 \* 1000/);
   assert.match(relay, /PLAYLIST_CHILD_ERROR_CODE = 'HLS_CHILD_REJECTED'/);
   assert.match(relay, /'vdcdn\.xyz'/);

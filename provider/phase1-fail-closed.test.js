@@ -173,9 +173,7 @@ test('Hardening Phase 1 release wiring is deterministic and preserves prior repa
 
   assert.match(pkg.version, /^2\.7\.0-alpha\.(?:2[5-9]|[3-9]\d|\d{3,})$/);
   assert.equal(pkg.scripts['test:hardening1'], 'node --test provider/phase1-fail-closed.test.js');
-  assert.match(pkg.scripts['test:release'], /phase1-fail-closed\.test\.js/);
-  assert.match(pkg.scripts['test:release'], /phase0-hardening\.test\.js/);
-  assert.match(pkg.scripts['test:release'], /hotfix-2\.6\.2\.test\.js/);
+  assert.equal(pkg.scripts['test:release'], 'npm test');
   assert.match(relay, /PLAYLIST_CHILD_ERROR_CODE = 'HLS_CHILD_REJECTED'/);
   assert.doesNotMatch(relay, /catch\s*\{\s*return resolved;\s*\}/);
   assert.match(relay, /const SESSION_TTL_MS = 8 \* 60 \* 60 \* 1000/);

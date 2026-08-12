@@ -3,8 +3,9 @@ FROM ghcr.io/metatube-community/metatube-server@sha256:04d58879b76624e180cfdb24c
 FROM node:20-bookworm-slim
 RUN apt-get update   && apt-get install -y --no-install-recommends ca-certificates curl python3 python3-pip python3-venv procps   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
+COPY package.json package-lock.json /app/
+RUN npm ci --omit=dev --no-audit --no-fund
 COPY . /app
-RUN npm install --omit=dev --no-package-lock --no-audit --no-fund
 COPY --from=metatube /metatube-server /usr/local/bin/metatube-server
 RUN chmod 0755 /usr/local/bin/metatube-server /app/scripts/start-onlyporn-with-metatube.sh   && install -d -m 0700 /tmp/onlyporn-runtime /tmp/onlyporn-runtime/metatube /tmp/onlyporn-runtime/cache /tmp/onlyporn-runtime/logs /tmp/onlyporn-runtime/tmp
 ENV NODE_ENV=production

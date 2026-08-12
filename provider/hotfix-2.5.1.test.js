@@ -82,5 +82,5 @@ test('OnlyPorn retains the 2.5.1 Safari transport regression coverage', () => {
     major > 2 ||
       (major === 2 && (minor > 5 || (minor === 5 && patch >= 1)))
   );
-  assert.match(packageInfo.scripts['test:release'], /hotfix-2\.5\.1\.test\.js/);
+  assert.equal(packageInfo.scripts['test:release'], 'npm test');
 });

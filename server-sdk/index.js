@@ -25,6 +25,23 @@ function serveHTTP(addonInterface, opts = {}) {
         next();
     });
 
+    app.all('/media/:generation(g-[a-f0-9]{7,40})/:token/:filename?', (req, res) => {
+        let expectedGeneration = '';
+        try {
+            expectedGeneration = mediaRelay.mediaGeneration();
+        } catch {
+            res.status(500).type('text/plain').send('Media generation is misconfigured');
+            return;
+        }
+
+        if (!expectedGeneration || req.params.generation !== expectedGeneration) {
+            res.status(410).type('text/plain').send('Media generation is no longer available');
+            return;
+        }
+
+        mediaRelay.handleRequest(req, res);
+    });
+
     app.all('/media/:token/:filename?', mediaRelay.handleRequest);
 
     app.use('/:resource/:type/:id/:extra?.json', (req, res, next) => {

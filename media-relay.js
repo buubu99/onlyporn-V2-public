@@ -80,7 +80,22 @@ function getPublicBase() {
   return configuredPublicBase() || observedPublicBase;
 }
 
+function mediaGeneration(env = process.env) {
+  const configured = String(env.ONLYPORN_MEDIA_GENERATION || '').trim().toLowerCase();
+  if (!configured) return '';
+  const generation = configured.startsWith('g-') ? configured.slice(2) : configured;
+  if (!/^[a-f0-9]{7,40}$/.test(generation)) {
+    throw new Error(
+      'ONLYPORN_MEDIA_GENERATION must be a 7-40 character hexadecimal commit identifier'
+    );
+  }
+  return `g-${generation}`;
+}
+
 function mediaPathPrefix(env = process.env) {
+  const generation = mediaGeneration(env);
+  if (generation) return `/media/${generation}`;
+
   const slot = String(env.ONLYPORN_MEDIA_SLOT || '').trim().toLowerCase();
   if (!slot) return '/media';
   if (!/^(?:blue|green)$/.test(slot)) {
@@ -142,6 +157,17 @@ function filenameFor(kind) {
   if (kind === 'mp4') return 'video.mp4';
   if (kind === 'key') return 'key.bin';
   return 'segment.bin';
+}
+
+function relayContentType(entry = {}, upstreamValue = '') {
+  const upstream = String(upstreamValue || '').trim();
+  if (
+    entry.kind === 'mp4' &&
+    (!upstream || /^(?:application\/(?:force-download|octet-stream)|binary\/octet-stream)(?:;|$)/i.test(upstream))
+  ) {
+    return 'video/mp4';
+  }
+  return upstream;
 }
 
 const KIND_TO_CODE = Object.freeze({
@@ -532,7 +558,10 @@ async function pipeYespornResponse(
       'last-modified',
     ]
   ) {
-    const value = response.headers.get(name);
+    const upstreamValue = response.headers.get(name);
+    const value = name === 'content-type'
+      ? relayContentType(entry, upstreamValue)
+      : upstreamValue;
     if (value != null) {
       res.setHeader(name, value);
     }
@@ -869,7 +898,9 @@ async function handleRequest(req, res) {
       'last-modified',
     ];
     for (const name of forwardedHeaders) {
-      const value = response.headers[name];
+      const value = name === 'content-type'
+        ? relayContentType(entry, response.headers[name])
+        : response.headers[name];
       if (value != null) res.setHeader(name, value);
     }
     res.setHeader('Cache-Control', 'no-store, max-age=0');
@@ -899,11 +930,13 @@ async function handleRequest(req, res) {
 module.exports = {
   getPublicBase,
   handleRequest,
+  mediaGeneration,
   register,
   setPublicBase,
   _test: {
     entries,
     MAX_SESSIONS,
+    mediaGeneration,
     mediaPathPrefix,
     PLAYLIST_CHILD_ERROR_CODE,
     SESSION_TTL_MS,
@@ -915,6 +948,7 @@ module.exports = {
     kindFromUrl,
     normalizePublicBase,
     pngPayloadOffset,
+    relayContentType,
     relayChild,
     resolveRelayEntry,
     rewritePlaylist,

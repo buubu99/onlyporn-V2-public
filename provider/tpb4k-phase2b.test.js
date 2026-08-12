@@ -82,5 +82,5 @@ test('all 27 OnlyPorn catalog IDs remain unique and unified-resolution', () => {
 
 test('Phase 2B release wiring retains the TPB torrent-index adapter', () => {
   assert.match(require('../package.json').version, /^2\.7\.0-alpha\.(?:2[5-9]|[3-9]\d|\d{3,})$/);
-  assert.match(require('../package.json').scripts['test:release'], /tpb4k-phase2b\.test\.js/);
+  assert.equal(require('../package.json').scripts['test:release'], 'npm test');
 });

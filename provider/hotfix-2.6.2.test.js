@@ -227,9 +227,9 @@ test('OnlyPorn 2.6.2 wires the isolated vdcdn hotfix into release validation', (
   const relay = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
   assert.match(pkg.version, /^2\.7\.0-alpha\.(?:2[5-9]|[3-9]\d|\d{3,})$/);
   assert.match(pkg.scripts['test:hotfix262'], /hotfix-2\.6\.2\.test\.js/);
-  assert.match(pkg.scripts['test:release'], /hotfix-2\.6\.2\.test\.js/);
+  assert.equal(pkg.scripts['test:release'], 'npm test');
   assert.match(relay, /'vdcdn\.xyz'/);
   assert.match(relay, /JAVHDPorn image-labelled MPEG-TS segment normalized/);
   assert.equal(relay.includes('const SESSION_TTL_MS = 8 * 60 * 60 * 1000;'), true);
-  assert.match(pkg.scripts['test:release'], /phase0-hardening\.test\.js/);
+  assert.equal(pkg.scripts['test:release'], 'npm test');
 });

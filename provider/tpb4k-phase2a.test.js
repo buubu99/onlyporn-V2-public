@@ -311,7 +311,7 @@ test('Phase 2A release wiring preserves 27 internal catalogs, 36 feature catalog
   const relay = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
   assert.match(pkg.version, /^2\.7\.0-alpha\.(?:2[5-9]|[3-9]\d|\d{3,})$/);
   assert.equal(catalogDefinitions.length, 27);
-  assert.match(pkg.scripts['test:release'], /tpb4k-phase2a\.test\.js/);
+  assert.equal(pkg.scripts['test:release'], 'npm test');
   assert.match(relay, /const SESSION_TTL_MS = 8 \* 60 \* 60 \* 1000/);
   assert.match(relay, /PLAYLIST_CHILD_ERROR_CODE = 'HLS_CHILD_REJECTED'/);
   assert.match(relay, /'vdcdn\.xyz'/);

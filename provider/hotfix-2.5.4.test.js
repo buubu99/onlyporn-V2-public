@@ -63,5 +63,5 @@ test('JWPlayer capture emits a marked result and exits immediately', () => {
 test('OnlyPorn retains hotfix 2.5.4 coverage in later releases', () => {
   const pkg = require('../package.json');
   assert.equal(versionAtLeast(pkg.version, '2.5.4'), true);
-  assert.match(pkg.scripts['test:release'], /hotfix-2\.5\.4\.test\.js/);
+  assert.equal(pkg.scripts['test:release'], 'npm test');
 });

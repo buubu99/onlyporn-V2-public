@@ -250,6 +250,20 @@ function cacheState(value) {
   return 'unknown';
 }
 
+function codecCompatibility(...values) {
+  const text = cleanText(values.filter(Boolean).join(' ')).toLowerCase();
+  if (/(?:^|[^a-z0-9])(?:av1|av01)(?:[^a-z0-9]|$)/i.test(text)) {
+    return Object.freeze({ codec: 'av1', rank: 0 });
+  }
+  if (/(?:^|[^a-z0-9])(?:hevc|h\.?265|x265)(?:[^a-z0-9]|$)/i.test(text)) {
+    return Object.freeze({ codec: 'hevc', rank: 1 });
+  }
+  if (/(?:^|[^a-z0-9])(?:avc|h\.?264|x264)(?:[^a-z0-9]|$)/i.test(text)) {
+    return Object.freeze({ codec: 'h264', rank: 3 });
+  }
+  return Object.freeze({ codec: 'unknown', rank: 2 });
+}
+
 function candidateFingerprint(candidate) {
   if (candidate.infoHash) return `torrent:${candidate.infoHash}:${candidate.fileIdx ?? ''}`;
   if (candidate.url) return `url:${candidate.url}`;
@@ -271,6 +285,7 @@ function normalizeCandidate(input = {}) {
   const validated = input.validated === true;
   const title = cleanText(input.title || magnet?.displayName || input.name);
   const filename = cleanText(input.filename || magnet?.displayName || title);
+  const codec = codecCompatibility(filename, title, input.quality, input.codec);
   const resolution = normalizeResolution(input.resolution, input.quality, title, direct.url, debridUrl);
   const trackers = [...new Set([
     ...(Array.isArray(input.trackers) ? input.trackers : []),
@@ -315,6 +330,8 @@ function normalizeCandidate(input = {}) {
     resolution,
     resolutionHeight: resolutionHeight(resolution),
     quality: cleanText(input.quality),
+    codec: codec.codec,
+    codecCompatibilityRank: codec.rank,
     seeders: normalizeSeeders(input.seeders),
     size: normalizeSize(input.sizeBytes ?? input.size),
     infoHash,
@@ -364,6 +381,7 @@ function candidateScore(candidate) {
 
   return (
     readinessTier * 10_000_000_000_000 +
+    candidate.codecCompatibilityRank * 1_000_000_000_000 +
     candidate.resolutionHeight * 1_000_000_000 +
     kindPreference * 100_000_000 +
     Math.min(candidate.seeders, 99_999) * 1_000 +
@@ -495,6 +513,7 @@ module.exports = {
   DEFAULT_TRACKERS,
   cacheState,
   candidateScore,
+  codecCompatibility,
   classifyDirectUrl,
   dedupeCandidates,
   indexerReliability,

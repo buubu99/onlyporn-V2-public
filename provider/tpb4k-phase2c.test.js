@@ -233,7 +233,7 @@ test('PornRips resolves its authoritative torrent into a real info hash for AIOS
 
 test('HentaiMama exact series and episode behavior is covered by the alpha.17 regression suite', () => {
   const pkg = require('../package.json');
-  assert.match(pkg.scripts['test:release'], /tpb4k-hentaimama-series\.test\.js/);
+  assert.equal(pkg.scripts['test:release'], 'npm test');
 });
 test('live-shaped selectors accept only exact YesPorn and HentaiMama content paths', () => {
   const yesporn = parseYespornCatalog(`${yespornList}<div class="thumb item"><a href="/videos/not-valid/">Navigation</a></div>`);
@@ -290,7 +290,7 @@ test('alpha.14 release wiring keeps native sources while studio catalogs are met
   const root = path.join(__dirname, '..');
   const pkg = require('../package.json');
   assert.match(pkg.version, /^2\.7\.0-alpha\.(?:2[5-9]|[3-9]\d|\d{3,})$/);
-  assert.match(pkg.scripts['test:release'], /tpb4k-phase2c\.test\.js/);
+  assert.equal(pkg.scripts['test:release'], 'npm test');
   assert.equal(pkg.scripts['smoke:tpb4k-native'], 'node scripts/tpb4k-native-smoke.js');
   assert.equal(pkg.scripts['smoke:tpb4k-hentai'], 'node scripts/tpb4k-hentai-live-smoke.js');
   for (const name of ['.env.example', 'README.md', 'provider/tpb4k/config.js']) {

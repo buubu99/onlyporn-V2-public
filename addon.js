@@ -10,6 +10,7 @@ const {
 const { catalogs: sourceCatalogs } = require('./catalog');
 const { normalizeCatalogFacetArgs } = require('./catalog/discovery-profiles');
 const logger = require('./logger');
+const { normalizeStreamResponse } = require('./provider/stream-contract');
 const {
   filterCatalogResponse,
   filterManifestCatalogs,
@@ -28,7 +29,7 @@ const manifest = {
   name: 'OnlyPorn',
   description: packageInfo.description,
 
-  icon: 'https://raw.githubusercontent.com/Mast3rCh1ef/addon-asset/main/op.png',
+  logo: 'https://raw.githubusercontent.com/Mast3rCh1ef/addon-asset/main/op.png',
   background:
     'https://cdni.pornpics.com/1280/5/188/87261714/87261714_013_3f11.jpg',
 
@@ -42,6 +43,7 @@ const manifest = {
 
   behaviorHints: {
     adult: true,
+    p2p: true,
   },
 };
 
@@ -106,7 +108,7 @@ builder.defineStreamHandler(async args => {
     const response = await provider.handleStream(args);
     const filtered = filterStreamResponse(response, contentFilter);
     logFiltered('stream', args, filtered);
-    return filtered.response;
+    return normalizeStreamResponse(filtered.response);
   } catch (error) {
     logger.error({ error: error.message, contentId: args.id }, 'Stream handler failed');
     return { streams: [] };
