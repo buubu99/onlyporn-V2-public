@@ -126,6 +126,44 @@ test('vdcdn master rewriting preserves custom token lines and relays image-named
   assert.equal(mediaRelay._test.entries.size, 1, 'segment child token must reuse one session');
 });
 
+test('vdcdn root snapshot remains playable after its one-use upstream master expires', async () => {
+  mediaRelay._test.entries.clear();
+  const originalRequest = axios.request;
+  let upstreamRequests = 0;
+  axios.request = async options => {
+    upstreamRequests += 1;
+    assert.equal(options.responseType, 'text');
+    return {
+      status: upstreamRequests === 1 ? 200 : 403,
+      data: upstreamRequests === 1
+        ? '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000\n360p/index.m3u8\n'
+        : 'expired',
+      headers: { 'content-type': 'application/vnd.apple.mpegurl' },
+    };
+  };
+
+  try {
+    const relayUrl = await mediaRelay.registerHlsSnapshot({
+      url: 'https://akamai-cache-p01.vdcdn.xyz/hls4/short-lived/master.m3u8',
+      headers: { Referer: 'https://video.javhdporn.net/p/fixture' },
+      provider: 'javhdporn',
+    });
+    const token = tokenFromRelayUrl(relayUrl);
+    const response = responseCapture();
+    await mediaRelay.handleRequest(
+      { method: 'GET', params: { token }, headers: {} },
+      response
+    );
+
+    assert.equal(response.statusCode, 200);
+    assert.match(response.body.toString(), /^#EXTM3U/);
+    assert.match(response.body.toString(), /\/index\.m3u8/);
+    assert.equal(upstreamRequests, 1, 'serving the root must use the preserved snapshot');
+  } finally {
+    axios.request = originalRequest;
+  }
+});
+
 test('raw MPEG-TS disguised as image/webp remains byte-identical', () => {
   const transport = transportStream();
   const normalized = mediaRelay._test.normalizeJavTransportSegment(transport);

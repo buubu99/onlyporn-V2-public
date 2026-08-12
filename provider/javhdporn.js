@@ -872,14 +872,35 @@ class JavHdPornProvider extends Provider {
     const name = `JAV HD Porn ${resolution || (candidate.kind === 'hls' ? 'HLS' : 'MP4')}`;
 
     try {
-      return {
-        type: Provider.TYPE,
-        url: mediaRelay.register({
+      let relayUrl;
+      let candidateHost = '';
+      try {
+        candidateHost = new URL(candidate.url).hostname.toLowerCase();
+      } catch {
+        // Protected relay validation below will reject malformed URLs.
+      }
+      const preserveExpiringRoot =
+        candidate.kind === 'hls' &&
+        (candidateHost === 'vdcdn.xyz' || candidateHost.endsWith('.vdcdn.xyz'));
+
+      if (preserveExpiringRoot) {
+        relayUrl = await mediaRelay.registerHlsSnapshot({
+          url: candidate.url,
+          headers,
+          provider: this.name,
+        });
+      } else {
+        relayUrl = mediaRelay.register({
           url: candidate.url,
           headers,
           provider: this.name,
           kind: candidate.kind,
-        }),
+        });
+      }
+
+      return {
+        type: Provider.TYPE,
+        url: relayUrl,
         name,
         behaviorHints: { notWebReady: false },
       };

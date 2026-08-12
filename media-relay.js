@@ -227,6 +227,47 @@ function register({ url, headers = {}, provider, kind, ttlMs = SESSION_TTL_MS })
   return `${publicBase}${mediaPathPrefix()}/${entry.sessionToken}/${filenameFor(entry.kind, entry.provider)}`;
 }
 
+async function registerHlsSnapshot({
+  url,
+  headers = {},
+  provider,
+  ttlMs = SESSION_TTL_MS,
+}) {
+  const publicBase = getPublicBase();
+  if (!publicBase) throw new Error('Media relay public base URL is not initialized');
+
+  const entry = createSessionEntry({ url, headers, provider, kind: 'hls', ttlMs });
+  try {
+    const { response, finalUrl } = await upstreamRequest(entry, {
+      method: 'GET',
+      text: true,
+    });
+    if (response.status < 200 || response.status >= 300) {
+      throw new Error(`Upstream playlist snapshot failed with HTTP ${response.status}`);
+    }
+
+    const content = String(response.data || '');
+    if (!content.includes('#EXTM3U')) {
+      throw new Error('Upstream playlist snapshot was not HLS');
+    }
+
+    const rewritten = rewritePlaylist(content, finalUrl, entry);
+    entry.playlistSnapshots = new Map([[entry.url, rewritten]]);
+    logger.info(
+      {
+        provider: entry.provider,
+        upstreamHostname: relayUpstreamHostname(entry),
+        bytes: Buffer.byteLength(rewritten),
+      },
+      'Expiring HLS root playlist preserved'
+    );
+    return `${publicBase}${mediaPathPrefix()}/${entry.sessionToken}/${filenameFor(entry.kind, entry.provider)}`;
+  } catch (error) {
+    entries.delete(entry.sessionToken);
+    throw error;
+  }
+}
+
 function ensureSessionEntry(entry, parentUrl) {
   if (entry?.sessionToken) {
     const stored = entries.get(entry.sessionToken);
@@ -793,6 +834,19 @@ async function handleRequest(req, res) {
     }
 
     if (entry.kind === 'hls') {
+      const playlistSnapshot = entry.playlistSnapshots?.get(entry.url);
+      if (playlistSnapshot) {
+        res.status(200);
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-store, max-age=0');
+        res.setHeader('Pragma', 'no-cache');
+        res.setHeader('Accept-Ranges', 'none');
+        res.setHeader('Content-Length', Buffer.byteLength(playlistSnapshot));
+        if (req.method === 'HEAD') res.end();
+        else res.end(playlistSnapshot);
+        return;
+      }
+
       const { response, finalUrl } = await upstreamRequest(entry, {
         method: 'GET',
         text: true,
@@ -933,6 +987,7 @@ module.exports = {
   handleRequest,
   mediaGeneration,
   register,
+  registerHlsSnapshot,
   setPublicBase,
   _test: {
     entries,
