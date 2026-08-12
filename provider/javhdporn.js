@@ -187,6 +187,13 @@ function extractCatalogPoster($, root, pageUrl) {
   return DEFAULT_POSTER;
 }
 
+function preferRealPosterCards(items) {
+  const cards = Array.isArray(items) ? items : [];
+  const real = cards.filter(item => !/\/fallback\.png$/i.test(String(item?.poster || '')));
+  const minimumReal = Math.min(8, Math.ceil(cards.length / 2));
+  return real.length >= minimumReal ? real : cards;
+}
+
 function structuredDataFromPage($) {
   return parseStructuredDataBlocks(
     $('script[type="application/ld+json"]')
@@ -556,7 +563,21 @@ class JavHdPornProvider extends Provider {
       );
     });
 
-    return results.slice(0, this.limit);
+    const capped = results.slice(0, this.limit);
+    const withRealPosters = preferRealPosterCards(capped);
+    if (withRealPosters.length !== capped.length) {
+      logger.info(
+        {
+          provider: this.name,
+          pageUrl: sanitizeUrlForLogs(pageUrl),
+          cards: capped.length,
+          realPosterCards: withRealPosters.length,
+          deadPosterCardsRemoved: capped.length - withRealPosters.length,
+        },
+        'JAVHDPorn dead upstream poster cards removed while preserving healthy results'
+      );
+    }
+    return withRealPosters;
   }
 
   metadataFromPage(id, html) {
@@ -623,8 +644,26 @@ class JavHdPornProvider extends Provider {
   }
 
   async getMetadata({ id }) {
-    const html = await this.fetchHtml(id);
-    return this.metadataFromPage(id, html);
+    let metadataPageUrl = id;
+    let html;
+    try {
+      html = await this.fetchHtml(metadataPageUrl);
+    } catch (error) {
+      const canonicalFallback = subtitleCanonicalPlaybackUrl(metadataPageUrl);
+      if (!canonicalFallback) throw error;
+      html = await this.fetchHtml(canonicalFallback, { cache: false });
+      logger.info(
+        {
+          provider: this.name,
+          subtitleUrl: sanitizeUrlForLogs(metadataPageUrl),
+          canonicalUrl: sanitizeUrlForLogs(canonicalFallback),
+          originalError: error.message,
+        },
+        'JAVHDPorn missing subtitle metadata recovered through canonical page'
+      );
+      metadataPageUrl = canonicalFallback;
+    }
+    return this.metadataFromPage(metadataPageUrl, html);
   }
 
   playerBootstrap(html) {
@@ -952,11 +991,21 @@ class JavHdPornProvider extends Provider {
   async processStreams({ id }) {
     try {
       let videoPageUrl = id;
-      let html = await this.fetchHtml(videoPageUrl, { cache: false });
-      let bootstrap = this.playerBootstrap(html);
-
       const canonicalFallback = subtitleCanonicalPlaybackUrl(videoPageUrl);
-      if ((!bootstrap.videoId || !bootstrap.mpu) && canonicalFallback) {
+      let html;
+      let initialFetchError;
+      try {
+        html = await this.fetchHtml(videoPageUrl, { cache: false });
+      } catch (error) {
+        initialFetchError = error;
+        if (!canonicalFallback) throw error;
+      }
+
+      let bootstrap = this.playerBootstrap(html || '');
+      if (
+        canonicalFallback &&
+        (initialFetchError || !bootstrap.videoId || !bootstrap.mpu)
+      ) {
         try {
           const fallbackHtml = await this.fetchHtml(canonicalFallback, { cache: false });
           const fallbackBootstrap = this.playerBootstrap(fallbackHtml);
@@ -966,6 +1015,7 @@ class JavHdPornProvider extends Provider {
                 provider: this.name,
                 subtitleUrl: sanitizeUrlForLogs(videoPageUrl),
                 canonicalUrl: sanitizeUrlForLogs(canonicalFallback),
+                originalError: initialFetchError?.message,
               },
               'JAVHDPorn subtitle card recovered through canonical player page'
             );
@@ -1021,6 +1071,7 @@ create._test = {
   normalizePoster,
   normalizePosterCandidate,
   posterFromSrcset,
+  preferRealPosterCards,
   subtitleCanonicalPlaybackUrl,
   extractCatalogPoster,
   normalizeSourceValue,

@@ -64,6 +64,24 @@ test('JAV DMM search cards keep their real poster and are never deleted', () => 
   );
 });
 
+test('JAV result pages hide dead poster cards only when enough real cards remain', () => {
+  const real = Array.from({ length: 8 }, (_, index) => ({
+    id: `real-${index}`,
+    poster: `https://onlyporn.example/onlyporn/poster/javhdporn/real-${index}`,
+  }));
+  const dead = Array.from({ length: 8 }, (_, index) => ({
+    id: `dead-${index}`,
+    poster: 'https://onlyporn.example/onlyporn/poster/javhdporn/fallback.png',
+  }));
+
+  assert.deepEqual(createJavHdPorn._test.preferRealPosterCards([...real, ...dead]), real);
+  assert.deepEqual(
+    createJavHdPorn._test.preferRealPosterCards([real[0], ...dead]),
+    [real[0], ...dead],
+    'a narrow search must not disappear just because JAVHDPorn lost its artwork'
+  );
+});
+
 test('search SQLite exposes live pool count and catalog rows without touching MetaTube', async t => {
   const root = fs.mkdtempSync('/tmp/onlyporn-search-v73-');
   const env = {

@@ -287,6 +287,45 @@ test('subtitle cards without an MPU recover through the canonical JAV player pag
   assert.deepEqual(fetched, [subtitleUrl, canonicalUrl]);
 });
 
+test('subtitle cards whose advertised page is gone recover metadata and playback canonically', async () => {
+  const provider = createJavHdPorn();
+  const subtitleUrl = 'https://www.javhdporn.net/video/start-269-sub/';
+  const canonicalUrl = 'https://www.javhdporn.net/video/start-269/';
+  const canonicalHtml = `
+    <html>
+      <head>
+        <meta property="og:title" content="START-269" />
+        <meta property="og:image" content="https://pics.pornfhd.com/start-269.jpg" />
+      </head>
+      <body>
+        <div id="video-player-area" data-video-id="679447"></div>
+        <div id="video-player" data-mpu="canonical-payload" data-ver="2"></div>
+      </body>
+    </html>`;
+  const fetched = [];
+
+  provider.fetchHtml = async url => {
+    fetched.push(url);
+    if (url === subtitleUrl) throw new Error('HTTP 404');
+    assert.equal(url, canonicalUrl);
+    return canonicalHtml;
+  };
+  provider.requestPlayerSources = async url => {
+    assert.equal(url, canonicalUrl);
+    return [];
+  };
+  provider.discoverMedia = async (_sources, url) => {
+    assert.equal(url, canonicalUrl);
+    return [];
+  };
+
+  const metadata = await provider.getMetadata({ id: subtitleUrl });
+  assert.equal(metadata.name, 'START-269');
+  assert.equal(metadata.id, canonicalUrl);
+  assert.deepEqual(await provider.processStreams({ id: subtitleUrl }), { streams: [] });
+  assert.deepEqual(fetched, [subtitleUrl, canonicalUrl, subtitleUrl, canonicalUrl]);
+});
+
 test('disguised JAV transport decoding from position 32 remains active', () => {
   const source = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
   assert.match(source, /tiktokcdn\.com/);
