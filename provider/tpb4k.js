@@ -128,24 +128,6 @@ function resolvedPoster(item, config = {}, catalogId = '') {
   return poster || safePoster(fallbackPosterUrl(fallbackKey(item), config.posterAssetBaseUrl));
 }
 function resolvedPosterShape(item = {}, catalogId = '') {
-  const normalizedCatalogId = String(catalogId || item?.catalogId || '');
-  const posterUrl = String(item?.poster || '');
-
-  // Native Stremio clients honor posterShape more strictly than WebStremio.
-  // These are measured, systemic source contracts from V9 rather than guesses.
-  if (normalizedCatalogId === 'tpb4k.sukebei.top') return 'poster';
-  if (normalizedCatalogId === 'tpb4k.yesporn.recent') return 'landscape';
-
-  // HentaiMama is normally portrait, but V9 measured specific 3D still-frame
-  // assets as landscape. Correct only those observed URL forms.
-  if (normalizedCatalogId.startsWith('tpb4k.hentai.')
-      && (/_snapshot_/i.test(posterUrl) || /\/3d1_poster\.jpg(?:$|\?)/i.test(posterUrl))) {
-    return 'landscape';
-  }
-
-  // Studio direct "wide_" assets are landscape while theporndb 800x1200
-  // derivatives remain portrait. Never force an entire studio to one shape.
-  if (/\/wide_/i.test(posterUrl) || /\/390x218\//i.test(posterUrl)) return 'landscape';
   return item.source === 'sukebei' || PLAYABILITY_GATED_CATALOGS.has(catalogId) ? 'landscape' : 'poster';
 }
 function torrentBundle(item = {}) {
@@ -699,7 +681,7 @@ class Tpb4kProvider {
       : definition.id;
 
     const [cachedPool, poolCount] = await Promise.all([
-      this.searchStore.listPool(poolCatalogId, poolLimit),
+      this.searchStore.searchPool(poolCatalogId, query, poolLimit),
       this.searchStore.countPool(poolCatalogId),
     ]);
 
@@ -725,7 +707,7 @@ class Tpb4kProvider {
       const torrentPool = allPool.filter(item => torrentBundle(item).length > 0);
       const matchingMetadata = rankSearchItems(metadataPool, query);
       const matchingTorrents = rankSearchItems(torrentPool, query);
-      const poolWarm = allPool.length >= 80 || (metadataPool.length >= 20 && torrentPool.length >= 20);
+      const poolWarm = metadataPool.length >= 20 && torrentPool.length >= 20;
 
       if (alreadyPlayable.length) {
         rawItems = alreadyPlayable.slice(0, 40);
@@ -791,13 +773,8 @@ class Tpb4kProvider {
       }
     } else if (definition.id === 'tpb4k.sukebei.top') {
       const cachedMatches = rankSearchItems(cachedPool, query);
-      if (cachedMatches.length) {
+      if (cachedMatches.length >= 4) {
         rawItems = cachedMatches.slice(0, 24);
-      } else if (poolCount >= 80) {
-        // A mature persistent Sukebei pool makes an interactive miss authoritative.
-        // Do not hold Stremio for a synchronous network refresh merely because an
-        // arbitrary English keyword is absent locally.
-        searchMode = 'sqlite-warm-miss';
       } else {
         searchMode = 'sukebei-upstream-query';
         const fetched = await this._withSearchNetworkSlot(() => adapter.catalog({
