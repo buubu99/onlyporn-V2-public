@@ -95,6 +95,20 @@ test('release and manifest contracts include every test, P2P disclosure, and sta
   assert.match(addon, /behaviorHints:\s*\{[\s\S]{0,100}adult:\s*true,[\s\S]{0,100}p2p:\s*true/);
 });
 
+test('production npm install receives every postinstall input before npm ci runs', () => {
+  const dockerfile = fs.readFileSync(path.join(__dirname, '..', 'Dockerfile'), 'utf8');
+  const npmCiAt = dockerfile.indexOf('RUN npm ci --omit=dev --no-audit --no-fund');
+  assert.ok(npmCiAt > 0, 'Dockerfile must use the reproducible npm ci install');
+  assert.ok(
+    dockerfile.indexOf('COPY package.json package-lock.json requirements.txt /app/') < npmCiAt,
+    'requirements.txt must exist before the Python postinstall runs'
+  );
+  assert.ok(
+    dockerfile.indexOf('COPY scripts/install-python-deps.js /app/scripts/install-python-deps.js') < npmCiAt,
+    'the Python dependency installer must exist before the npm postinstall runs'
+  );
+});
+
 test('server owns immutable generation paths and rejects requests for other generations', () => {
   const server = fs.readFileSync(path.join(__dirname, '..', 'server-sdk', 'index.js'), 'utf8');
   assert.match(server, /\/media\/:generation\(g-\[a-f0-9\]\{7,40\}\)\/:token/);

@@ -3,7 +3,8 @@ FROM ghcr.io/metatube-community/metatube-server@sha256:04d58879b76624e180cfdb24c
 FROM node:20-bookworm-slim
 RUN apt-get update   && apt-get install -y --no-install-recommends ca-certificates curl python3 python3-pip python3-venv procps   && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-COPY package.json package-lock.json /app/
+COPY package.json package-lock.json requirements.txt /app/
+COPY scripts/install-python-deps.js /app/scripts/install-python-deps.js
 RUN npm ci --omit=dev --no-audit --no-fund
 COPY . /app
 COPY --from=metatube /metatube-server /usr/local/bin/metatube-server
