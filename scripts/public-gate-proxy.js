@@ -33,8 +33,8 @@ function readValidMarker() {
     if (
       marker?.ready === true &&
       marker?.gate === 'catalog-prewarm-success' &&
-      Number(marker?.activeCatalogs) === 34 &&
-      Number(marker?.healthyCatalogs) === 34 &&
+      Number(marker?.activeCatalogs) === 33 &&
+      Number(marker?.healthyCatalogs) === 33 &&
       Array.isArray(marker?.missingCatalogs) &&
       marker.missingCatalogs.length === 0 &&
       marker?.sukebei?.healthy === true &&
@@ -63,7 +63,7 @@ function handleReady(request, response) {
     sendJson(response, 503, {
       ready: false,
       gate: 'catalog-prewarm-success',
-      waitingFor: '34/34 prewarm + strict Sukebei MetaTube + complete Sukebei Hentai SQLite index',
+      waitingFor: '33/33 prewarm + strict Sukebei MetaTube + complete Sukebei Hentai SQLite index',
     }, request.method === 'HEAD');
     return;
   }
