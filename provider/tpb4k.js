@@ -915,13 +915,27 @@ class Tpb4kProvider {
       ? [uncensoredCodeSearch]
       : Array.from(new Set((searchQueries || []).filter(Boolean))).slice(0, 6);
     const responses = [];
+    const aliasOverallBudgetMs = 27_000;
+    const aliasUsefulGraceMs = 500;
+    const aliasWaveStaggerMs = 1_500;
+    const aliasResponses = new Array(queries.length);
 
-    // Two at a time avoids a six-request burst against Sukebei while still
-    // keeping the expanded search inside the existing Stremio/AIO timeout budget.
-    for (let offset = 0; offset < queries.length; offset += 2) {
-      const batch = queries.slice(offset, offset + 2);
+    let resolveFirstUseful;
+    let firstUsefulResolved = false;
+    const firstUsefulPromise = new Promise(resolve => {
+      resolveFirstUseful = resolve;
+    });
 
-      const batchResponses = await Promise.all(batch.map(async search => {
+    // Keep the proven two-at-a-time pressure profile, but overlap the three
+    // waves so total latency is not the sum of three independent slow waves.
+    // Existing per-alias behavior below remains byte-for-byte intact.
+    const tasks = queries.map((search, index) => (async () => {
+      const wave = Math.floor(index / 2);
+      if (wave > 0) {
+        await new Promise(resolve => setTimeout(resolve, wave * aliasWaveStaggerMs));
+      }
+
+      const response = await (async () => {
         try {
           const response = await this.handleCatalog({
             ...args,
@@ -999,10 +1013,49 @@ class Tpb4kProvider {
 
           return { metas: [] };
         }
-      }));
+      })();
 
-      responses.push(...batchResponses);
+      aliasResponses[index] = response;
+
+      if (
+        !firstUsefulResolved &&
+        Array.isArray(response?.metas) &&
+        response.metas.length > 0
+      ) {
+        firstUsefulResolved = true;
+        resolveFirstUseful();
+      }
+
+      return response;
+    })());
+
+    // allSettled is attached immediately so late tasks cannot become unhandled
+    // if the method returns at the overall deadline.
+    const allDone = Promise.allSettled(tasks).then(() => 'all');
+
+    let deadlineId = null;
+    const deadline = new Promise(resolve => {
+      deadlineId = setTimeout(() => resolve('deadline'), aliasOverallBudgetMs);
+    });
+
+    const winner = await Promise.race([
+      allDone,
+      firstUsefulPromise.then(() => 'useful'),
+      deadline,
+    ]);
+
+    // Once useful data exists, allow a very small grace period for siblings
+    // that are already about to finish, then merge only completed responses.
+    if (winner === 'useful') {
+      await Promise.race([
+        allDone,
+        new Promise(resolve => setTimeout(resolve, aliasUsefulGraceMs)),
+      ]);
     }
+
+    if (deadlineId) clearTimeout(deadlineId);
+
+    responses.push(...aliasResponses.filter(Boolean));
 
     const merged = mergeSukebeiAliasResponses(responses, requestedSkip, pageSize);
 
