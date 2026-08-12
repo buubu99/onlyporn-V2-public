@@ -1,6 +1,5 @@
 const shuffle = require('fisher-yates');
 const { applyDiscoveryProfile } = require('./discovery-profiles');
-const porntrexCatalog = require('./porntrex');
 const { spankbangCatalogs } = require('./spankbang');
 const xhamsterCatalogs = require('./xhamster');
 const { catalogs: epornerCatalogs } = require('./eporner');
@@ -22,7 +21,6 @@ function compactCatalogName(value) {
 
 const catalogNames = [
   'spankbang',
-  'porntrex',
   'xhamster',
   'eporner',
   'xvideos',
@@ -105,7 +103,6 @@ const legacyCatalogs = [
   ...epornerCatalogs,
   ...spankbangCatalogs,
   ...xhamsterCatalogs,
-  porntrexCatalog,
   xvideosCatalog,
   xnxxCatalog,
   javhdpornCatalog,
