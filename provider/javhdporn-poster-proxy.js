@@ -238,6 +238,7 @@ module.exports = {
   encodeSource,
   installJavHdPornPosterProxyRoute,
   javPosterProxyUrl,
+  loadImage,
   normalizeSourceUrl,
   publicBase,
 };

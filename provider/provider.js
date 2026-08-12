@@ -401,7 +401,11 @@ class Provider {
       const parsed = this.getCatalogMetas.length >= 2
         ? this.getCatalogMetas(html, url)
         : this.getCatalogMetas(html);
-      const metas = (Array.isArray(parsed) ? parsed : []).map(item => ({
+      const parsedMetas = Array.isArray(parsed) ? parsed : [];
+      const processed = typeof this.postProcessCatalogMetas === 'function'
+        ? await this.postProcessCatalogMetas(parsedMetas, { args, url })
+        : parsedMetas;
+      const metas = (Array.isArray(processed) ? processed : []).map(item => ({
         ...item,
         id: this.toStremioId(item.id),
       }));

@@ -1,6 +1,10 @@
 const { load } = require('cheerio');
 const logger = require('../logger');
-const { javPosterProxyUrl } = require('./javhdporn-poster-proxy');
+const {
+  decodeSource: decodePosterSource,
+  javPosterProxyUrl,
+  loadImage: loadPosterImage,
+} = require('./javhdporn-poster-proxy');
 const BoundedTtlCache = require('./cache');
 const mediaRelay = require('../media-relay');
 const { meta } = require('../model');
@@ -138,6 +142,9 @@ function posterFromSrcset(value, baseUrl) {
 
 function extractCatalogPoster($, root, pageUrl) {
   const image = root.find('img').first();
+  const primarySrc = normalizePosterCandidate(image.attr('src'), pageUrl);
+  if (primarySrc) return primarySrc;
+
   const directAttrs = [
     'data-lazy-src',
     'data-src',
@@ -173,9 +180,6 @@ function extractCatalogPoster($, root, pageUrl) {
   }
   if (bestSrcset) return bestSrcset;
 
-  const src = normalizePosterCandidate(image.attr('src'), pageUrl);
-  if (src) return src;
-
   const styled = image.add(root.find('[style*="background"]').first());
   for (const element of styled.toArray()) {
     const style = String($(element).attr('style') || '');
@@ -192,6 +196,13 @@ function preferRealPosterCards(items) {
   const real = cards.filter(item => !/\/fallback\.png$/i.test(String(item?.poster || '')));
   const minimumReal = Math.min(8, Math.ceil(cards.length / 2));
   return real.length >= minimumReal ? real : cards;
+}
+
+function preferHealthyPosterCards(items, healthyIds) {
+  const cards = Array.isArray(items) ? items : [];
+  const healthy = cards.filter(item => healthyIds.has(String(item?.id || '')));
+  const minimumHealthy = Math.min(8, Math.ceil(cards.length / 2));
+  return healthy.length >= minimumHealthy ? healthy : cards;
 }
 
 function structuredDataFromPage($) {
@@ -578,6 +589,35 @@ class JavHdPornProvider extends Provider {
       );
     }
     return withRealPosters;
+  }
+
+  async postProcessCatalogMetas(items, { url } = {}) {
+    const checked = await Promise.all(items.map(async item => {
+      try {
+        const token = new URL(String(item?.poster || '')).pathname.split('/').filter(Boolean).pop();
+        const source = decodePosterSource(token);
+        if (!source) return null;
+        await loadPosterImage(source);
+        return String(item.id || '');
+      } catch {
+        return null;
+      }
+    }));
+    const healthyIds = new Set(checked.filter(Boolean));
+    const selected = preferHealthyPosterCards(items, healthyIds);
+    if (selected.length !== items.length) {
+      logger.info(
+        {
+          provider: this.name,
+          pageUrl: sanitizeUrlForLogs(url),
+          cards: items.length,
+          verifiedPosterCards: selected.length,
+          failedPosterCardsRemoved: items.length - selected.length,
+        },
+        'JAVHDPorn poster sources verified before catalog publication'
+      );
+    }
+    return selected;
   }
 
   metadataFromPage(id, html) {
@@ -1071,6 +1111,7 @@ create._test = {
   normalizePoster,
   normalizePosterCandidate,
   posterFromSrcset,
+  preferHealthyPosterCards,
   preferRealPosterCards,
   subtitleCanonicalPlaybackUrl,
   extractCatalogPoster,

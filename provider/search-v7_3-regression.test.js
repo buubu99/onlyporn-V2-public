@@ -82,6 +82,20 @@ test('JAV result pages hide dead poster cards only when enough real cards remain
   );
 });
 
+test('JAV poster health verification removes failed images only with a healthy result floor', () => {
+  const cards = Array.from({ length: 12 }, (_, index) => ({
+    id: `card-${index}`,
+    poster: `https://onlyporn.example/poster-${index}.jpg`,
+  }));
+  const healthy = new Set(cards.slice(0, 11).map(item => item.id));
+  assert.deepEqual(createJavHdPorn._test.preferHealthyPosterCards(cards, healthy), cards.slice(0, 11));
+  assert.deepEqual(
+    createJavHdPorn._test.preferHealthyPosterCards(cards, new Set([cards[0].id])),
+    cards,
+    'narrow results survive when most upstream artwork has disappeared'
+  );
+});
+
 test('search SQLite exposes live pool count and catalog rows without touching MetaTube', async t => {
   const root = fs.mkdtempSync('/tmp/onlyporn-search-v73-');
   const env = {
