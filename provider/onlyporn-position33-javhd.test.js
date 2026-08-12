@@ -11,7 +11,7 @@ const createJavHdPorn = require('./javhdporn');
 const ROOT = path.resolve(__dirname, '..');
 mediaRelay.setPublicBase('https://onlyporn.example');
 
-test('position 33 preserves position-32 c1 children and segment.bin', () => {
+test('position 33 preserves c1 children and uses a decoder-safe JAV segment extension', () => {
   const source = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
   assert.match(source, /const CHILD_TOKEN_VERSION = 'c1'/);
   assert.match(source, /return 'segment\.bin'/);
@@ -19,6 +19,30 @@ test('position 33 preserves position-32 c1 children and segment.bin', () => {
     source,
     /COMPACT_CHILD_TOKEN_VERSION|createCompactChildToken|MAX_COMPACT_CHILDREN/
   );
+
+  const javEntry = {
+    provider: 'javhdporn',
+    headers: { Referer: 'https://video.javhdporn.net/p/test' },
+  };
+  const javChild = mediaRelay._test.relayChild(
+    javEntry,
+    'https://akamai-cache-p01.vdcdn.xyz/hls/test/index.m3u8',
+    'segment-1.webp',
+    'segment'
+  );
+  assert.match(new URL(javChild).pathname, /\/segment\.ts$/);
+
+  const regularEntry = {
+    provider: 'pornhub',
+    headers: { Referer: 'https://www.pornhub.com/view_video.php?viewkey=test' },
+  };
+  const regularChild = mediaRelay._test.relayChild(
+    regularEntry,
+    'https://cdn.phncdn.com/hls/test/index.m3u8',
+    'segment-1.ts',
+    'segment'
+  );
+  assert.match(new URL(regularChild).pathname, /\/segment\.bin$/);
 });
 
 test('JAVHDPorn accepts every verified additional playback host narrowly', () => {

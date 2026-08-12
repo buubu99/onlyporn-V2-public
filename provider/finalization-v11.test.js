@@ -70,9 +70,10 @@ test('measured TPB4K poster contracts are corrected centrally', () => {
   assert.match(src, /wide_/);
 });
 
-test('JAVHD no longer exposes explicit fallback poster cards as successful catalog art', () => {
+test('JAVHD keeps valid search cards when artwork must fall back locally', () => {
   const src = fs.readFileSync(path.join(__dirname, 'javhdporn.js'), 'utf8');
-  assert.match(src, /if \(\/\\\/fallback\\\.png\$\/i\.test\(poster\)\) return/);
+  assert.doesNotMatch(src, /if \(\/\\\/fallback\\\.png\$\/i\.test\(poster\)\) return/);
+  assert.match(src, /new meta\.MetaPreview\(id, Provider\.TYPE, title, poster/);
 });
 
 test('Sukebei phase1 contract now declares portrait poster art as poster', () => {

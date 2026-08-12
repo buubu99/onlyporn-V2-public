@@ -526,7 +526,6 @@ class JavHdPornProvider extends Provider {
 
       const image = root.find('img').first();
       const poster = javPosterProxyUrl(extractCatalogPoster($, root, pageUrl));
-      if (/\/fallback\.png$/i.test(poster)) return;
       const title = cleanTitle(
         anchor.attr('title') ||
           image.attr('alt') ||

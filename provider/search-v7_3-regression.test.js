@@ -41,6 +41,29 @@ test('JAV search cards ignore data placeholders and choose the largest real srcs
   assert.notEqual(metas[0].poster, 'https://pics.pornfhd.com/404.jpeg');
 });
 
+test('JAV DMM search cards keep their real poster and are never deleted', () => {
+  const provider = createJavHdPorn();
+  const html = `
+    <article class="thumb-block loop-video">
+      <a href="/video/sone-620-sub/" title="SONE-620 English Subtitle">
+        <img
+          alt="SONE-620 English Subtitle"
+          src="https://i1.wp.com/pics.dmm.co.jp/mono/movie/adult/9sone620/9sone620pl.jpg">
+      </a>
+    </article>`;
+  const metas = provider.getCatalogMetas(
+    html,
+    'https://www.javhdporn.net/search/SONE+620/'
+  );
+
+  assert.equal(metas.length, 1);
+  assert.equal(metas[0].name, 'SONE-620 English Subtitle');
+  assert.equal(
+    decodeSource(metas[0].poster.split('/').pop()),
+    'https://pics.dmm.co.jp/mono/movie/adult/9sone620/9sone620pl.jpg'
+  );
+});
+
 test('search SQLite exposes live pool count and catalog rows without touching MetaTube', async t => {
   const root = fs.mkdtempSync('/tmp/onlyporn-search-v73-');
   const env = {

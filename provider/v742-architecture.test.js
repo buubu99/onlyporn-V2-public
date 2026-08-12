@@ -228,7 +228,16 @@ test('JAV poster relay only accepts HTTPS allowlisted image hosts', () => {
     normalizeSourceUrl('https://storage69000.contents.fc2.com/file/poster.png'),
     'https://storage69000.contents.fc2.com/file/poster.png'
   );
+  assert.equal(
+    normalizeSourceUrl('https://i1.wp.com/pics.dmm.co.jp/mono/movie/adult/9sone620/9sone620pl.jpg'),
+    'https://pics.dmm.co.jp/mono/movie/adult/9sone620/9sone620pl.jpg'
+  );
+  assert.equal(
+    normalizeSourceUrl('https://i3.wp.com/pics.dmm.co.jp/digital/video/13gvg00620/13gvg00620pl.jpg'),
+    'https://pics.dmm.co.jp/digital/video/13gvg00620/13gvg00620pl.jpg'
+  );
   assert.equal(normalizeSourceUrl('https://i2.wp.com/evil.example/poster.jpg'), '');
+  assert.equal(normalizeSourceUrl('https://i1.wp.com/evil.pics.dmm.co.jp/poster.jpg'), '');
   assert.equal(normalizeSourceUrl('https://evil.i2.wp.com/poster.jpg'), '');
   assert.equal(normalizeSourceUrl('https://i2.wp.com.evil.example/poster.jpg'), '');
   assert.equal(normalizeSourceUrl('https://storage69000.contents.fc2.com.evil.example/poster.jpg'), '');

@@ -152,10 +152,11 @@ function kindFromUrl(value, fallback = 'binary') {
   return fallback;
 }
 
-function filenameFor(kind) {
+function filenameFor(kind, provider = '') {
   if (kind === 'hls') return 'index.m3u8';
   if (kind === 'mp4') return 'video.mp4';
   if (kind === 'key') return 'key.bin';
+  if (kind === 'segment' && provider === 'javhdporn') return 'segment.ts';
   return 'segment.bin';
 }
 
@@ -223,7 +224,7 @@ function register({ url, headers = {}, provider, kind, ttlMs = SESSION_TTL_MS })
   if (!publicBase) throw new Error('Media relay public base URL is not initialized');
 
   const entry = createSessionEntry({ url, headers, provider, kind, ttlMs });
-  return `${publicBase}${mediaPathPrefix()}/${entry.sessionToken}/${filenameFor(entry.kind)}`;
+  return `${publicBase}${mediaPathPrefix()}/${entry.sessionToken}/${filenameFor(entry.kind, entry.provider)}`;
 }
 
 function ensureSessionEntry(entry, parentUrl) {
@@ -324,7 +325,7 @@ function relayChild(entry, parentUrl, value, kind) {
     const sessionEntry = ensureSessionEntry(entry, parentUrl);
     const resolvedKind = kind || kindFromUrl(resolved);
     const token = createChildToken(sessionEntry, resolved, resolvedKind);
-    return `${publicBase}${mediaPathPrefix()}/${token}/${filenameFor(resolvedKind)}`;
+    return `${publicBase}${mediaPathPrefix()}/${token}/${filenameFor(resolvedKind, sessionEntry.provider)}`;
   } catch (error) {
     if (error instanceof PlaylistChildRelayError) throw error;
     throw new PlaylistChildRelayError(
