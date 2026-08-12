@@ -118,30 +118,3 @@ test('provider source wires the alias expander into handleCatalog and merge help
   assert.match(source, /OnlyPorn Sukebei alias search merged/);
   assert.match(source, /__onlypornSukebeiAliasExpanded/);
 });
-
-test('Sukebei aliases are SQLite-local-first with only one bounded cold fallback', () => {
-  const fs = require('node:fs');
-  const source = fs.readFileSync(require.resolve('./tpb4k'), 'utf8');
-  const start = source.indexOf('async _handleSukebeiAliasCatalog(args, searchQueries)');
-  const end = source.indexOf('async _handleCatalogFresh(args)', start);
-  assert.ok(start >= 0 && end > start);
-  const method = source.slice(start, end);
-
-  assert.match(method, /aliasPoolCatalogId/);
-  assert.match(method, /aliasLocalMinimum = args\?\.id === 'tpb4k\.sukebei\.top' \? 4 : 1/);
-  assert.match(method, /aliasFallbackBudgetMs = 12_000/);
-  assert.match(method, /this\.searchStore\.searchPool\(aliasPoolCatalogId, search, 24\)/);
-  assert.match(method, /const localQueries = queries\.filter/);
-  assert.match(method, /selectedQueries = localQueries\.length \? localQueries : queries\.slice\(0, 1\)/);
-  assert.match(method, /allowSingleNetworkFallback/);
-  assert.match(method, /Promise\.race\(\[fallbackTask, fallbackTimeout\]\)/);
-  assert.match(method, /OnlyPorn Sukebei alias local preflight/);
-  assert.match(method, /OnlyPorn Sukebei single upstream fallback timed out safely/);
-  assert.match(method, /seenSceneKeys/);
-  assert.doesNotMatch(method, /offset \+= 2/);
-  assert.doesNotMatch(method, /queries\.slice\(offset/);
-  assert.doesNotMatch(method, /aliasOverallBudgetMs/);
-  assert.doesNotMatch(method, /aliasVariantBudgetMs/);
-  assert.match(method, /OnlyPorn Sukebei uncensored JAV code fallback filtered/);
-  assert.match(method, /mergeSukebeiAliasResponses/);
-});

@@ -915,49 +915,13 @@ class Tpb4kProvider {
       ? [uncensoredCodeSearch]
       : Array.from(new Set((searchQueries || []).filter(Boolean))).slice(0, 6);
     const responses = [];
-    const aliasPoolCatalogId = args?.id === 'tpb4k.sukebei.hentai'
-      ? 'tpb4k.source.hentai'
-      : args?.id;
-    const aliasLocalMinimum = args?.id === 'tpb4k.sukebei.top' ? 4 : 1;
-    const aliasFallbackBudgetMs = 12_000;
 
-    // Search SQLite is the first authority for interactive Stremio search.
-    // Preflight aliases locally and execute only variants that are guaranteed
-    // to remain on the sqlite-pool branch (>=4 matches in the current V10
-    // source-aware search policy). This prevents six aliases from each falling
-    // into the extremely slow Sukebei upstream path.
-    const localCounts = await Promise.all(queries.map(async search => {
-      try {
-        const rows = await this.searchStore.searchPool(aliasPoolCatalogId, search, 24);
-        return Array.isArray(rows) ? rows.length : 0;
-      } catch (error) {
-        logger().warn({
-          provider: this.name,
-          catalogId: args?.id,
-          search,
-          error: error?.message || String(error),
-        }, 'OnlyPorn Sukebei alias local preflight failed safely');
-        return 0;
-      }
-    }));
+    // Two at a time avoids a six-request burst against Sukebei while still
+    // keeping the expanded search inside the existing Stremio/AIO timeout budget.
+    for (let offset = 0; offset < queries.length; offset += 2) {
+      const batch = queries.slice(offset, offset + 2);
 
-    const localQueries = queries.filter((_, index) =>
-      Number(localCounts[index] || 0) >= aliasLocalMinimum
-    );
-    const selectedQueries = localQueries.length ? localQueries : queries.slice(0, 1);
-    const allowSingleNetworkFallback = localQueries.length === 0;
-
-    logger().info({
-      provider: this.name,
-      catalogId: args?.id,
-      search: requestedSearch,
-      queries,
-      localCounts,
-      selectedQueries,
-      allowSingleNetworkFallback,
-    }, 'OnlyPorn Sukebei alias local preflight');
-
-    const runVariant = async search => {
+      const batchResponses = await Promise.all(batch.map(async search => {
         try {
           const response = await this.handleCatalog({
             ...args,
@@ -1035,57 +999,12 @@ class Tpb4kProvider {
 
           return { metas: [] };
         }
-    };
+      }));
 
-    if (selectedQueries.length) {
-      if (allowSingleNetworkFallback) {
-        // Exactly one bounded fallback query is allowed when the local pool is
-        // genuinely cold. The underlying refresh may complete later and warm
-        // SQLite, but the interactive response is never held for its full
-        // upstream duration.
-        let fallbackTimer = null;
-        const fallbackTask = runVariant(selectedQueries[0]);
-        const fallbackTimeout = new Promise(resolve => {
-          fallbackTimer = setTimeout(() => resolve({
-            metas: [],
-            __onlypornSukebeiFallbackTimedOut: true,
-          }), aliasFallbackBudgetMs);
-        });
-        const response = await Promise.race([fallbackTask, fallbackTimeout]);
-        if (fallbackTimer) clearTimeout(fallbackTimer);
-        responses.push(response);
-
-        if (response?.__onlypornSukebeiFallbackTimedOut) {
-          logger().warn({
-            provider: this.name,
-            catalogId: args?.id,
-            search: selectedQueries[0],
-            budgetMs: aliasFallbackBudgetMs,
-          }, 'OnlyPorn Sukebei single upstream fallback timed out safely');
-        }
-      } else {
-        // Every selected query has already proved >=4 SQLite matches, so these
-        // calls stay on the local source-aware branch and finish quickly.
-        responses.push(...await Promise.all(selectedQueries.map(runVariant)));
-      }
+      responses.push(...batchResponses);
     }
 
     const merged = mergeSukebeiAliasResponses(responses, requestedSkip, pageSize);
-    const seenSceneKeys = new Set();
-    const dedupedMetas = (Array.isArray(merged?.metas) ? merged.metas : []).filter(meta => {
-      const visible = [meta?.name, meta?.title].filter(Boolean).join(' ');
-      const code = /\b([a-z]{2,12})[-_ ]?(\d{2,6})\b/i.exec(visible);
-      const key = code
-        ? `code:${code[1].toUpperCase()}-${code[2]}`
-        : `id:${String(meta?.id || visible).toLocaleLowerCase('en-US')}`;
-      if (seenSceneKeys.has(key)) return false;
-      seenSceneKeys.add(key);
-      return true;
-    }).slice(0, pageSize);
-    const finalMerged = {
-      ...(merged || {}),
-      metas: dedupedMetas,
-    };
 
     logger().info({
       provider: this.name,
@@ -1093,12 +1012,10 @@ class Tpb4kProvider {
       search: args?.extra?.search,
       searchAliases: queries.slice(1),
       searchVariants: queries.length,
-      selectedVariants: selectedQueries.length,
-      localCounts,
-      metas: dedupedMetas.length,
+      metas: Array.isArray(merged.metas) ? merged.metas.length : 0,
     }, 'OnlyPorn Sukebei alias search merged');
 
-    return finalMerged;
+    return merged;
   }
 
   async _handleCatalogFresh(args) {
