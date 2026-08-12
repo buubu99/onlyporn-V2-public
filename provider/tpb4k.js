@@ -915,13 +915,38 @@ class Tpb4kProvider {
       ? [uncensoredCodeSearch]
       : Array.from(new Set((searchQueries || []).filter(Boolean))).slice(0, 6);
     const responses = [];
+    const aliasVariantBudgetMs = 22_000;
 
-    // Two at a time avoids a six-request burst against Sukebei while still
-    // keeping the expanded search inside the existing Stremio/AIO timeout budget.
-    for (let offset = 0; offset < queries.length; offset += 2) {
-      const batch = queries.slice(offset, offset + 2);
+    // AIOStreams stops waiting at 30 seconds. The previous implementation ran
+    // three sequential 2-request waves, so one slow upstream could push the
+    // merged response beyond that deadline. Keep the existing per-alias body
+    // completely intact, but execute all deterministic variants in one wave.
+    // withAliasBudget wraps the whole existing operation instead of patching
+    // any fragile internal `try`/`handleCatalog` text.
+    const withAliasBudget = async (search, operation) => {
+      let timeoutId = null;
+      try {
+        return await Promise.race([
+          operation(),
+          new Promise(resolve => {
+            timeoutId = setTimeout(() => {
+              logger().warn({
+                provider: this.name,
+                catalogId: args?.id,
+                search,
+                budgetMs: aliasVariantBudgetMs,
+              }, 'OnlyPorn Sukebei alias search variant hit response budget');
+              resolve({ metas: [], __onlypornAliasTimedOut: true });
+            }, aliasVariantBudgetMs);
+          }),
+        ]);
+      } finally {
+        if (timeoutId) clearTimeout(timeoutId);
+      }
+    };
 
-      const batchResponses = await Promise.all(batch.map(async search => {
+    const batchResponses = await Promise.all(
+      queries.map(search => withAliasBudget(search, async () => {
         try {
           const response = await this.handleCatalog({
             ...args,
@@ -999,10 +1024,10 @@ class Tpb4kProvider {
 
           return { metas: [] };
         }
-      }));
+      }))
+    );
 
-      responses.push(...batchResponses);
-    }
+    responses.push(...batchResponses);
 
     const merged = mergeSukebeiAliasResponses(responses, requestedSkip, pageSize);
 
