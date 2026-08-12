@@ -34,6 +34,16 @@ const MAX_PLAYER_PAGES = 12;
 const MAX_PLAYER_DEPTH = 3;
 const PLAYER_SCRIPT_MAX_BYTES = 1024 * 1024;
 
+function isExpiringVdcdnHls(value) {
+  if (!isHls(value)) return false;
+  try {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return hostname === 'vdcdn.xyz' || hostname.endsWith('.vdcdn.xyz');
+  } catch {
+    return false;
+  }
+}
+
 const GENRE_ROUTES = new Map([
   ['Latest', '/v3/category/censored/'],
   ['Censored', '/v3/category/censored/'],
@@ -776,7 +786,11 @@ class JavHdPornProvider extends Provider {
 
       if (isHls(item.url) || isDirectMp4(item.url)) {
         if (!isAdvertisementMedia(item.url, item.context)) {
-          media.set(item.url, { ...item, kind: isHls(item.url) ? 'hls' : 'mp4' });
+          const candidate = {
+            ...item,
+            kind: isHls(item.url) ? 'hls' : 'mp4',
+          };
+          media.set(item.url, await this.preserveDiscoveredMedia(candidate));
         }
         continue;
       }
@@ -807,7 +821,8 @@ class JavHdPornProvider extends Provider {
               });
           const contentType = String(probe.headers?.['content-type'] || '').toLowerCase();
           if (/mpegurl|application\/vnd\.apple/i.test(contentType)) {
-            media.set(probe.finalUrl, { ...item, url: probe.finalUrl, kind: 'hls' });
+            const candidate = { ...item, url: probe.finalUrl, kind: 'hls' };
+            media.set(probe.finalUrl, await this.preserveDiscoveredMedia(candidate));
             continue;
           }
           if (/video\/mp4/i.test(contentType)) {
@@ -829,7 +844,8 @@ class JavHdPornProvider extends Provider {
             });
         if (/sorry\s+streaming\s+service\s+is\s+unavailable/i.test(html)) continue;
         if (String(html).includes('#EXTM3U')) {
-          media.set(safeUrl, { ...item, url: safeUrl, kind: 'hls' });
+          const candidate = { ...item, url: safeUrl, kind: 'hls' };
+          media.set(safeUrl, await this.preserveDiscoveredMedia(candidate));
           continue;
         }
 
@@ -866,36 +882,52 @@ class JavHdPornProvider extends Provider {
     return [...media.values()];
   }
 
+  async preserveDiscoveredMedia(candidate) {
+    if (!isExpiringVdcdnHls(candidate.url)) return candidate;
+
+    try {
+      const headers = await this.playbackHeaders(candidate.referer, candidate.url);
+      const relayUrl = await mediaRelay.registerHlsSnapshot({
+        url: candidate.url,
+        headers,
+        provider: this.name,
+      });
+      return { ...candidate, relayUrl };
+    } catch (error) {
+      logger.debug(
+        {
+          provider: this.name,
+          url: sanitizeUrlForLogs(candidate.url),
+          error: error.message,
+        },
+        'JAVHDPorn expiring HLS root could not be preserved during discovery'
+      );
+      return candidate;
+    }
+  }
+
   async streamFromMedia(candidate) {
-    const headers = await this.playbackHeaders(candidate.referer, candidate.url);
     const resolution = extractResolution(candidate.context, candidate.url);
     const name = `JAV HD Porn ${resolution || (candidate.kind === 'hls' ? 'HLS' : 'MP4')}`;
 
     try {
-      let relayUrl;
-      let candidateHost = '';
-      try {
-        candidateHost = new URL(candidate.url).hostname.toLowerCase();
-      } catch {
-        // Protected relay validation below will reject malformed URLs.
-      }
-      const preserveExpiringRoot =
-        candidate.kind === 'hls' &&
-        (candidateHost === 'vdcdn.xyz' || candidateHost.endsWith('.vdcdn.xyz'));
-
-      if (preserveExpiringRoot) {
-        relayUrl = await mediaRelay.registerHlsSnapshot({
-          url: candidate.url,
-          headers,
-          provider: this.name,
-        });
-      } else {
-        relayUrl = mediaRelay.register({
-          url: candidate.url,
-          headers,
-          provider: this.name,
-          kind: candidate.kind,
-        });
+      let relayUrl = candidate.relayUrl;
+      if (!relayUrl) {
+        const headers = await this.playbackHeaders(candidate.referer, candidate.url);
+        if (isExpiringVdcdnHls(candidate.url)) {
+          relayUrl = await mediaRelay.registerHlsSnapshot({
+            url: candidate.url,
+            headers,
+            provider: this.name,
+          });
+        } else {
+          relayUrl = mediaRelay.register({
+            url: candidate.url,
+            headers,
+            provider: this.name,
+            kind: candidate.kind,
+          });
+        }
       }
 
       return {
@@ -982,6 +1014,7 @@ create._test = {
   cleanTitle,
   extractPlayerCandidates,
   isAdvertisementMedia,
+  isExpiringVdcdnHls,
   isFallbackPlayerUrl,
   isLikelyPlayerPage,
   isoDurationToRuntime,

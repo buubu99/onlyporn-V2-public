@@ -82,6 +82,56 @@ test('JAVHDPorn accepts every verified additional playback host narrowly', () =>
   );
 });
 
+test('vdcdn HLS roots are identified narrowly for immediate preservation', () => {
+  assert.equal(
+    createJavHdPorn._test.isExpiringVdcdnHls(
+      'https://akamai-cache-p01.vdcdn.xyz/hls4/token/master.m3u8'
+    ),
+    true
+  );
+  assert.equal(
+    createJavHdPorn._test.isExpiringVdcdnHls(
+      'https://cloud-1.vdcdn.xyz/hls4/token/master.m3u8'
+    ),
+    true
+  );
+  assert.equal(
+    createJavHdPorn._test.isExpiringVdcdnHls(
+      'https://vdcdn.xyz.evil.example/hls4/token/master.m3u8'
+    ),
+    false
+  );
+  assert.equal(
+    createJavHdPorn._test.isExpiringVdcdnHls(
+      'https://akamai-cache-p01.vdcdn.xyz/hls4/token/video.mp4'
+    ),
+    false
+  );
+});
+
+test('JAVHDPorn preserves an expiring direct candidate during discovery', async () => {
+  const provider = createJavHdPorn();
+  const upstream = 'https://akamai-cache-p01.vdcdn.xyz/hls4/fresh/master.m3u8';
+  const preserved = 'https://onlyporn.example/media/preserved/index.m3u8';
+  let calls = 0;
+  provider.preserveDiscoveredMedia = async candidate => {
+    calls += 1;
+    return { ...candidate, relayUrl: preserved };
+  };
+
+  const candidates = await provider.discoverMedia(
+    [{ value: upstream, context: '720p' }],
+    'https://video.javhdporn.net/p/fixture'
+  );
+
+  assert.equal(calls, 1);
+  assert.equal(candidates.length, 1);
+  assert.equal(candidates[0].url, upstream);
+  assert.equal(candidates[0].relayUrl, preserved);
+  const stream = await provider.streamFromMedia(candidates[0]);
+  assert.equal(stream.url, preserved);
+});
+
 test('newly decoded media receives priority without deleting reserve fallbacks', () => {
   const queue = Array.from({ length: 14 }, (_, index) => ({
     url: `https://video1.javhdporn.net/p/reserve-${index}`,
