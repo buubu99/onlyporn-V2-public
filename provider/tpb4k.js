@@ -965,7 +965,10 @@ class Tpb4kProvider {
       ? 'tpb4k.source.hentai'
       : args?.id;
     const aliasLocalMinimum = args?.id === 'tpb4k.sukebei.top' ? 4 : 1;
-    const aliasFallbackBudgetMs = 12_000;
+    // Cold alias searches include one bounded upstream discovery plus a short
+    // artwork attempt. Give that honest fallback enough time to return real
+    // torrent cards, while remaining safely below AIOStreams' 35s timeout.
+    const aliasFallbackBudgetMs = 20_000;
 
     // Search SQLite is the first authority for interactive Stremio search.
     // Preflight aliases locally and execute only variants that are guaranteed
@@ -1121,9 +1124,15 @@ class Tpb4kProvider {
     const dedupedMetas = (Array.isArray(merged?.metas) ? merged.metas : []).filter(meta => {
       const visible = [meta?.name, meta?.title].filter(Boolean).join(' ');
       const code = /\b([a-z]{2,12})[-_ ]?(\d{2,6})\b/i.exec(visible);
-      const key = code
-        ? `code:${code[1].toUpperCase()}-${code[2]}`
-        : `id:${String(meta?.id || visible).toLocaleLowerCase('en-US')}`;
+      // One JAV code can legitimately have several different Sukebei torrents
+      // (resolution, subtitle, censored and leaked/uncensored variants). Alias
+      // expansion must remove the same hash repeated by multiple queries, not
+      // collapse every playable torrent for the scene into one card.
+      const key = args?.id === 'tpb4k.sukebei.top'
+        ? sukebeiSearchMetaKey(meta)
+        : (code
+            ? `code:${code[1].toUpperCase()}-${code[2]}`
+            : `id:${String(meta?.id || visible).toLocaleLowerCase('en-US')}`);
       if (seenSceneKeys.has(key)) return false;
       seenSceneKeys.add(key);
       return true;
@@ -1681,3 +1690,4 @@ module.exports.legacyCatalogCacheSuffix = legacyCatalogCacheSuffix;
 module.exports.__testOnlyIsCatalogBoundSukebeiTorrent = isCatalogBoundSukebeiTorrent;
 module.exports.__testOnlyPassesTorrentSeederGate = passesTorrentSeederGate;
 module.exports.__testOnlyIsSukebeiCodeSearch = isSukebeiCodeSearch;
+module.exports.__testOnlySukebeiSearchMetaKey = sukebeiSearchMetaKey;

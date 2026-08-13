@@ -156,3 +156,81 @@ test('Sukebei combines Top plus RSS and honors 40-card pagination without metada
   assert.ok(requests.some(url => url.includes('s=seeders')));
   assert.ok(requests.some(url => url.includes('page=rss')));
 });
+
+test('strict Sukebei exact-code search remains stable across repeated MetaTube timeouts', async () => {
+  const rss = `<?xml version="1.0"?>
+  <rss xmlns:nyaa="https://nyaa.si/xmlns/nyaa"><channel>${
+    Array.from({ length: 22 }, (_, index) => {
+      const number = index + 1;
+      const hash = hashFor(number);
+      const variant = String.fromCharCode(65 + index);
+      const title = index < 7
+        ? `(無修正-流出) SONE-002 (Uncensored Leaked) Release ${variant}`
+        : `SONE-002 Original Censored Release ${variant}`;
+      return `<item>
+        <guid>https://sukebei.example/view/${number}</guid>
+        <title>${title}</title>
+        <link>https://sukebei.example/download/${number}.torrent</link>
+        <nyaa:infoHash>${hash}</nyaa:infoHash>
+        <nyaa:seeders>${100 - number}</nyaa:seeders>
+        <nyaa:size>2.0 GiB</nyaa:size>
+      </item>`;
+    }).join('')
+  }</channel></rss>`;
+
+  const observedTimeouts = [];
+  const env = {
+    TPB4K_ENABLED: 'true',
+    TPB4K_METATUBE_STRICT: 'true',
+    ONLYPORN_CONTENT_FILTER_ENABLED: 'false',
+    ONLYPORN_DISABLE_PERSISTENT_CACHE: 'true',
+    ONLYPORN_PUBLIC_BASE_URL: 'https://onlyporn.example',
+  };
+  const adapter = createSukebeiMetadataAdapter({
+    config: {
+      ...readTpb4kConfig(env),
+      sukebeiEnrichmentDeadlineMs: 45_000,
+      sukebeiRssPages: 1,
+      sukebeiCodeLookupLimit: 12,
+      sukebeiTitleLookupLimit: 0,
+      sukebeiDetailImageLimit: 0,
+    },
+    endpoint: 'https://sukebei.example/?page=rss&c=0_0&f=0',
+    env,
+    checkDns: false,
+    fetchImpl: async () => response(rss, 'application/rss+xml'),
+    metatubeClient: {
+      configured: true,
+      async queryScenes({ timeoutMs }) {
+        observedTimeouts.push(timeoutMs);
+        const error = new Error('MetaTube timed out');
+        error.name = 'AbortError';
+        throw error;
+      },
+    },
+  });
+  const catalog = {
+    id: 'tpb4k.sukebei.top',
+    mode: 'top',
+    searchMode: true,
+    searchQuery: 'SONE 002',
+  };
+
+  const first = await adapter.catalog({ catalog, skip: 0, limit: 24 });
+  const second = await adapter.catalog({ catalog, skip: 0, limit: 24 });
+
+  for (const items of [first, second]) {
+    assert.equal(items.length, 22);
+    assert.equal(new Set(items.map(item => item.sourceId)).size, 22);
+    assert.equal(items.filter(item => /uncensored|無修正|流出/i.test(item.title)).length, 7);
+    assert.ok(items.every(item => item.lookupSource === 'sukebei-rss-fallback'));
+    assert.ok(items.every(item => new URL(item.poster).pathname.startsWith('/onlyporn/poster/sukebei-rss/')));
+    assert.ok(items.every(item => /^[a-f0-9]{40}$/.test(item.infoHash)));
+  }
+  assert.ok(observedTimeouts.length >= 2);
+  assert.ok(observedTimeouts.every(timeoutMs => timeoutMs <= 6_000));
+  const diagnostics = adapter.diagnostics().sukebeiMetadata;
+  assert.equal(diagnostics.returned, 22);
+  assert.equal(diagnostics.rssFallbackCards, 22);
+  assert.equal(diagnostics.providerErrorReasons['metatube:timeout'], 1);
+});

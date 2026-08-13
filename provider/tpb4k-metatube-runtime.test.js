@@ -178,7 +178,8 @@ test('strict Sukebei source publishes 24–40 MetaTube cards and no generated fa
   const source = fs.readFileSync(require.resolve('./tpb4k/sukebei-metadata'), 'utf8');
   assert.match(source, /const strictMinimum = searchMode \? 0 : \(safeSkip === 0 \? Math\.min\(24, safeLimit\) : 0\)/);
   assert.match(source, /allowed\.length < strictMinimum/);
-  assert.match(source, /catalogDefinition\?\.mode === 'top' && allowed\.length < needed && !metatubeStrict/);
+  assert.match(source, /\(searchMode \|\| !metatubeStrict\)/);
+  assert.match(source, /ONLYPORN_SEARCH_SUKEBEI_METADATA_TIMEOUT_MS/);
   assert.match(source, /metatubePosters === cards/);
   assert.match(source, /recordSukebeiResult/);
 });

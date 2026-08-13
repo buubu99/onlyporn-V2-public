@@ -1014,6 +1014,15 @@ function createSukebeiMetadataAdapter(options = {}) {
       Math.max(Number(env.ONLYPORN_SEARCH_SUKEBEI_BUDGET_MS || 45_000), 10_000),
       90_000
     );
+    // Interactive searches must never let one flaky artwork lookup consume the
+    // complete catalogue budget. The underlying torrent rows are already real
+    // and playable; a short metadata attempt is enough before publishing an
+    // honest title-specific fallback card. Browse/prewarm remains unchanged and
+    // can spend the full deadline proving the strict MetaTube poster contract.
+    const searchMetadataTimeoutMs = Math.min(
+      Math.max(Number(env.ONLYPORN_SEARCH_SUKEBEI_METADATA_TIMEOUT_MS || 6_000), 1_000),
+      10_000
+    );
     const budgetMs = searchMode
       ? Math.min(configuredBudgetMs, searchBudgetMs)
       : configuredBudgetMs;
@@ -1291,7 +1300,7 @@ function createSukebeiMetadataAdapter(options = {}) {
           }
           const remaining = Math.max(metadataDeadlineAt - Date.now(), 250);
           const lookupTimeoutMs = provider === 'metatube'
-            ? Math.min(210_000, remaining)
+            ? Math.min(searchMode ? searchMetadataTimeoutMs : 210_000, remaining)
             : Math.min(
                 Math.max(Number(config.metadataLookupTimeoutMs || 2_500), 750),
                 remaining,
@@ -1407,7 +1416,7 @@ function createSukebeiMetadataAdapter(options = {}) {
       if (!item) continue;
       const evaluation = evaluateContent(item, filterConfig);
       if (!evaluation.excluded) {
-        if (!metatubeStrict || isMetaTubePoster(item.poster)) allowed.push(item);
+        if (searchMode || !metatubeStrict || isMetaTubePoster(item.poster)) allowed.push(item);
         continue;
       }
       stats.filtered += 1;
@@ -1427,7 +1436,9 @@ function createSukebeiMetadataAdapter(options = {}) {
     // complete requested Stremio window with honest title-specific cards backed
     // by each real upstream torrent identity. Artwork failure must not discard
     // a valid playable info hash.
-    if (catalogDefinition?.mode === 'top' && allowed.length < needed && !metatubeStrict) {
+    if (catalogDefinition?.mode === 'top'
+        && allowed.length < needed
+        && (searchMode || !metatubeStrict)) {
       const existing = new Set(allowed.map(item => String(item.sourceId)));
       for (const source of normalized) {
         if (allowed.length >= needed || existing.has(String(source.sourceId))) continue;
