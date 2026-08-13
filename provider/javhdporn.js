@@ -25,6 +25,7 @@ const {
   isPreviewMediaCandidate,
   normalizeAbsoluteUrl,
 } = require('./media-utils');
+const { createMetaTubeClient } = require('./tpb4k/metatube-client');
 const {
   findVideoObject,
   firstString,
@@ -40,6 +41,8 @@ const MAX_PLAYER_DEPTH = 3;
 const PLAYER_SCRIPT_MAX_BYTES = 1024 * 1024;
 const JAV_HOME_ROTATION_MS = 15 * 60 * 1000;
 const JAV_HOME_FAMILY_COUNT = 5;
+const JAV_METATUBE_DEFAULT_CONCURRENCY = 8;
+const JAV_METATUBE_DEFAULT_TIMEOUT_MS = 6_000;
 const JAV_HOME_FAMILIES = Object.freeze([
   'SONE',
   'SSIS',
@@ -132,6 +135,47 @@ function isUncensoredCategorySearch(value) {
 
 function cleanText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
+}
+
+function extractJavSceneCode(...values) {
+  for (const value of values) {
+    const text = String(value || '').normalize('NFKC').toUpperCase();
+    const fc2 = text.match(/\bFC2[\s._-]*(?:PPV[\s._-]*)?(\d{5,9})\b/);
+    if (fc2) return `FC2-PPV-${fc2[1]}`;
+
+    const generic = text.match(/\b([A-Z]{2,12})[\s._-]+(\d{2,7})\b/);
+    if (generic) return `${generic[1]}-${generic[2]}`;
+  }
+  return '';
+}
+
+function isMetaTubePoster(value) {
+  try {
+    const url = new URL(String(value || ''));
+    return url.protocol === 'https:' && /\/onlyporn\/poster\/metatube\//i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+async function mapWithConcurrency(items, concurrency, mapper) {
+  const values = Array.isArray(items) ? items : [];
+  if (!values.length) return [];
+  const results = new Array(values.length);
+  let cursor = 0;
+  const workerCount = Math.min(
+    Math.max(Number.parseInt(String(concurrency || 1), 10) || 1, 1),
+    values.length
+  );
+
+  await Promise.all(Array.from({ length: workerCount }, async () => {
+    while (cursor < values.length) {
+      const index = cursor;
+      cursor += 1;
+      results[index] = await mapper(values[index], index);
+    }
+  }));
+  return results;
 }
 
 function cleanTitle(value) {
@@ -465,10 +509,23 @@ function prioritizePlayerCandidates(queue, visited, candidates, referer, depth) 
 }
 
 class JavHdPornProvider extends Provider {
-  constructor() {
+  constructor(options = {}) {
     super('https://www.javhdporn.net', 'javhdporn', 24, {
       allowedPageHosts: ['javhdporn.net', 'video.javhdporn.net'],
     });
+    const env = options.env || process.env;
+    this.metatubeClient = options.metatubeClient || createMetaTubeClient({
+      env,
+      ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
+    });
+    this.metatubeConcurrency = Math.min(Math.max(Number.parseInt(
+      String(env.JAVHDPORN_METATUBE_CONCURRENCY || JAV_METATUBE_DEFAULT_CONCURRENCY),
+      10
+    ) || JAV_METATUBE_DEFAULT_CONCURRENCY, 1), 16);
+    this.metatubeTimeoutMs = Math.min(Math.max(Number.parseInt(
+      String(env.JAVHDPORN_METATUBE_TIMEOUT_MS || JAV_METATUBE_DEFAULT_TIMEOUT_MS),
+      10
+    ) || JAV_METATUBE_DEFAULT_TIMEOUT_MS, 5_000), 20_000);
     this.playerScriptCache = new BoundedTtlCache({
       maxEntries: 12,
       ttlMs: 15 * 60 * 1000,
@@ -495,8 +552,8 @@ class JavHdPornProvider extends Provider {
     }
   }
 
-  static create() {
-    return new JavHdPornProvider();
+  static create(options = {}) {
+    return new JavHdPornProvider(options);
   }
 
   getInitialUrl() {
@@ -742,7 +799,7 @@ class JavHdPornProvider extends Provider {
 
       results.push(
         new meta.MetaPreview(id, Provider.TYPE, title, poster, {
-          posterShape: 'landscape',
+          posterShape: 'poster',
           description,
           videoPageUrl: id,
         })
@@ -767,29 +824,65 @@ class JavHdPornProvider extends Provider {
   }
 
   async postProcessCatalogMetas(items, { url } = {}) {
-    const checked = await Promise.all(items.map(async item => {
+    const cards = Array.isArray(items) ? items : [];
+    let metaTubeMatches = 0;
+    const checked = await mapWithConcurrency(cards, this.metatubeConcurrency, async item => {
+      const code = extractJavSceneCode(item?.name, item?.id);
+      if (code && this.metatubeClient?.configured) {
+        try {
+          const scene = await this.metatubeClient.searchExact(code, this.metatubeTimeoutMs);
+          if (scene?.poster && isMetaTubePoster(scene.poster)) {
+            metaTubeMatches += 1;
+            return {
+              healthy: true,
+              item: {
+                ...item,
+                poster: scene.poster,
+                posterShape: 'poster',
+              },
+            };
+          }
+        } catch (error) {
+          logger.debug(
+            { provider: this.name, code, error: error.message },
+            'JAVHDPorn MetaTube poster lookup failed safely'
+          );
+        }
+      }
+
       try {
         const token = new URL(String(item?.poster || '')).pathname.split('/').filter(Boolean).pop();
         const source = decodePosterSource(token);
-        if (!source) return null;
+        if (!source) return { healthy: false, item };
         await loadPosterImage(source);
-        return String(item.id || '');
+        return { healthy: true, item: { ...item, posterShape: 'poster' } };
       } catch {
-        return null;
+        return { healthy: false, item };
       }
-    }));
-    const healthyIds = new Set(checked.filter(Boolean));
-    const selected = preferHealthyPosterCards(items, healthyIds);
-    if (selected.length !== items.length) {
+    });
+    const healthyIds = new Set(checked
+      .filter(result => result?.healthy)
+      .map(result => String(result.item?.id || ''))
+      .filter(Boolean));
+    const enrichedById = new Map(checked
+      .filter(result => result?.item?.id)
+      .map(result => [String(result.item.id), result.item]));
+    const selected = preferHealthyPosterCards(cards, healthyIds)
+      .map(item => ({
+        ...(enrichedById.get(String(item?.id || '')) || item),
+        posterShape: 'poster',
+      }));
+    if (selected.length !== cards.length || metaTubeMatches) {
       logger.info(
         {
           provider: this.name,
           pageUrl: sanitizeUrlForLogs(url),
-          cards: items.length,
+          cards: cards.length,
           verifiedPosterCards: selected.length,
-          failedPosterCardsRemoved: items.length - selected.length,
+          metaTubePortraitCards: metaTubeMatches,
+          failedPosterCardsRemoved: cards.length - selected.length,
         },
-        'JAVHDPorn poster sources verified before catalog publication'
+        'JAVHDPorn portrait poster enrichment completed before catalog publication'
       );
     }
     return selected;
@@ -840,7 +933,7 @@ class JavHdPornProvider extends Provider {
       description: cleanText(videoObject?.description || $('meta[name="description"]').attr('content') || title),
       poster,
       background: poster,
-      posterShape: 'landscape',
+      posterShape: 'poster',
       genres: [...new Set(keywords)],
       extra: {
         playerVideoId: $('#video-player-area').attr('data-video-id') || '',
@@ -878,7 +971,21 @@ class JavHdPornProvider extends Provider {
       );
       metadataPageUrl = canonicalFallback;
     }
-    return this.metadataFromPage(metadataPageUrl, html);
+    const response = this.metadataFromPage(metadataPageUrl, html);
+    const code = extractJavSceneCode(response?.name, metadataPageUrl);
+    if (code && this.metatubeClient?.configured) {
+      try {
+        const scene = await this.metatubeClient.searchExact(code, this.metatubeTimeoutMs);
+        if (scene?.poster && isMetaTubePoster(scene.poster)) response.poster = scene.poster;
+      } catch (error) {
+        logger.debug(
+          { provider: this.name, code, error: error.message },
+          'JAVHDPorn metadata MetaTube poster lookup failed safely'
+        );
+      }
+    }
+    response.posterShape = 'poster';
+    return response;
   }
 
   playerBootstrap(html) {
@@ -1199,6 +1306,9 @@ class JavHdPornProvider extends Provider {
           provider: this.name,
           url: sanitizeUrlForLogs(candidate.url),
           error: error.message,
+          errorCode: error.code || '',
+          childHostname: error.childHostname || '',
+          cause: error.cause?.message || '',
         },
         'JAVHDPorn media candidate was rejected by the protected relay'
       );
@@ -1296,6 +1406,9 @@ create._test = {
   preferRealPosterCards,
   subtitleCanonicalPlaybackUrl,
   extractCatalogPoster,
+  extractJavSceneCode,
+  isMetaTubePoster,
+  mapWithConcurrency,
   normalizeSourceValue,
   prioritizePlayerCandidates,
   decodeReservePlayers,

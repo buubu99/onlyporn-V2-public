@@ -35,7 +35,7 @@ test('JAVHDPorn catalog parser accepts same-origin videos and rejects external l
   const results = provider.getCatalogMetas(fixture('catalog.html'), provider.baseUrl);
   assert.equal(results.length, 1);
   assert.equal(results[0].id, 'https://www.javhdporn.net/video/seo-001/');
-  assert.equal(results[0].posterShape, 'landscape');
+  assert.equal(results[0].posterShape, 'poster');
   assert.match(results[0].poster, /\/onlyporn\/poster\/javhdporn\//);
   assert.match(decodeSource(results[0].poster.split('/').pop()), /pics\.pornfhd\.com/);
 });

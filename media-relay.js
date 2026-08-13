@@ -32,6 +32,7 @@ const PROVIDER_SUFFIXES = {
     'streamhls.click',
     'edge-hls.saawsedge.com',
     'pianopic.com',
+    'qooglecdn.com',
     's2.maxstream.org',
     's4.maxstream.org',
     's8.maxstream.org',
@@ -329,6 +330,9 @@ async function registerHlsSnapshot({
         ...relayDiagnosticFields(entry),
         upstreamHostname: relayUpstreamHostname(entry),
         error: error.message,
+        errorCode: error.code || '',
+        childHostname: error.childHostname || '',
+        cause: error.cause?.message || '',
       },
       'RELAY_SNAPSHOT_FAILED'
     );
@@ -405,11 +409,12 @@ function resolveRelayEntry(token) {
 }
 
 class PlaylistChildRelayError extends Error {
-  constructor(message, cause) {
+  constructor(message, cause, details = {}) {
     super(message);
     this.name = 'PlaylistChildRelayError';
     this.code = PLAYLIST_CHILD_ERROR_CODE;
     if (cause) this.cause = cause;
+    if (details.childHostname) this.childHostname = details.childHostname;
   }
 }
 
@@ -438,9 +443,12 @@ function relayChild(entry, parentUrl, value, kind) {
     return `${publicBase}${mediaPathPrefix()}/${token}/${filenameFor(resolvedKind, sessionEntry.provider, resolved)}`;
   } catch (error) {
     if (error instanceof PlaylistChildRelayError) throw error;
+    let childHostname = '';
+    try { childHostname = new URL(resolved).hostname.toLowerCase(); } catch { /* Invalid child. */ }
     throw new PlaylistChildRelayError(
       'HLS playlist child URL could not be relayed safely',
-      error
+      error,
+      { childHostname }
     );
   }
 }

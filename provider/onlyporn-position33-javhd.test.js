@@ -50,6 +50,7 @@ test('JAVHDPorn accepts every verified additional playback host narrowly', () =>
     'https://edge-hls.saawsedge.com/tokenized/master.m3u8',
     'https://pianopic.com/hls/token/master.m3u8',
     'https://cdn.pianopic.com/hls/token/master.m3u8',
+    'https://video.qooglecdn.com/hls/token/segment-1.ts',
     'https://s2.maxstream.org/hls2/test/master.m3u8',
     'https://s4.maxstream.org/hls2/test/master.m3u8',
     'https://s8.maxstream.org/hls2/test/master.m3u8',
