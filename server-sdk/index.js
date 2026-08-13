@@ -6,6 +6,55 @@ const landingTemplate = require('stremio-addon-sdk/src/landingTemplate');
 const getRouter = require('stremio-addon-sdk/src/getRouter');
 const { addonEnabled } = require('../catalog');
 const mediaRelay = require('../media-relay');
+const logger = require('../logger');
+
+function requestLogLevel(context, status = 200) {
+    if (status >= 500) return 'error';
+    if (status >= 400) return 'warn';
+    return context.resource === 'health' ? 'debug' : 'info';
+}
+
+function installRequestTracing(app) {
+    app.use((req, res, next) => {
+        const context = logger.createRequestContext(req);
+        const startedAt = process.hrtime.bigint();
+
+        logger.runWithTraceContext(context, () => {
+            const initialLevel = requestLogLevel(context);
+            logger[initialLevel](
+                {
+                    event: 'REQ_IN',
+                    method: req.method,
+                    hasRange: Boolean(req.headers.range),
+                },
+                'REQ_IN'
+            );
+
+            let completed = false;
+            const logOutcome = finished => {
+                if (completed) return;
+                completed = true;
+                const durationMs = Number(process.hrtime.bigint() - startedAt) / 1e6;
+                const level = requestLogLevel(context, res.statusCode);
+                logger[level](
+                    {
+                        event: 'REQ_OUT',
+                        method: req.method,
+                        status: res.statusCode,
+                        durationMs: Number(durationMs.toFixed(2)),
+                        completed: Boolean(finished),
+                        hasRange: Boolean(req.headers.range),
+                    },
+                    'REQ_OUT'
+                );
+            };
+
+            res.once('finish', () => logOutcome(true));
+            res.once('close', () => logOutcome(res.writableEnded));
+            next();
+        });
+    });
+}
 
 function serveHTTP(addonInterface, opts = {}) {
     if (addonInterface.constructor.name !== 'AddonInterface') {
@@ -14,6 +63,7 @@ function serveHTTP(addonInterface, opts = {}) {
 
     const app = express();
     app.set('trust proxy', true);
+    installRequestTracing(app);
     if (typeof opts.configureApp === 'function') opts.configureApp(app);
     const router = getRouter(addonInterface);
 

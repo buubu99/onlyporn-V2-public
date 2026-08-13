@@ -431,6 +431,7 @@ async function runCatalogPrewarm(options = {}) {
 
   log.info(
     {
+      event: 'DEPLOY_PREWARM_START',
       runId,
       baseUrl,
       activeCatalogs: activeCatalogs.length,
@@ -540,6 +541,7 @@ async function runCatalogPrewarm(options = {}) {
 
         log.info(
           {
+            event: 'DEPLOY_PREWARM_COMPLETE',
             success: true,
             runId,
             manifestVersion: result.manifestVersion,
@@ -572,6 +574,7 @@ async function runCatalogPrewarm(options = {}) {
   };
   log.warn(
     {
+      event: 'DEPLOY_PREWARM_INCOMPLETE',
       success: false,
       runId,
       manifestVersion: result.manifestVersion,

@@ -209,16 +209,34 @@ function createSessionEntry({ url, headers = {}, provider, kind, ttlMs = SESSION
   const safeUrl = validateTargetUrl(url, provider);
   const resolvedKind = kind || kindFromUrl(safeUrl);
   const token = crypto.randomBytes(24).toString('base64url');
+  const trace = logger.currentTraceContext();
   const entry = {
     url: safeUrl,
     headers: sanitizeHeaders(headers),
     provider,
     kind: resolvedKind,
     sessionToken: token,
+    originRid: String(trace.rid || ''),
+    originTargetHash: String(trace.targetHash || ''),
+    originPlatform: String(trace.platform || 'unknown'),
+    originUaFamily: String(trace.uaFamily || 'unknown'),
   };
 
   entries.set(token, entry, ttlMs);
-  logger.debug({ provider, kind: resolvedKind }, 'Media relay session registered');
+  logger.info(
+    {
+      event: 'RELAY_SESSION',
+      provider,
+      kind: resolvedKind,
+      session: relaySessionFingerprint(token),
+      originRid: entry.originRid,
+      originTargetHash: entry.originTargetHash,
+      originPlatform: entry.originPlatform,
+      upstreamHostname: relayUpstreamHostname(entry),
+      ttlMs,
+    },
+    'RELAY_SESSION'
+  );
   return entry;
 }
 
@@ -281,7 +299,9 @@ async function registerHlsSnapshot({
     entry.playlistSnapshots = snapshots;
     logger.info(
       {
+        event: 'RELAY_SNAPSHOT_READY',
         provider: entry.provider,
+        ...relayDiagnosticFields(entry),
         upstreamHostname: relayUpstreamHostname(entry),
         playlists: visited.size,
         bytes: [...snapshots.values()].reduce(
@@ -293,6 +313,16 @@ async function registerHlsSnapshot({
     );
     return `${publicBase}${mediaPathPrefix()}/${entry.sessionToken}/${filenameFor(entry.kind, entry.provider)}`;
   } catch (error) {
+    logger.warn(
+      {
+        event: 'RELAY_SNAPSHOT_FAILED',
+        provider: entry.provider,
+        ...relayDiagnosticFields(entry),
+        upstreamHostname: relayUpstreamHostname(entry),
+        error: error.message,
+      },
+      'RELAY_SNAPSHOT_FAILED'
+    );
     entries.delete(entry.sessionToken);
     throw error;
   }
@@ -796,6 +826,16 @@ function relayUpstreamHostname(entry) {
   }
 }
 
+function relayDiagnosticFields(entry) {
+  return {
+    session: relaySessionFingerprint(entry?.sessionToken),
+    originRid: String(entry?.originRid || ''),
+    originTargetHash: String(entry?.originTargetHash || ''),
+    originPlatform: String(entry?.originPlatform || 'unknown'),
+    originUaFamily: String(entry?.originUaFamily || 'unknown'),
+  };
+}
+
 function attachRelayUsageLogging(req, res, entry) {
   if (!mediaUsageLoggingEnabled()) return;
 
@@ -840,7 +880,9 @@ function attachRelayUsageLogging(req, res, entry) {
         bytesSent,
         durationMs: Date.now() - startedAt,
         completed: Boolean(completed),
-        session: relaySessionFingerprint(entry.sessionToken),
+        ...relayDiagnosticFields(entry),
+        playbackPlatform: logger.currentTraceContext().platform || 'unknown',
+        playbackUaFamily: logger.currentTraceContext().uaFamily || 'unknown',
         upstreamHostname: relayUpstreamHostname(entry),
       },
       'Media relay usage'
@@ -875,6 +917,13 @@ async function handleRequest(req, res) {
 
   const entry = resolveRelayEntry(req.params.token);
   if (!entry) {
+    logger.warn(
+      {
+        event: 'RELAY_SESSION_EXPIRED',
+        session: relaySessionFingerprint(req.params.token),
+      },
+      'RELAY_SESSION_EXPIRED'
+    );
     res.status(410).type('text/plain').send('Media relay link expired');
     return;
   }
@@ -914,6 +963,17 @@ async function handleRequest(req, res) {
       });
 
       if (response.status < 200 || response.status >= 300) {
+        logger.warn(
+          {
+            event: 'RELAY_UPSTREAM_STATUS',
+            provider: entry.provider,
+            ...relayDiagnosticFields(entry),
+            stage: 'playlist',
+            upstreamStatus: response.status,
+            upstreamHostname: relayUpstreamHostname(entry),
+          },
+          'RELAY_UPSTREAM_STATUS'
+        );
         res.status(response.status).type('text/plain').send('Upstream playlist request failed');
         return;
       }
@@ -931,7 +991,9 @@ async function handleRequest(req, res) {
         if (error?.code !== PLAYLIST_CHILD_ERROR_CODE) throw error;
         logger.warn(
           {
+            event: 'RELAY_CHILD_REJECTED',
             provider: entry.provider,
+            ...relayDiagnosticFields(entry),
             code: error.code,
             error: error.message,
           },
@@ -960,6 +1022,17 @@ async function handleRequest(req, res) {
       });
 
       if (response.status < 200 || response.status >= 300) {
+        logger.warn(
+          {
+            event: 'RELAY_UPSTREAM_STATUS',
+            provider: entry.provider,
+            ...relayDiagnosticFields(entry),
+            stage: 'jav-segment',
+            upstreamStatus: response.status,
+            upstreamHostname: relayUpstreamHostname(entry),
+          },
+          'RELAY_UPSTREAM_STATUS'
+        );
         res.status(response.status).type('text/plain').send('Upstream segment request failed');
         return;
       }
@@ -967,13 +1040,25 @@ async function handleRequest(req, res) {
       const upstreamPayload = Buffer.from(response.data || '');
       const normalized = normalizeJavTransportSegment(upstreamPayload);
       if (!normalized) {
+        logger.warn(
+          {
+            event: 'JAVHD_SEGMENT_REJECTED',
+            provider: entry.provider,
+            ...relayDiagnosticFields(entry),
+            upstreamBytes: upstreamPayload.length,
+            upstreamHostname: relayUpstreamHostname(entry),
+          },
+          'JAVHD_SEGMENT_REJECTED'
+        );
         res.status(502).type('text/plain').send('JAVHDPorn segment payload was not recognized');
         return;
       }
 
       logger.debug(
         {
+          event: 'JAVHD_SEGMENT_DECODED',
           provider: entry.provider,
+          ...relayDiagnosticFields(entry),
           wrapperBytes: normalized.wrapperBytes,
           payloadBytes: normalized.payload.length,
         },
@@ -1006,6 +1091,19 @@ async function handleRequest(req, res) {
     }
 
     res.status(response.status);
+    if (response.status < 200 || response.status >= 400) {
+      logger.warn(
+        {
+          event: 'RELAY_UPSTREAM_STATUS',
+          provider: entry.provider,
+          ...relayDiagnosticFields(entry),
+          stage: entry.kind,
+          upstreamStatus: response.status,
+          upstreamHostname: relayUpstreamHostname(entry),
+        },
+        'RELAY_UPSTREAM_STATUS'
+      );
+    }
     const forwardedHeaders = [
       'content-type',
       'content-length',
@@ -1028,7 +1126,16 @@ async function handleRequest(req, res) {
     }
 
     response.data.on('error', error => {
-      logger.warn({ provider: entry.provider, error: error.message }, 'Media relay upstream stream failed');
+      logger.warn(
+        {
+          event: 'RELAY_UPSTREAM_STREAM_ERROR',
+          provider: entry.provider,
+          ...relayDiagnosticFields(entry),
+          upstreamHostname: relayUpstreamHostname(entry),
+          error: error.message,
+        },
+        'Media relay upstream stream failed'
+      );
       if (!res.headersSent) res.status(502).end();
       else res.destroy(error);
     });
@@ -1037,7 +1144,16 @@ async function handleRequest(req, res) {
     });
     response.data.pipe(res);
   } catch (error) {
-    logger.warn({ provider: entry.provider, error: error.message }, 'Media relay request failed');
+    logger.warn(
+      {
+        event: 'RELAY_REQUEST_ERROR',
+        provider: entry.provider,
+        ...relayDiagnosticFields(entry),
+        upstreamHostname: relayUpstreamHostname(entry),
+        error: error.message,
+      },
+      'Media relay request failed'
+    );
     if (!res.headersSent) res.status(502).type('text/plain').send('Media relay request failed');
     else res.destroy(error);
   }

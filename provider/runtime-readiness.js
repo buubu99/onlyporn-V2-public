@@ -2,6 +2,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const logger = require('../logger');
 
 const SUKEBEI_MIN_CARDS = 24;
 const SUKEBEI_MAX_CARDS = 40;
@@ -51,8 +52,18 @@ function latchStartupReadyMarkerIfNeeded() {
   fs.renameSync(temporary, markerPath);
   startupReadyLatched = true;
 
-  process.stdout.write(
-    `OnlyPorn startup readiness latched: 34/34 + strict Sukebei + indexed Sukebei Hentai; marker=${markerPath}\n`
+  logger.info(
+    {
+      event: 'DEPLOY_READY',
+      activeCatalogs: state.catalog.activeCatalogs,
+      healthyCatalogs: state.catalog.healthyCatalogs,
+      missingCatalogs: state.catalog.missingCatalogs,
+      sukebeiCards: state.sukebei.cards,
+      sukebeiMetatubePosters: state.sukebei.metatubePosters,
+      sukebeiGeneratedPosters: state.sukebei.generatedPosters,
+      marker: markerPath,
+    },
+    'DEPLOY_READY'
   );
   return true;
 }
