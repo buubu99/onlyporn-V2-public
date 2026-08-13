@@ -41,6 +41,21 @@ test('JAV search cards ignore data placeholders and choose the largest real srcs
   assert.notEqual(metas[0].poster, 'https://pics.pornfhd.com/404.jpeg');
 });
 
+test('exact uncensored search uses the full JAV category and its page routes', () => {
+  const provider = createJavHdPorn();
+  const args = { extra: { search: '  Uncensored  ', skip: 24 } };
+  const firstPage = provider.handleSearch(args);
+  assert.equal(firstPage, 'https://www.javhdporn.net/v2/category/uncensored/');
+  assert.equal(
+    provider.handlePagination(firstPage, args),
+    'https://www.javhdporn.net/v2/category/uncensored/page/2/'
+  );
+  assert.equal(
+    provider.handleSearch({ extra: { search: 'SONE 620 uncensored' } }),
+    'https://www.javhdporn.net/?s=SONE+620+uncensored'
+  );
+});
+
 test('JAV DMM search cards keep their real poster and are never deleted', () => {
   const provider = createJavHdPorn();
   const html = `

@@ -61,6 +61,10 @@ const GENRE_ROUTES = new Map([
   ['Amateur', '/category/amateur/'],
 ]);
 
+function isUncensoredCategorySearch(value) {
+  return cleanText(value).toLowerCase() === 'uncensored';
+}
+
 function cleanText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -500,6 +504,9 @@ class JavHdPornProvider extends Provider {
   }
 
   handleSearch({ extra: { search } }) {
+    if (isUncensoredCategorySearch(search)) {
+      return new URL(GENRE_ROUTES.get('Uncensored'), this.baseUrl).toString();
+    }
     const url = new URL(this.baseUrl);
     url.searchParams.set('s', cleanText(search));
     return url.toString();
@@ -515,6 +522,11 @@ class JavHdPornProvider extends Provider {
     if (page <= 1) return url;
 
     const parsed = new URL(url, this.baseUrl);
+    if (search && isUncensoredCategorySearch(search)) {
+      parsed.pathname = `${parsed.pathname.replace(/\/?$/, '/') }page/${page}/`.replace(/\/{2,}/g, '/');
+      return parsed.toString();
+    }
+
     if (search || parsed.searchParams.has('s')) {
       parsed.searchParams.set('paged', String(page));
       return parsed.toString();
@@ -1119,5 +1131,6 @@ create._test = {
   prioritizePlayerCandidates,
   decodeReservePlayers,
   isJavPlayerHost,
+  isUncensoredCategorySearch,
 };
 module.exports = create;
