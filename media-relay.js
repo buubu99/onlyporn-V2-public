@@ -12,6 +12,9 @@ const PLAYLIST_CHILD_ERROR_CODE = 'HLS_CHILD_REJECTED';
 const CHILD_TOKEN_SECRET = crypto.randomBytes(32);
 const MAX_REDIRECTS = 5;
 const PLAYLIST_MAX_BYTES = 4 * 1024 * 1024;
+const HLS_SNAPSHOT_MAX_PLAYLISTS = 12;
+const HLS_SNAPSHOT_TIMEOUT_MS = 8_000;
+const HLS_SNAPSHOT_REQUEST_TIMEOUT_MS = 5_000;
 const JAV_SEGMENT_MAX_BYTES = 32 * 1024 * 1024;
 const entries = new BoundedTtlCache({ maxEntries: MAX_SESSIONS, ttlMs: SESSION_TTL_MS });
 
@@ -238,28 +241,55 @@ async function registerHlsSnapshot({
 
   const entry = createSessionEntry({ url, headers, provider, kind: 'hls', ttlMs });
   try {
-    const { response, finalUrl } = await upstreamRequest(entry, {
-      method: 'GET',
-      text: true,
-    });
-    if (response.status < 200 || response.status >= 300) {
-      throw new Error(`Upstream playlist snapshot failed with HTTP ${response.status}`);
+    const snapshots = new Map();
+    const visited = new Set();
+    const queue = [entry.url];
+    const deadlineAt = Date.now() + HLS_SNAPSHOT_TIMEOUT_MS;
+
+    while (queue.length) {
+      const playlistUrl = validateTargetUrl(queue.shift(), entry.provider);
+      if (visited.has(playlistUrl)) continue;
+      if (visited.size >= HLS_SNAPSHOT_MAX_PLAYLISTS) {
+        throw new Error('HLS playlist snapshot exceeded its bounded child count');
+      }
+      visited.add(playlistUrl);
+
+      const remainingMs = deadlineAt - Date.now();
+      if (remainingMs <= 0) throw new Error('HLS playlist snapshot exceeded its time budget');
+
+      const playlistEntry = { ...entry, url: playlistUrl, kind: 'hls' };
+      const { response, finalUrl } = await upstreamRequest(playlistEntry, {
+        method: 'GET',
+        text: true,
+        timeoutMs: Math.min(HLS_SNAPSHOT_REQUEST_TIMEOUT_MS, remainingMs),
+      });
+      if (response.status < 200 || response.status >= 300) {
+        throw new Error(`Upstream playlist snapshot failed with HTTP ${response.status}`);
+      }
+
+      const content = String(response.data || '');
+      if (!content.includes('#EXTM3U')) {
+        throw new Error('Upstream playlist snapshot was not HLS');
+      }
+
+      const rewritten = rewritePlaylist(content, finalUrl, entry);
+      snapshots.set(playlistUrl, rewritten);
+      snapshots.set(finalUrl, rewritten);
+      queue.push(...hlsChildPlaylistUrls(content, finalUrl));
     }
 
-    const content = String(response.data || '');
-    if (!content.includes('#EXTM3U')) {
-      throw new Error('Upstream playlist snapshot was not HLS');
-    }
-
-    const rewritten = rewritePlaylist(content, finalUrl, entry);
-    entry.playlistSnapshots = new Map([[entry.url, rewritten]]);
+    entry.playlistSnapshots = snapshots;
     logger.info(
       {
         provider: entry.provider,
         upstreamHostname: relayUpstreamHostname(entry),
-        bytes: Buffer.byteLength(rewritten),
+        playlists: visited.size,
+        bytes: [...snapshots.values()].reduce(
+          (total, playlist) => total + Buffer.byteLength(playlist),
+          0
+        ),
       },
-      'Expiring HLS root playlist preserved'
+      'Validated HLS playlist tree preserved'
     );
     return `${publicBase}${mediaPathPrefix()}/${entry.sessionToken}/${filenameFor(entry.kind, entry.provider)}`;
   } catch (error) {
@@ -385,6 +415,34 @@ function kindFromPlaylistTag(line, fallbackUrl = '') {
   if (normalized.startsWith('#EXT-X-MAP')) return 'segment';
   if (normalized.startsWith('#EXTINF')) return 'segment';
   return kindFromUrl(fallbackUrl);
+}
+
+function hlsChildPlaylistUrls(content, finalUrl) {
+  const children = new Set();
+  let pendingKind = '';
+
+  for (const line of String(content).split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    if (!trimmed.startsWith('#')) {
+      const resolved = resolveChildUrl(finalUrl, trimmed);
+      const kind = pendingKind || kindFromUrl(resolved);
+      pendingKind = '';
+      if (resolved && kind === 'hls') children.add(resolved);
+      continue;
+    }
+
+    if (trimmed.startsWith('#EXT-X-STREAM-INF')) pendingKind = 'hls';
+    const uriKind = kindFromPlaylistTag(trimmed);
+    if (uriKind !== 'hls') continue;
+    for (const match of line.matchAll(/URI="([^"]+)"/g)) {
+      const resolved = resolveChildUrl(finalUrl, match[1]);
+      if (resolved) children.add(resolved);
+    }
+  }
+
+  return [...children];
 }
 
 function rewritePlaylist(content, finalUrl, entry) {
@@ -659,7 +717,10 @@ async function pipeYespornResponse(
   stream.pipe(res);
 }
 
-async function upstreamRequest(entry, { method = 'GET', range, text = false, buffer = false } = {}) {
+async function upstreamRequest(
+  entry,
+  { method = 'GET', range, text = false, buffer = false, timeoutMs = 30_000 } = {}
+) {
   let currentUrl = entry.url;
 
   for (let redirects = 0; redirects <= MAX_REDIRECTS; redirects += 1) {
@@ -678,7 +739,7 @@ async function upstreamRequest(entry, { method = 'GET', range, text = false, buf
       headers,
       maxRedirects: 0,
       responseType: text ? 'text' : (buffer ? 'arraybuffer' : 'stream'),
-      timeout: 30_000,
+      timeout: timeoutMs,
       validateStatus: () => true,
       decompress: true,
       maxContentLength: text
@@ -1001,6 +1062,7 @@ module.exports = {
     isJavTransportSegment,
     normalizeJavTransportSegment,
     kindFromPlaylistTag,
+    hlsChildPlaylistUrls,
     kindFromUrl,
     normalizePublicBase,
     pngPayloadOffset,

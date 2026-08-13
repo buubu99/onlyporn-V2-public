@@ -181,6 +181,12 @@ test('the discovery loop retains the full 12-page fallback traversal', () => {
 
 test('all approved pending-title source families survive stream registration', async () => {
   const provider = createJavHdPorn();
+  provider.registerPlayableHls = async (candidate, headers) => mediaRelay.register({
+    url: candidate.url,
+    headers,
+    provider: provider.name,
+    kind: 'hls',
+  });
   provider.fetchHtml = async () => '<html></html>';
   provider.playerBootstrap = () => ({
     videoId: '867640',

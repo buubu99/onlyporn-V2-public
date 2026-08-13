@@ -93,6 +93,12 @@ test('JAVHDPorn never exposes a raw HLS URL rejected by the protected relay', as
 
 test('JAVHDPorn keeps a relay-compatible reserve stream and filters the blocked primary', async () => {
   const provider = createJavHdPorn();
+  provider.registerPlayableHls = async (candidate, headers) => mediaRelay.register({
+    url: candidate.url,
+    headers,
+    provider: provider.name,
+    kind: 'hls',
+  });
   provider.fetchHtml = async () => '<html></html>';
   provider.playerBootstrap = () => ({ videoId: '867640', mpu: 'fixture', version: '2' });
   provider.requestPlayerSources = async () => [];
@@ -118,6 +124,55 @@ test('JAVHDPorn keeps a relay-compatible reserve stream and filters the blocked 
   assert.equal(response.streams.length, 1);
   assert.match(response.streams[0].url, /^https:\/\/onlyporn\.example\/media\//);
   assert.equal(response.streams[0].behaviorHints.notWebReady, false);
+});
+
+test('JAVHDPorn drops a broken HLS master before publishing its working reserve', async () => {
+  const provider = createJavHdPorn();
+  const attempted = [];
+  provider.registerPlayableHls = async (candidate, headers) => {
+    attempted.push(candidate.url);
+    if (candidate.url.includes('streamhls.click')) {
+      const error = new Error('HLS playlist child URL could not be relayed safely');
+      error.code = mediaRelay._test.PLAYLIST_CHILD_ERROR_CODE;
+      throw error;
+    }
+    return mediaRelay.register({
+      url: candidate.url,
+      headers,
+      provider: provider.name,
+      kind: 'hls',
+    });
+  };
+  provider.fetchHtml = async () => '<html></html>';
+  provider.playerBootstrap = () => ({ videoId: '620', mpu: 'fixture', version: '2' });
+  provider.requestPlayerSources = async () => [];
+  provider.discoverMedia = async () => [
+    {
+      url: 'https://streamhls.click/hls/broken/master.m3u8',
+      referer: 'https://video1.javhdporn.net/p/broken',
+      context: 'reserve[0] de',
+      kind: 'hls',
+    },
+    {
+      url: 'https://pianopic.com/hls/working/master.m3u8',
+      referer: 'https://video.javhdporn.net/p/working',
+      context: 'reserve[1] fr',
+      kind: 'hls',
+    },
+  ];
+
+  const response = await provider.processStreams({
+    id: 'https://www.javhdporn.net/video/mvsd-620-decensored/',
+  });
+
+  assert.deepEqual(attempted, [
+    'https://streamhls.click/hls/broken/master.m3u8',
+    'https://pianopic.com/hls/working/master.m3u8',
+  ]);
+  assert.equal(response.streams.length, 1);
+  const token = new URL(response.streams[0].url).pathname.split('/').filter(Boolean).at(-2);
+  assert.equal(mediaRelay._test.resolveRelayEntry(token).url,
+    'https://pianopic.com/hls/working/master.m3u8');
 });
 
 test('OnlyPorn retains hotfix 2.5.5 coverage in later releases', () => {

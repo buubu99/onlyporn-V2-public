@@ -126,6 +126,45 @@ test('vdcdn master rewriting preserves custom token lines and relays image-named
   assert.equal(mediaRelay._test.entries.size, 1, 'segment child token must reuse one session');
 });
 
+test('HLS snapshot registration rejects an unsafe child before a stream is published', async () => {
+  mediaRelay._test.entries.clear();
+  const originalRequest = axios.request;
+  let upstreamRequests = 0;
+  axios.request = async () => {
+    upstreamRequests += 1;
+    return {
+      status: 200,
+      data: upstreamRequests === 1
+        ? [
+            '#EXTM3U',
+            '#EXT-X-STREAM-INF:BANDWIDTH=800000',
+            '720/index.m3u8',
+          ].join('\n')
+        : [
+            '#EXTM3U',
+            '#EXTINF:4.0,',
+            'https://unapproved.invalid/blocked/segment.ts',
+          ].join('\n'),
+      headers: { 'content-type': 'application/vnd.apple.mpegurl' },
+    };
+  };
+
+  try {
+    await assert.rejects(
+      mediaRelay.registerHlsSnapshot({
+        url: 'https://streamhls.click/hls/broken/master.m3u8',
+        headers: { Referer: 'https://video1.javhdporn.net/p/broken' },
+        provider: 'javhdporn',
+      }),
+      error => error.code === mediaRelay._test.PLAYLIST_CHILD_ERROR_CODE
+    );
+    assert.equal(upstreamRequests, 2, 'preflight must inspect the selected child playlist');
+    assert.equal(mediaRelay._test.entries.size, 0, 'rejected preflight must not leak a relay session');
+  } finally {
+    axios.request = originalRequest;
+  }
+});
+
 test('vdcdn root snapshot remains playable after its one-use upstream master expires', async () => {
   mediaRelay._test.entries.clear();
   const originalRequest = axios.request;
@@ -134,10 +173,12 @@ test('vdcdn root snapshot remains playable after its one-use upstream master exp
     upstreamRequests += 1;
     assert.equal(options.responseType, 'text');
     return {
-      status: upstreamRequests === 1 ? 200 : 403,
+      status: upstreamRequests <= 2 ? 200 : 403,
       data: upstreamRequests === 1
         ? '#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=800000\n360p/index.m3u8\n'
-        : 'expired',
+        : upstreamRequests === 2
+          ? '#EXTM3U\n#EXTINF:4.0,\nsegment-1.webp\n#EXT-X-ENDLIST\n'
+          : 'expired',
       headers: { 'content-type': 'application/vnd.apple.mpegurl' },
     };
   };
@@ -158,7 +199,15 @@ test('vdcdn root snapshot remains playable after its one-use upstream master exp
     assert.equal(response.statusCode, 200);
     assert.match(response.body.toString(), /^#EXTM3U/);
     assert.match(response.body.toString(), /\/index\.m3u8/);
-    assert.equal(upstreamRequests, 1, 'serving the root must use the preserved snapshot');
+    const childUrl = response.body.toString().split('\n').find(line => /^https:\/\//.test(line));
+    const childResponse = responseCapture();
+    await mediaRelay.handleRequest(
+      { method: 'GET', params: { token: tokenFromRelayUrl(childUrl) }, headers: {} },
+      childResponse
+    );
+    assert.equal(childResponse.statusCode, 200);
+    assert.match(childResponse.body.toString(), /segment\.ts/);
+    assert.equal(upstreamRequests, 2, 'serving the root and child must use preserved snapshots');
   } finally {
     axios.request = originalRequest;
   }

@@ -978,11 +978,7 @@ class JavHdPornProvider extends Provider {
 
     try {
       const headers = await this.playbackHeaders(candidate.referer, candidate.url);
-      const relayUrl = await mediaRelay.registerHlsSnapshot({
-        url: candidate.url,
-        headers,
-        provider: this.name,
-      });
+      const relayUrl = await this.registerPlayableHls(candidate, headers);
       return { ...candidate, relayUrl };
     } catch (error) {
       logger.debug(
@@ -997,6 +993,17 @@ class JavHdPornProvider extends Provider {
     }
   }
 
+  async registerPlayableHls(candidate, headers) {
+    // Fetch and rewrite the root before publication. A shallow relay registration
+    // can advertise a master whose first child is outside the protected profile,
+    // which only fails after Stremio has already selected the stream.
+    return mediaRelay.registerHlsSnapshot({
+      url: candidate.url,
+      headers,
+      provider: this.name,
+    });
+  }
+
   async streamFromMedia(candidate) {
     const resolution = extractResolution(candidate.context, candidate.url);
     const name = `JAV HD Porn ${resolution || (candidate.kind === 'hls' ? 'HLS' : 'MP4')}`;
@@ -1005,12 +1012,8 @@ class JavHdPornProvider extends Provider {
       let relayUrl = candidate.relayUrl;
       if (!relayUrl) {
         const headers = await this.playbackHeaders(candidate.referer, candidate.url);
-        if (isExpiringVdcdnHls(candidate.url)) {
-          relayUrl = await mediaRelay.registerHlsSnapshot({
-            url: candidate.url,
-            headers,
-            provider: this.name,
-          });
+        if (candidate.kind === 'hls') {
+          relayUrl = await this.registerPlayableHls(candidate, headers);
         } else {
           relayUrl = mediaRelay.register({
             url: candidate.url,
