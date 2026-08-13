@@ -1,3 +1,4 @@
+const crypto = require('node:crypto');
 const { load } = require('cheerio');
 const logger = require('../logger');
 const {
@@ -37,6 +38,70 @@ const DEFAULT_POSTER = 'https://pics.pornfhd.com/404.jpeg';
 const MAX_PLAYER_PAGES = 12;
 const MAX_PLAYER_DEPTH = 3;
 const PLAYER_SCRIPT_MAX_BYTES = 1024 * 1024;
+const JAV_HOME_ROTATION_MS = 15 * 60 * 1000;
+const JAV_HOME_FAMILY_COUNT = 5;
+const JAV_HOME_FAMILIES = Object.freeze([
+  'SONE',
+  'SSIS',
+  'MIDV',
+  'MIDE',
+  'JUQ',
+  'JUL',
+  'IPX',
+  'ABW',
+  'ADN',
+  'PRED',
+  'FSDSS',
+  'CAWD',
+  'DASS',
+  'START',
+  'SIRO',
+  'FC2 PPV',
+]);
+
+function escapeRegex(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function isJavCodeFamilyTitle(title, family) {
+  const text = cleanText(title);
+  if (!text) return false;
+  if (family === 'FC2 PPV') {
+    return /\bFC2(?:[\s._-]*PPV)?[\s._-]*\d{5,9}\b/i.test(text);
+  }
+  return new RegExp(`\\b${escapeRegex(family)}[\\s._-]*\\d{2,7}\\b`, 'i').test(text);
+}
+
+function rotatingJavFamilies(rotation, page = 1, count = JAV_HOME_FAMILY_COUNT) {
+  const seed = `${Math.max(Number(rotation) || 0, 0)}:${Math.max(Number(page) || 1, 1)}`;
+  return [...JAV_HOME_FAMILIES]
+    .sort((left, right) => crypto
+      .createHash('sha256')
+      .update(`${seed}:${left}`)
+      .digest('hex')
+      .localeCompare(crypto.createHash('sha256').update(`${seed}:${right}`).digest('hex')))
+    .slice(0, Math.min(Math.max(Number(count) || JAV_HOME_FAMILY_COUNT, 1), JAV_HOME_FAMILIES.length));
+}
+
+function interleaveJavFamilyCards(groups, limit = 24) {
+  const rows = (Array.isArray(groups) ? groups : []).map(group => [...(Array.isArray(group) ? group : [])]);
+  const output = [];
+  const seen = new Set();
+  let cursor = 0;
+  while (output.length < limit && rows.some(row => cursor < row.length)) {
+    for (const row of rows) {
+      const item = row[cursor];
+      if (!item) continue;
+      const id = String(item.id || '').trim();
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      output.push(item);
+      if (output.length >= limit) break;
+    }
+    cursor += 1;
+  }
+  return output;
+}
 
 function isExpiringVdcdnHls(value) {
   if (!isHls(value)) return false;
@@ -408,6 +473,16 @@ class JavHdPornProvider extends Provider {
       maxEntries: 12,
       ttlMs: 15 * 60 * 1000,
     });
+    this.homeCatalogCache = new BoundedTtlCache({
+      maxEntries: 8,
+      ttlMs: JAV_HOME_ROTATION_MS,
+    });
+    this.homeCatalogInFlight = new Map();
+    this.lastGoodHomeCatalog = new BoundedTtlCache({
+      maxEntries: 8,
+      ttlMs: 24 * 60 * 60 * 1000,
+    });
+    this.homeClock = () => Date.now();
   }
 
   approveDynamicPlayerHost(url) {
@@ -426,6 +501,94 @@ class JavHdPornProvider extends Provider {
 
   getInitialUrl() {
     return new URL(GENRE_ROUTES.get('Uncensored'), this.baseUrl).toString();
+  }
+
+  async handleCatalog(args) {
+    const extra = args?.extra || {};
+    if (
+      args?.type === Provider.TYPE &&
+      args?.id === this.name &&
+      !cleanText(extra.search) &&
+      !cleanText(extra.genre)
+    ) {
+      return this.handleRotatingHomeCatalog(args);
+    }
+    return super.handleCatalog(args);
+  }
+
+  async handleRotatingHomeCatalog(args) {
+    const skip = Math.max(Number.parseInt(String(args?.extra?.skip || 0), 10) || 0, 0);
+    const page = Number(this.page(skip));
+    const rotation = Math.floor(this.homeClock() / JAV_HOME_ROTATION_MS);
+    const cacheKey = `${rotation}:${page}`;
+    const cached = this.homeCatalogCache.get(cacheKey);
+    if (cached) return cached;
+    if (this.homeCatalogInFlight.has(cacheKey)) return this.homeCatalogInFlight.get(cacheKey);
+    const lastGood = this.lastGoodHomeCatalog.get(page);
+
+    const operation = (async () => {
+      const families = rotatingJavFamilies(rotation, page);
+      const results = await Promise.all(families.map(async family => {
+        const searchArgs = { extra: { search: family, skip } };
+        let url = this.handleSearch(searchArgs);
+        if (page > 1) url = this.handlePagination(url, searchArgs);
+        try {
+          const html = await this.fetchHtml(url);
+          const cards = this.getCatalogMetas(html, url)
+            .filter(item => isJavCodeFamilyTitle(item?.name, family));
+          return { family, cards, failed: false };
+        } catch (error) {
+          logger.warn({
+            provider: this.name,
+            family,
+            page,
+            error: error.message,
+          }, 'JAVHDPorn rotating Home family failed safely');
+          return { family, cards: [], failed: true };
+        }
+      }));
+
+      const mixed = interleaveJavFamilyCards(results.map(result => result.cards), this.limit);
+      const processed = await this.postProcessCatalogMetas(mixed, { args, url: this.baseUrl });
+      const metas = (Array.isArray(processed) ? processed : []).map(item => ({
+        ...item,
+        id: this.toStremioId(item.id),
+      }));
+      const response = { metas };
+      if (metas.length >= Math.min(12, this.limit)) {
+        this.homeCatalogCache.set(cacheKey, response);
+        this.lastGoodHomeCatalog.set(page, response);
+      }
+
+      logger.info({
+        provider: this.name,
+        catalogId: args.id,
+        page,
+        rotation,
+        families,
+        familyCards: Object.fromEntries(results.map(result => [result.family, result.cards.length])),
+        failedFamilies: results.filter(result => result.failed).map(result => result.family),
+        metas: metas.length,
+        usedLastKnownGood: Boolean(metas.length < Math.min(12, this.limit) && lastGood),
+      }, 'JAVHDPorn rotating code-family Home completed');
+
+      return metas.length >= Math.min(12, this.limit) || !lastGood ? response : lastGood;
+    })()
+      .catch(error => {
+        logger.warn({
+          provider: this.name,
+          catalogId: args.id,
+          page,
+          rotation,
+          error: error.message,
+          usedLastKnownGood: Boolean(lastGood),
+        }, 'JAVHDPorn rotating code-family Home failed safely');
+        return lastGood || { metas: [] };
+      })
+      .finally(() => this.homeCatalogInFlight.delete(cacheKey));
+
+    this.homeCatalogInFlight.set(cacheKey, operation);
+    return operation;
   }
 
   async fetchSafariResponse(url, options = {}) {
@@ -1116,6 +1279,9 @@ class JavHdPornProvider extends Provider {
 const create = JavHdPornProvider.create;
 create._test = {
   GENRE_ROUTES,
+  JAV_HOME_FAMILIES,
+  JAV_HOME_FAMILY_COUNT,
+  JAV_HOME_ROTATION_MS,
   cleanTitle,
   extractPlayerCandidates,
   isAdvertisementMedia,
@@ -1135,5 +1301,8 @@ create._test = {
   decodeReservePlayers,
   isJavPlayerHost,
   isUncensoredCategorySearch,
+  interleaveJavFamilyCards,
+  isJavCodeFamilyTitle,
+  rotatingJavFamilies,
 };
 module.exports = create;
