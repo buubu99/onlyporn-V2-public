@@ -7,6 +7,7 @@ const path = require('node:path');
 const test = require('node:test');
 
 const createJavHdPorn = require('./javhdporn');
+const { __testOnlyIsSukebeiCodeSearch } = require('./tpb4k');
 const { decodeSource, FALLBACK_POSTER_PNG, FALLBACK_POSTER_TOKEN, javPosterProxyUrl } = require('./javhdporn-poster-proxy');
 const { createSearchSqliteStore } = require('./search-sqlite');
 
@@ -43,6 +44,7 @@ test('JAV search cards ignore data placeholders and choose the largest real srcs
 
 test('exact uncensored search uses the full JAV category and its page routes', () => {
   const provider = createJavHdPorn();
+  assert.equal(provider.getInitialUrl(), 'https://www.javhdporn.net/v2/category/uncensored/');
   const args = { extra: { search: '  Uncensored  ', skip: 24 } };
   const firstPage = provider.handleSearch(args);
   assert.equal(firstPage, 'https://www.javhdporn.net/v2/category/uncensored/');
@@ -54,6 +56,15 @@ test('exact uncensored search uses the full JAV category and its page routes', (
     provider.handleSearch({ extra: { search: 'SONE 620 uncensored' } }),
     'https://www.javhdporn.net/?s=SONE+620+uncensored'
   );
+});
+
+test('Sukebei treats prefixed and number-only JAV searches as authoritative upstream lookups', () => {
+  for (const query of ['SONE 620', 'SONE-620', '664']) {
+    assert.equal(__testOnlyIsSukebeiCodeSearch(query), true, query);
+  }
+  for (const query of ['uncensored', 'big breasts', 'SONE 620 uncensored']) {
+    assert.equal(__testOnlyIsSukebeiCodeSearch(query), false, query);
+  }
 });
 
 test('JAV DMM search cards keep their real poster and are never deleted', () => {

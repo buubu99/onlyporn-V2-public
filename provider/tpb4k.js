@@ -61,6 +61,11 @@ const CATALOG_CACHE_TTL_MS = 15 * 60 * 1000;
 const CATALOG_STALE_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 let loggerInstance;
 
+function isSukebeiCodeSearch(value) {
+  const query = normalizeSearchQuery(value);
+  return /^(?:[a-z]{2,12}[\s_-]*)?\d{2,6}$/i.test(query);
+}
+
 function logger() {
   if (loggerInstance) return loggerInstance;
   try { loggerInstance = require('../logger'); }
@@ -640,7 +645,15 @@ class Tpb4kProvider {
     const skip = Math.max(Number.parseInt(String(args?.extra?.skip || 0), 10) || 0, 0);
     const pageSize = 40;
     const key = `${definition.id}\0${query}`;
-    const cached = await this.searchStore.getQuery(definition.id, query);
+    const cachedRecord = await this.searchStore.getQuery(definition.id, query);
+    // A prior warm-pool miss may have stored an empty result. Code-shaped
+    // Sukebei searches are authoritative upstream lookups, so an empty query
+    // cache must never suppress their recovery path.
+    const cached = (
+      definition.id === 'tpb4k.sukebei.top'
+      && isSukebeiCodeSearch(query)
+      && !cachedRecord?.metas?.length
+    ) ? null : cachedRecord;
     const slice = metas => ({
       metas: (Array.isArray(metas) ? metas : []).slice(skip, skip + pageSize),
     });
@@ -791,15 +804,18 @@ class Tpb4kProvider {
       }
     } else if (definition.id === 'tpb4k.sukebei.top') {
       const cachedMatches = rankSearchItems(cachedPool, query);
+      const targetedCodeSearch = isSukebeiCodeSearch(query);
       if (cachedMatches.length) {
         rawItems = cachedMatches.slice(0, 24);
-      } else if (poolCount >= 80) {
+      } else if (poolCount >= 80 && !targetedCodeSearch) {
         // A mature persistent Sukebei pool makes an interactive miss authoritative.
         // Do not hold Stremio for a synchronous network refresh merely because an
         // arbitrary English keyword is absent locally.
         searchMode = 'sqlite-warm-miss';
       } else {
-        searchMode = 'sukebei-upstream-query';
+        searchMode = targetedCodeSearch
+          ? 'sukebei-upstream-code-query'
+          : 'sukebei-upstream-query';
         const fetched = await this._withSearchNetworkSlot(() => adapter.catalog({
           catalog: { ...definition, searchMode: true, searchQuery: query },
           skip: 0,
@@ -920,11 +936,11 @@ class Tpb4kProvider {
     // code-shaped query such as "SONE 620 UNCENSORED", search the stable JAV
     // code first and then enforce the uncensored qualifier locally.
     const requestedSearch = String(args?.extra?.search || '').trim();
-    const uncensoredCodeMatch = /\b([a-z]{2,12})[\s_-]*(\d{2,6})\b/i.exec(requestedSearch);
+    const uncensoredCodeMatch = /\b(?:([a-z]{2,12})[\s_-]*)?(\d{2,6})\b/i.exec(requestedSearch);
     const uncensoredCodeSearch = (
       /\buncensored\b/i.test(requestedSearch) && uncensoredCodeMatch
     )
-      ? `${uncensoredCodeMatch[1].toUpperCase()} ${uncensoredCodeMatch[2]}`
+      ? [uncensoredCodeMatch[1]?.toUpperCase(), uncensoredCodeMatch[2]].filter(Boolean).join(' ')
       : '';
     const uncensoredMarkers = [
       'uncensored',
@@ -1657,3 +1673,4 @@ module.exports.legacyCatalogCacheSuffix = legacyCatalogCacheSuffix;
 // Test-only exports for deterministic Sukebei playback-gate regression coverage.
 module.exports.__testOnlyIsCatalogBoundSukebeiTorrent = isCatalogBoundSukebeiTorrent;
 module.exports.__testOnlyPassesTorrentSeederGate = passesTorrentSeederGate;
+module.exports.__testOnlyIsSukebeiCodeSearch = isSukebeiCodeSearch;

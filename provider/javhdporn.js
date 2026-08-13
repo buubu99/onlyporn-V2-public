@@ -425,7 +425,7 @@ class JavHdPornProvider extends Provider {
   }
 
   getInitialUrl() {
-    return `${this.baseUrl}/v3/category/censored/`;
+    return new URL(GENRE_ROUTES.get('Uncensored'), this.baseUrl).toString();
   }
 
   async fetchSafariResponse(url, options = {}) {

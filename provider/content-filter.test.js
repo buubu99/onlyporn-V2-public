@@ -31,7 +31,10 @@ test('global filter blocks explicit gay and male-male labels', () => {
 });
 
 test('global filter blocks explicit interracial and black-male labels', () => {
-  for (const tags of [['Interracial'], ['Black Male'], ['BBC']]) {
+  for (const tags of [
+    ['Interracial'], ['Blacked'], ['Black Male'], ['Black Man'],
+    ['Black Cock'], ['BBC'], ['BBCs'], ['BCC'],
+  ]) {
     const result = evaluateContent({ tags }, config());
     assert.equal(result.excluded, true, tags.join(','));
     assert.equal(result.reason, 'interracial');
@@ -51,6 +54,9 @@ test('filter does not infer race or orientation from a poster, performer name, o
 
 test('strong explicit title text is filtered while neutral text remains', () => {
   assert.equal(evaluateContent({ title: 'Interracial Couple Scene' }, config()).excluded, true);
+  assert.equal(evaluateContent({ title: 'BLACKED scene with a huge black cock' }, config()).excluded, true);
+  assert.equal(evaluateContent({ title: 'Two BBCs For Service' }, config()).excluded, true);
+  assert.equal(evaluateContent({ title: 'Juniper Loves BCC In The Shower' }, config()).excluded, true);
   assert.equal(evaluateContent({ title: 'Two Women Romantic Scene' }, config()).excluded, false);
 });
 

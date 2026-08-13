@@ -66,6 +66,10 @@ test('HLS relay rewrites playlists, media segments, and key URIs to absolute rel
 
   const relayUrls = rewritten.match(/https:\/\/onlyporn\.example\/media\/[A-Za-z0-9._-]+\/[^"\s,]+/g) || [];
   assert.equal(relayUrls.length, 4);
+  assert.match(relayUrls[0], /\/key\.bin$/);
+  assert.match(relayUrls[1], /\/segment\.mp4$/);
+  assert.match(relayUrls[2], /\/segment\.ts$/);
+  assert.match(relayUrls[3], /\/index\.m3u8$/);
   assert.doesNotMatch(rewritten, /segments\/part-0001\.ts/);
   assert.doesNotMatch(rewritten, /\.\.\/720\/index\.m3u8/);
 

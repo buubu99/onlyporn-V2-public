@@ -42,11 +42,13 @@ test('SpankBang and XVideos search responses pass through relevance filter', () 
   assert.match(xv, /return search \? filterCatalogResponse\(response, search\) : response/);
 });
 
-test('TPB4K general search ranks a broad local pool and mature misses stay local', () => {
+test('TPB4K general search ranks a broad local pool while Sukebei codes bypass mature misses', () => {
   const src = fs.readFileSync(path.join(__dirname, 'tpb4k.js'), 'utf8');
   assert.match(src, /this\.searchStore\.listPool\(poolCatalogId, poolLimit\)/);
   assert.match(src, /allPool\.length >= 80 \|\| \(metadataPool\.length >= 20 && torrentPool\.length >= 20\)/);
-  assert.match(src, /else if \(poolCount >= 80\)[\s\S]{0,450}searchMode = 'sqlite-warm-miss'/);
+  assert.match(src, /else if \(poolCount >= 80 && !targetedCodeSearch\)[\s\S]{0,450}searchMode = 'sqlite-warm-miss'/);
+  assert.match(src, /sukebei-upstream-code-query/);
+  assert.match(src, /cachedRecord\?\.metas\?\.length/);
   assert.doesNotMatch(src, /if \(cachedMatches\.length >= 4\)/);
 });
 

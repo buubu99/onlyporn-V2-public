@@ -53,7 +53,7 @@ test('green media URL includes /media/green and child tokens keep same slot pref
     'segment01.ts',
     'segment'
   );
-  assert.match(new URL(child).pathname, /^\/media\/green\/c1\.[^/]+\/segment\.bin$/);
+  assert.match(new URL(child).pathname, /^\/media\/green\/c1\.[^/]+\/segment\.ts$/);
 });
 
 test('immutable generation media URL and every HLS child keep the same commit prefix', () => {

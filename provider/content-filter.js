@@ -16,11 +16,19 @@ const DEFAULT_GAY_TAGS = Object.freeze([
 const DEFAULT_INTERRACIAL_TAGS = Object.freeze([
   'interracial',
   'interracial sex',
+  'blacked',
   'black male',
+  'black man',
+  'black guy',
+  'black cock',
+  'black dick',
   'african american male',
   'african-american male',
   'ebony male',
   'bbc',
+  'bbcs',
+  'bcc',
+  'bccs',
   'big black cock',
   'black guy white girl',
   'white girl black guy',
@@ -31,7 +39,10 @@ const INTERRACIAL_TAG_KEYS = new Set(DEFAULT_INTERRACIAL_TAGS.map(value => label
 
 const STRONG_TEXT_PATTERNS = Object.freeze([
   Object.freeze({ reason: 'gay', pattern: /\b(?:gay(?:\s+sex)?|male[\s\/-]+male|m2m|man\s+on\s+man|men\s+only|bisexual\s+male|bi\s+male)\b/i }),
-  Object.freeze({ reason: 'interracial', pattern: /\b(?:interracial(?:\s+sex)?|black\s+male|african[\s-]+american\s+male|ebony\s+male|bbc|big\s+black\s+cock|black\s+guy\s+white\s+girl|white\s+girl\s+black\s+guy)\b/i }),
+  Object.freeze({
+    reason: 'interracial',
+    pattern: /\b(?:interracial(?:\s+sex)?|blacked(?:\s*raw)?|black\s+(?:male|man|men|guy|guys|dude|cock|cocks|dick|dicks)|african[\s-]+american\s+(?:male|man)|ebony\s+(?:male|man)|bbcs?|bccs?|big\s+black\s+cock|black\s+guy\s+white\s+girl|white\s+girl\s+black\s+guy)\b/i,
+  }),
 ]);
 
 function booleanValue(value, fallback = false) {

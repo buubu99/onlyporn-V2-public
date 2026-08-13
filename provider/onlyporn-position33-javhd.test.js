@@ -42,7 +42,7 @@ test('position 33 preserves c1 children and uses a decoder-safe JAV segment exte
     'segment-1.ts',
     'segment'
   );
-  assert.match(new URL(regularChild).pathname, /\/segment\.bin$/);
+  assert.match(new URL(regularChild).pathname, /\/segment\.ts$/);
 });
 
 test('JAVHDPorn accepts every verified additional playback host narrowly', () => {
