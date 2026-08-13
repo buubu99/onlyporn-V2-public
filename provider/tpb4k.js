@@ -719,6 +719,7 @@ class Tpb4kProvider {
     let rawItems = [];
     let searchMode = 'sqlite-pool';
     let studioSearchRecovery;
+    let searchSourceDiagnostics;
 
     const requiresPlayableBinding = ['studio-metadata', 'platform-hybrid'].includes(definition.source)
       && definition.lookupSource === 'torrent-index';
@@ -822,6 +823,11 @@ class Tpb4kProvider {
           limit: 24,
           config,
         }));
+        try {
+          searchSourceDiagnostics = adapter.diagnostics?.().sukebeiMetadata;
+        } catch {
+          searchSourceDiagnostics = undefined;
+        }
         this._rememberSearchPool(definition.id, fetched);
         rawItems = rankSearchItems(mergeSearchItems(cachedPool, fetched), query).slice(0, 24);
       }
@@ -886,6 +892,7 @@ class Tpb4kProvider {
       metas: metas.length,
       sqliteSearch: Boolean(this.searchStore?.enabled),
       ...(studioSearchRecovery ? { studioSearchRecovery } : {}),
+      ...(searchSourceDiagnostics ? { sukebeiMetadata: searchSourceDiagnostics } : {}),
       contentFilter: {
         removed: contentFiltered.removed,
         reasons: contentFiltered.reasons,

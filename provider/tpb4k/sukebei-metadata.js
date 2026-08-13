@@ -480,10 +480,11 @@ function scoreCandidate(source, normalized) {
 function createLimiter(maxConcurrency = 4) {
   const limit = Math.max(Number.parseInt(String(maxConcurrency || 4), 10) || 4, 1);
   let active = 0;
+  const priorityQueue = [];
   const queue = [];
   function drain() {
-    while (active < limit && queue.length) {
-      const task = queue.shift();
+    while (active < limit && (priorityQueue.length || queue.length)) {
+      const task = priorityQueue.shift() || queue.shift();
       active += 1;
       Promise.resolve()
         .then(task.run)
@@ -494,8 +495,9 @@ function createLimiter(maxConcurrency = 4) {
         });
     }
   }
-  return run => new Promise((resolve, reject) => {
-    queue.push({ run, resolve, reject });
+  return (run, options = {}) => new Promise((resolve, reject) => {
+    const target = options.priority ? priorityQueue : queue;
+    target.push({ run, resolve, reject });
     drain();
   });
 }
@@ -1166,6 +1168,9 @@ function createSukebeiMetadataAdapter(options = {}) {
         .map((item, position) => normalizeFeedItem('sukebei', item, position))
         .filter(Boolean)
     );
+    const searchCodes = searchMode ? extractSceneCodes(searchQuery) : [];
+    const priorityCodeSearch = searchCodes.length === 1
+      && compactKey(searchQuery) === compactKey(searchCodes[0]);
     stats.inspected = normalized.length;
     stats.codeCandidates = normalized.filter(item => extractSceneCodes(item.title).length > 0).length;
 
@@ -1335,7 +1340,7 @@ function createSukebeiMetadataAdapter(options = {}) {
             provider: codeProviders.join(','),
           }));
         }
-      })));
+      }, { priority: priorityCodeSearch })));
     }
 
     // Stage 2: a very small title fallback only after the complete code scan.

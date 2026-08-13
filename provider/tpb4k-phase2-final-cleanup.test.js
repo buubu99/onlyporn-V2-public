@@ -61,7 +61,7 @@ function scene(id, options = {}) {
     date: '2026-07-30',
     site: options.site || { name: 'Example Studio' },
     tags: (options.tags || ['Romantic']).map(name => ({ name })),
-    images: [{ url: `https://images.example/${id}.jpg`, width: 600, height: 900 }],
+    images: options.images || [{ url: `https://images.example/${id}.jpg`, width: 600, height: 900 }],
     performers: [{ name: 'Performer One' }],
     urls: options.urls || [],
   };
@@ -597,6 +597,82 @@ test('Sukebei code stage scans late exact matches before any title or TPDB fallb
   assert.equal(diagnostics.providerRequests.stashdb, 30);
   assert.equal(diagnostics.providerRequests.tpdb || 0, 0);
   assert.equal(diagnostics.returned, 2);
+});
+
+test('interactive exact-code enrichment jumps ahead of queued background Sukebei jobs', async () => {
+  const rssForCodes = codes => `<?xml version="1.0"?><rss xmlns:nyaa="https://nyaa.si/xmlns/nyaa"><channel>${
+    codes.map((code, index) => `<item><guid>${code}</guid><title>${code}</title><link>https://sukebei.example/view/${code}</link><nyaa:infoHash>${String(index + 1).padStart(40, '0')}</nyaa:infoHash><nyaa:seeders>${100 - index}</nyaa:seeders></item>`).join('')
+  }</channel></rss>`;
+  const backgroundCodes = Array.from({ length: 8 }, (_, index) => `BGND-${String(index + 1).padStart(3, '0')}`);
+  const lookupOrder = [];
+  const adapter = createSukebeiMetadataAdapter({
+    endpoint: 'https://sukebei.example/?page=rss&c=0_0&f=0',
+    checkDns: false,
+    fetchImpl: async value => {
+      const query = new URL(String(value)).searchParams.get('q') || '';
+      return response(rssForCodes(query ? ['SONE-621'] : backgroundCodes));
+    },
+    env: {
+      ONLYPORN_CONTENT_FILTER_ENABLED: 'false',
+      TPB4K_METATUBE_STRICT: 'true',
+    },
+    config: {
+      requestTimeoutMs: 15_000,
+      discoveryMaxResponseBytes: 2_000_000,
+      discoveryCacheTtlMs: 300_000,
+      discoveryNegativeTtlMs: 60_000,
+      discoveryCacheMaxEntries: 100,
+      metadataCacheMaxEntries: 100,
+      metadataCacheTtlMs: 600_000,
+      metadataNegativeTtlMs: 120_000,
+      sukebeiLookupConcurrency: 1,
+      sukebeiRssPages: 1,
+      sukebeiCodeLookupLimit: 8,
+      sukebeiTitleLookupLimit: 0,
+      sukebeiDetailImageLimit: 0,
+      sukebeiEnrichmentDeadlineMs: 4_000,
+    },
+    metatubeClient: {
+      configured: true,
+      async queryScenes({ query }) {
+        lookupOrder.push(query);
+        await new Promise(resolve => setTimeout(resolve, 20));
+        return [scene(query, {
+          code: query,
+          title: query,
+          images: [{
+            url: `https://onlyporn.example/onlyporn/poster/metatube/JavBus/${query}/signature`,
+            width: 600,
+            height: 900,
+          }],
+        })];
+      },
+    },
+  });
+
+  const background = adapter.catalog({
+    catalog: { id: 'tpb4k.sukebei.top', mode: 'top' },
+    skip: 0,
+    limit: 8,
+  });
+  while (!lookupOrder.length) await new Promise(resolve => setTimeout(resolve, 1));
+  const interactive = adapter.catalog({
+    catalog: {
+      id: 'tpb4k.sukebei.top',
+      mode: 'top',
+      searchMode: true,
+      searchQuery: 'SONE 621',
+    },
+    skip: 0,
+    limit: 24,
+  });
+
+  const interactiveItems = await interactive;
+  await background;
+  assert.equal(lookupOrder[0], 'BGND-001');
+  assert.equal(lookupOrder[1], 'SONE-621');
+  assert.equal(interactiveItems.length, 1);
+  assert.match(interactiveItems[0].poster, /\/onlyporn\/poster\/metatube\//);
 });
 
 test('OnlyFans catalog uses explicit platform metadata queries instead of a nonexistent studio/site binding', async () => {
