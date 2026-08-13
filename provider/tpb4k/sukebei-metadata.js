@@ -1473,8 +1473,25 @@ function createSukebeiMetadataAdapter(options = {}) {
     return index.get(String(sourceId || '')) || null;
   }
 
-  async function resolve({ sourceId }) {
-    const source = index.get(String(sourceId || ''));
+  async function resolve({ sourceId, item }) {
+    const encodedDetailUrl = safeHttpsUrl(item?.detailUrl)
+      ? String(item.detailUrl)
+      : (safeHttpsUrl(sourceId) ? String(sourceId) : '');
+    const encodedInfoHash = normalizeInfoHash(item?.infoHash);
+    const encodedSource = encodedDetailUrl && encodedInfoHash
+      ? Object.freeze({
+        ...item,
+        source: 'sukebei',
+        sourceId: String(sourceId || encodedDetailUrl),
+        detailUrl: encodedDetailUrl,
+        infoHash: encodedInfoHash,
+        title: compactText(item?.title || item?.filename),
+        filename: compactText(item?.filename || item?.title),
+        seeders: Math.max(Number.parseInt(String(item?.seeders ?? 0), 10) || 0, 0),
+        size: item?.size,
+      })
+      : null;
+    const source = index.get(String(sourceId || '')) || encodedSource;
     if (!source) return [];
 
     let magnet = parseMagnet(source.magnetLink);

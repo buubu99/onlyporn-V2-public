@@ -1489,6 +1489,20 @@ class Tpb4kProvider {
     const sukebeiNeedsFileSelection = ['sukebei', 'sukebei-hentai'].includes(decoded.source)
       && Array.isArray(decoded.torrents)
       && decoded.torrents.some(torrent => !Number.isInteger(torrent?.fileIdx));
+    const encodedSukebeiItem = decoded.source === 'sukebei'
+      && Array.isArray(decoded.torrents)
+      && decoded.torrents[0]
+      ? {
+        source: 'sukebei',
+        sourceId: decoded.sourceId,
+        detailUrl: decoded.sourceId,
+        title: decoded.torrents[0].title || decoded.torrents[0].filename,
+        filename: decoded.torrents[0].filename || decoded.torrents[0].title,
+        infoHash: decoded.torrents[0].infoHash,
+        seeders: decoded.torrents[0].seeders,
+        size: decoded.torrents[0].size,
+      }
+      : null;
     // Keep every catalog-bound torrent as a final playback fallback.
     // If Sukebei lacks fileIdx, prefer its resolver first so it can inspect the
     // .torrent and choose the main video. Search/persistent cards may not exist
@@ -1525,12 +1539,31 @@ class Tpb4kProvider {
           sourceId: decoded.sourceId,
           catalogId: decoded.catalogId,
           catalog: definition,
-          item: rawItem,
+          // Search results can be served by a different process than the
+          // subsequent stream request. Preserve enough encoded identity for
+          // Sukebei to download the .torrent and select its main video even
+          // when the process-local search record is unavailable.
+          item: rawItem || encodedSukebeiItem,
           config,
         });
       } catch (error) {
         logger().warn({ provider: this.name, source: decoded.source, resolver: resolverAdapter.id, error: redactSecrets(error?.message || error, this.env) }, 'OnlyPorn stream adapter failed safely');
       }
+    }
+    if (
+      !rawItem
+      && encodedSukebeiItem
+      && rawCandidates.some(candidate => Number.isInteger(candidate?.fileIdx))
+    ) {
+      logger().info({
+        provider: this.name,
+        source: decoded.source,
+        sourceId: decoded.sourceId,
+        infoHash: encodedSukebeiItem.infoHash,
+        selectedFileIndexes: rawCandidates
+          .map(candidate => candidate?.fileIdx)
+          .filter(Number.isInteger),
+      }, 'OnlyPorn Sukebei search playback recovered main video file');
     }
     if (
       !rawCandidates.length

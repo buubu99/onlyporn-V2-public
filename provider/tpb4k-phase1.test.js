@@ -571,6 +571,51 @@ test('Sukebei resolves an explicit main-file index instead of trusting debrid au
   assert.equal(result.streams[0].behaviorHints.filename, 'Sukebei.Main.Movie.mp4');
 });
 
+test('Sukebei search playback recovers file selection after its process-local record is lost', async () => {
+  let resolverItem = null;
+  registerAdapter({
+    id: 'sukebei',
+    async catalog() { return []; },
+    async meta() { return null; },
+    async resolve({ item }) {
+      resolverItem = item;
+      return [{
+        infoHash: item.infoHash,
+        fileIdx: 0,
+        filename: 'DSOD-053-uncensored-HD/DSOD-053-uncensored-nyap2p.com.mp4',
+        seeders: item.seeders,
+        size: item.size,
+      }];
+    },
+  });
+  const provider = new Tpb4kProvider({
+    installBuiltIns: false,
+    env: { TPB4K_ENABLED: 'true', TPB4K_CATALOG_LIMIT: '40' },
+  });
+  const id = encodeTpb4kId({
+    source: 'sukebei',
+    sourceId: 'https://sukebei.nyaa.si/view/4680364',
+    catalogId: 'tpb4k.sukebei.top',
+    torrent: {
+      infoHash: HASH_4K,
+      title: 'DSOD-053 uncensored',
+      seeders: 8,
+      size: 4_080_218_931,
+    },
+  });
+
+  const result = await provider.handleStream({ type: 'movie', id });
+
+  assert.equal(resolverItem.infoHash, HASH_4K);
+  assert.equal(resolverItem.detailUrl, 'https://sukebei.nyaa.si/view/4680364');
+  assert.equal(result.streams.length, 1);
+  assert.equal(result.streams[0].fileIdx, 0);
+  assert.equal(
+    result.streams[0].behaviorHints.filename,
+    'DSOD-053-uncensored-HD/DSOD-053-uncensored-nyap2p.com.mp4'
+  );
+});
+
 test('release wiring preserves v2.6.4 hardening and keeps TPB4K off production by default', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const relay = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
