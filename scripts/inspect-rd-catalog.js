@@ -16,6 +16,8 @@ async function main() {
   const minimumComplete = expected('--minimum-complete');
   const minimumModified = expected('--minimum-modified');
   const minimumPosters = expected('--minimum-posters');
+  const minimumPosterDecisions = expected('--minimum-poster-decisions');
+  const maximumPosterErrors = expected('--maximum-poster-errors', Number.MAX_SAFE_INTEGER);
   const store = createRdCatalogSqliteStore();
   try {
     if (!store.enabled) throw new Error('RD catalog persistent store is disabled');
@@ -24,6 +26,14 @@ async function main() {
     if (Number(stats.complete || 0) < minimumComplete) throw new Error(`complete ${stats.complete || 0} < ${minimumComplete}`);
     if (Number(stats.modifiedHashes || 0) < minimumModified) throw new Error(`modified ${stats.modifiedHashes || 0} < ${minimumModified}`);
     if (Number(stats.posters || 0) < minimumPosters) throw new Error(`posters ${stats.posters || 0} < ${minimumPosters}`);
+    const posterDecisions = Number(stats.posters || 0) + Number(stats.posterAttempts?.missing || 0);
+    const posterErrors = Number(stats.posterAttempts?.error || 0);
+    if (posterDecisions < minimumPosterDecisions) {
+      throw new Error(`poster decisions ${posterDecisions} < ${minimumPosterDecisions}`);
+    }
+    if (posterErrors > maximumPosterErrors) {
+      throw new Error(`poster errors ${posterErrors} > ${maximumPosterErrors}`);
+    }
     process.stdout.write(`${JSON.stringify({ event: 'RD_CATALOG_INSPECT_OK', ...stats })}\n`);
   } finally {
     await store.close();

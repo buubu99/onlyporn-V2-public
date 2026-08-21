@@ -34,6 +34,7 @@ Confirmed misses are checkpointed so a resumed run does not repeat them unless
 node scripts/import-rd-catalog-report.js /import/final-audit.json
 node scripts/inspect-rd-catalog.js --minimum-codes 2160 --minimum-complete 2140 --minimum-modified 53
 node scripts/warm-rd-metatube-posters.js --all --concurrency 3 --timeout-ms 90000
+node scripts/inspect-rd-catalog.js --minimum-poster-decisions 2140 --maximum-poster-errors 0
 ```
 
 Production sets both `ONLYPORN_RD_CATALOG_ENABLED=true` and
