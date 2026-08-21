@@ -122,12 +122,25 @@ for stale_tmp_dir in "${stale_tmp_dirs[@]}"; do
   rm -rf -- "$stale_tmp_dir"
 done
 TMP_DIR="$(mktemp -d "$STATE_DIR/tmp.XXXXXX")"
+CLEANUP_DONE=0
 cleanup() {
+  if (( CLEANUP_DONE == 1 )); then
+    return 0
+  fi
+  CLEANUP_DONE=1
   rm -rf "$TMP_DIR"
   rm -f "$LOCK_DIR/pid"
   rmdir "$LOCK_DIR" 2>/dev/null || true
 }
-trap cleanup EXIT INT TERM
+stop_safely() {
+  trap - INT TERM
+  cleanup
+  echo >&2
+  echo "Stopped safely. Run the same command again to resume this week's unfinished hashes." >&2
+  exit 130
+}
+trap cleanup EXIT
+trap stop_safely INT TERM
 
 TARGETS_FILE="$TMP_DIR/targets.tsv"
 CURRENT_FILE="$TMP_DIR/current.jsonl"
@@ -278,8 +291,10 @@ touch_original_link() {
   unset download
   http="${meta%% *}"
   bytes="${meta##* }"
-  if (( rc == 0 )) &&
-     [[ "$http" == "200" || "$http" == "206" ]] &&
+  if [[ "$http" == "206" ]] && (( rc == 0 || rc == 63 )); then
+    return 0
+  fi
+  if (( rc == 0 )) && [[ "$http" == "200" ]] &&
      awk "BEGIN {exit !(${bytes:-999999} <= 1024)}"; then
     return 0
   fi
@@ -417,6 +432,19 @@ while IFS=$'\t' read -r codes hash; do
     torrent_status="$(print -r -- "$row" | jq -r '.status // "unknown"')"
     link="$(print -r -- "$row" | jq -r '.links[0] // empty')"
     name="$(print -r -- "$row" | jq -r '.filename // "unknown"')"
+    torrent_id="$(print -r -- "$row" | jq -r '.id // empty')"
+    if [[ "$torrent_status" == "downloaded" && -z "$link" && -n "$torrent_id" ]]; then
+      if api_request GET "torrents/info/$torrent_id" "$INFO_FILE"; then
+        torrent_status="$(jq -r '.status // "unknown"' "$INFO_FILE")"
+        link="$(jq -r '.links[0] // empty' "$INFO_FILE")"
+        name="$(jq -r '.filename // "unknown"' "$INFO_FILE")"
+      else
+        failed=$((failed + 1))
+        record_event "$codes" "$hash" "TORRENT_INFO_FAILED" "$LAST_API_ERROR"
+        echo "[$position/$TARGET_HASHES] FAILED $codes — torrent info: $LAST_API_ERROR"
+        continue
+      fi
+    fi
     if [[ "$torrent_status" == "downloaded" && -n "$link" ]]; then
       if touch_original_link "$link"; then
         touched=$((touched + 1))
@@ -433,7 +461,7 @@ while IFS=$'\t' read -r codes hash; do
       record_event "$codes" "$hash" "PRESENT_NOT_READY" "$torrent_status"
       echo "[$position/$TARGET_HASHES] NOT READY $codes — $torrent_status"
     fi
-    unset row link
+    unset row link torrent_id
     continue
   fi
 
