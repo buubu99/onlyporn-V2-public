@@ -151,7 +151,11 @@ function createMetaTubeClient(options = {}) {
           'User-Agent': 'OnlyPorn-MetaTube-Sukebei/1.0',
         },
       }, timeoutMs, async response => {
-        if (!response.ok) throw new Error(`MetaTube search returned HTTP ${response.status}`);
+        if (!response.ok) {
+          const error = new Error(`MetaTube search returned HTTP ${response.status}`);
+          error.status = response.status;
+          throw error;
+        }
         return response.json();
       });
       const exactRows = collectRows(payload).filter(row => isExactMetaTubeCode(code, row));

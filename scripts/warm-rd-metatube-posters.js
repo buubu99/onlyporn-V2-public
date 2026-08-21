@@ -22,6 +22,12 @@ async function mapLimit(rows, concurrency, operation) {
   await Promise.all(workers);
 }
 
+function isConfirmedMissing(error) {
+  const status = Number(error?.status || error?.statusCode || error?.response?.status || 0);
+  if (status === 404) return true;
+  return /\bMetaTube search returned HTTP 404\b/i.test(String(error?.message || error || ''));
+}
+
 async function main() {
   const all = process.argv.includes('--all');
   const retryMissing = process.argv.includes('--retry-missing');
@@ -58,12 +64,21 @@ async function main() {
           })}\n`);
         }
       } catch (error) {
-        await store.recordPosterAttempt(row.code, 'error', error?.message || error);
-        totals.errors += 1;
-        process.stderr.write(`${JSON.stringify({
-          event: 'RD_METATUBE_POSTER_ERROR', position: index + 1, total: rows.length,
-          code: row.code, error: String(error?.message || error).slice(0, 500),
-        })}\n`);
+        if (isConfirmedMissing(error)) {
+          await store.recordPosterAttempt(row.code, 'missing');
+          totals.missing += 1;
+          process.stdout.write(`${JSON.stringify({
+            event: 'RD_METATUBE_POSTER_MISSING', position: index + 1, total: rows.length,
+            code: row.code, reason: 'http-404',
+          })}\n`);
+        } else {
+          await store.recordPosterAttempt(row.code, 'error', error?.message || error);
+          totals.errors += 1;
+          process.stderr.write(`${JSON.stringify({
+            event: 'RD_METATUBE_POSTER_ERROR', position: index + 1, total: rows.length,
+            code: row.code, error: String(error?.message || error).slice(0, 500),
+          })}\n`);
+        }
       }
     });
     const stats = await store.stats();
@@ -74,7 +89,11 @@ async function main() {
   }
 }
 
-main().catch(error => {
-  process.stderr.write(`RD MetaTube warm failed: ${String(error?.message || error)}\n`);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch(error => {
+    process.stderr.write(`RD MetaTube warm failed: ${String(error?.message || error)}\n`);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { isConfirmedMissing };

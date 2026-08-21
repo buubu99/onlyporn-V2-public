@@ -6,6 +6,7 @@ const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
 const { createMetaTubeClient, isExactMetaTubeCode } = require('./tpb4k/metatube-client');
+const { isConfirmedMissing } = require('../scripts/warm-rd-metatube-posters');
 const { MAX_CONCURRENT_IMAGES, MAX_IMAGE_BYTES, decodeToken, readBoundedBody } = require('./tpb4k/metatube-image-proxy');
 const { minimumHealthyMetas } = require('./catalog-prewarm');
 const { choosePoster, chooseBackground, normalizeScene } = require('./tpb4k/metadata-normalize');
@@ -60,6 +61,24 @@ test('MetaTube exact matching accepts canonical and FC2 variants only', () => {
   assert.equal(isExactMetaTubeCode('MIDA-762', { number: 'MIDA-762' }), true);
   assert.equal(isExactMetaTubeCode('MIDA-762', { number: 'MIDA-761' }), false);
   assert.equal(isExactMetaTubeCode('FC2-PPV-4949783', { number: 'FC2-4949783' }), true);
+});
+
+test('MetaTube warming records confirmed HTTP 404 as missing but retries operational failures', async () => {
+  const client = createMetaTubeClient({
+    env: {
+      TPB4K_METATUBE_ENABLED: 'true',
+      TPB4K_METATUBE_URL: 'http://127.0.0.1:18080',
+      TPB4K_METATUBE_PUBLIC_URL: 'https://onlyporn.example',
+      TPB4K_METATUBE_PROXY_SECRET: 'onlyporn-v6-test-secret-at-least-32-characters',
+    },
+    fetchImpl: async () => new Response('', { status: 404 }),
+  });
+  const missingError = await client.searchExact('MIDA-762', 5_000).catch(error => error);
+  assert.equal(missingError.status, 404);
+  assert.equal(isConfirmedMissing(missingError), true);
+  assert.equal(isConfirmedMissing(new Error('MetaTube search returned HTTP 404')), true);
+  assert.equal(isConfirmedMissing(new Error('MetaTube search returned HTTP 503')), false);
+  assert.equal(isConfirmedMissing(new Error('fetch failed')), false);
 });
 
 test('MetaTube scalar proxy poster survives metadata normalization', () => {
