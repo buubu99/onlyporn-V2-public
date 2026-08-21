@@ -135,16 +135,23 @@ function storageSnapshot(env = process.env) {
   ));
   const artworkCachePath = path.join(cacheDir, 'sukebei-artwork-v3.json');
   const catalogCachePath = path.join(cacheDir, 'catalog-responses-v1.json');
+  const rdCatalogDbPath = path.resolve(String(
+    env.ONLYPORN_RD_CATALOG_DB || '/tmp/onlyporn-runtime/rd-catalog/rd-catalog-v1.sqlite'
+  ));
+  const rdCatalogRequired = truthy(env.ONLYPORN_RD_CATALOG_REQUIRED);
   const dbExists = fs.existsSync(dbPath);
   const artworkCacheExists = fs.existsSync(artworkCachePath);
   const catalogCacheExists = fs.existsSync(catalogCachePath);
+  const rdCatalogExists = fs.existsSync(rdCatalogDbPath);
   let dbBytes = 0;
   let artworkCacheBytes = 0;
   let catalogCacheBytes = 0;
+  let rdCatalogBytes = 0;
   let freeBytes = -1;
   try { dbBytes = dbExists ? fs.statSync(dbPath).size : 0; } catch {}
   try { artworkCacheBytes = artworkCacheExists ? fs.statSync(artworkCachePath).size : 0; } catch {}
   try { catalogCacheBytes = catalogCacheExists ? fs.statSync(catalogCachePath).size : 0; } catch {}
+  try { rdCatalogBytes = rdCatalogExists ? fs.statSync(rdCatalogDbPath).size : 0; } catch {}
   try {
     if (typeof fs.statfsSync === 'function') {
       const stats = fs.statfsSync(path.dirname(dbPath));
@@ -170,6 +177,11 @@ function storageSnapshot(env = process.env) {
     artworkCacheBytes,
     catalogCacheExists,
     catalogCacheBytes,
+    rdCatalogDbPath,
+    rdCatalogRequired,
+    rdCatalogExists,
+    rdCatalogSqlite: sqliteHeader(rdCatalogDbPath),
+    rdCatalogBytes,
     freeBytes,
   });
 }
@@ -185,7 +197,8 @@ function snapshot() {
     sukebeiState.ready &&
     cardsInRange &&
     sukebeiState.metatubePosters === sukebeiState.cards &&
-    sukebeiState.generatedPosters === 0
+    sukebeiState.generatedPosters === 0 &&
+    (!storage.rdCatalogRequired || (storage.rdCatalogExists && storage.rdCatalogSqlite))
   );
   const publicStorage = Object.freeze({
     ephemeralPaths: storage.ephemeralPaths,
@@ -202,6 +215,10 @@ function snapshot() {
     artworkCacheBytes: storage.artworkCacheBytes,
     catalogCacheExists: storage.catalogCacheExists,
     catalogCacheBytes: storage.catalogCacheBytes,
+    rdCatalogRequired: storage.rdCatalogRequired,
+    rdCatalogExists: storage.rdCatalogExists,
+    rdCatalogSqlite: storage.rdCatalogSqlite,
+    rdCatalogBytes: storage.rdCatalogBytes,
   });
   return Object.freeze({
     ready,

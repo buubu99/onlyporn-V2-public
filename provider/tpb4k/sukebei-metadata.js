@@ -19,6 +19,7 @@ const { decodeTorrent, readBoundedBuffer, safeNativeRequest } = require('./nativ
 const { assertSafeHttpsUrl } = require('../url-security');
 const { evaluateContent, readContentFilterConfig } = require('../content-filter');
 const { createMetaTubeClient } = require('./metatube-client');
+const { createRdCatalogSqliteStore } = require('../rd-catalog-sqlite');
 const { recordSukebeiResult } = require('../runtime-readiness');
 
 const CODE_EXCLUSIONS = new Set([
@@ -68,7 +69,7 @@ function extractSceneCodes(value) {
     }
   }
 
-  const generic = text.match(/\b[A-Z]{2,12}[\s._-]+\d{2,7}\b/g) || [];
+  const generic = text.match(/\b[A-Z]{2,24}[\s._-]+\d{2,7}\b/g) || [];
   for (const raw of generic) {
     const code = raw.replace(/[\s._-]+/g, '-');
     const key = compactKey(code);
@@ -662,6 +663,10 @@ function createSukebeiMetadataAdapter(options = {}) {
     env: options.env || process.env,
     maxEntries: Math.max(Number(config.metadataCacheMaxEntries || 500), 50),
   });
+  const rdCatalogStore = options.rdCatalogStore || createRdCatalogSqliteStore({
+    env: options.env || process.env,
+  });
+  let lastRdCatalogStats = Object.freeze({ enabled: rdCatalogStore.enabled, codes: 0, hashes: 0, posters: 0 });
   // StashDB tolerates the general catalog queries but Render's Sukebei burst
   // produced 44 immediate failures at eight-way concurrency. Keep the exact
   // code scan bounded so it does not look like an abusive search burst.
@@ -733,6 +738,8 @@ function createSukebeiMetadataAdapter(options = {}) {
     cacheHits: 0,
     persistentArtworkHits: 0,
     persistentArtworkWrites: 0,
+    rdCatalogMappingHits: 0,
+    rdCatalogPosterHits: 0,
     providerRequests: {},
     providerMatches: {},
     providerErrors: {},
@@ -1160,6 +1167,8 @@ function createSukebeiMetadataAdapter(options = {}) {
       cacheHits: 0,
       persistentArtworkHits: 0,
       persistentArtworkWrites: 0,
+      rdCatalogMappingHits: 0,
+      rdCatalogPosterHits: 0,
       providerRequests: {},
       providerMatches: {},
       providerErrors: {},
@@ -1177,6 +1186,14 @@ function createSukebeiMetadataAdapter(options = {}) {
         .map((item, position) => normalizeFeedItem('sukebei', item, position))
         .filter(Boolean)
     );
+    const normalizedCodes = [...new Set(normalized
+      .flatMap(item => extractSceneCodes(item.title))
+      .filter(Boolean))];
+    const [rdPostersByCode, rdMappingsByCode] = await Promise.all([
+      rdCatalogStore.postersForCodes(normalizedCodes),
+      rdCatalogStore.mappingsForCodes(normalizedCodes),
+    ]);
+    lastRdCatalogStats = Object.freeze(await rdCatalogStore.stats());
     const searchCodes = searchMode ? extractSceneCodes(searchQuery) : [];
     const priorityCodeSearch = searchCodes.length === 1
       && compactKey(searchQuery) === compactKey(searchCodes[0]);
@@ -1214,6 +1231,32 @@ function createSukebeiMetadataAdapter(options = {}) {
         ...item,
         lookupSource: 'sukebei',
         contentClassificationKnown: Array.isArray(item.tags) && item.tags.length > 0,
+      }));
+    }
+
+    // The RD catalog is keyed by stable JAV code instead of an ephemeral
+    // Sukebei detail URL. A poster warmed once through MetaTube can therefore
+    // be reused by every later torrent/result for the same title.
+    for (const item of normalized) {
+      const sourceId = String(item.sourceId);
+      if (resolvedById.has(sourceId)) continue;
+      const code = extractSceneCodes(item.title)[0];
+      const persisted = code ? rdPostersByCode[code] : null;
+      if (!persisted?.poster) continue;
+      stats.rdCatalogPosterHits += 1;
+      resolvedById.set(sourceId, Object.freeze({
+        ...item,
+        title: persisted.title || item.title,
+        poster: persisted.poster,
+        background: persisted.background || persisted.poster,
+        studio: persisted.studio || item.studio,
+        performers: persisted.performers?.length ? persisted.performers : item.performers,
+        tags: persisted.tags?.length ? persisted.tags : item.tags,
+        releaseDate: persisted.releaseDate || item.releaseDate,
+        sceneCode: code,
+        metadataProvider: persisted.provider || 'metatube',
+        lookupSource: 'rd-catalog-metatube-persistent',
+        contentClassificationKnown: Boolean(item.tags?.length || persisted.tags?.length),
       }));
     }
 
@@ -1432,6 +1475,23 @@ function createSukebeiMetadataAdapter(options = {}) {
       return remember([]);
     }
     stats.persistentArtworkWrites += artworkStore.setMany(allowed);
+    await rdCatalogStore.upsertPosters?.(allowed.map(item => {
+      const code = extractSceneCodes(item.title)[0];
+      if (!code || !isMetaTubePoster(item.poster) || !rdMappingsByCode[code]?.length) return null;
+      return {
+        code,
+        scene: {
+          title: item.title,
+          poster: item.poster,
+          background: item.background || item.poster,
+          provider: item.metadataProvider || 'metatube',
+          studio: item.studio,
+          performers: item.performers,
+          tags: item.tags,
+          releaseDate: item.releaseDate,
+        },
+      };
+    }).filter(Boolean));
     // Keep one Sukebei catalogue. Prefer verified scene artwork, then fill the
     // complete requested Stremio window with honest title-specific cards backed
     // by each real upstream torrent identity. Artwork failure must not discard
@@ -1467,6 +1527,51 @@ function createSukebeiMetadataAdapter(options = {}) {
     }
 
     // Honor Stremio pagination over the combined, deduplicated upstream pool.
+    for (let allowedIndex = 0; allowedIndex < allowed.length; allowedIndex += 1) {
+      const item = allowed[allowedIndex];
+      const code = extractSceneCodes(item.title)[0];
+      const mappings = code && Array.isArray(rdMappingsByCode[code])
+        ? rdMappingsByCode[code]
+        : [];
+      const parsedMagnet = parseMagnet(item.magnetLink || item.magnet);
+      const sourceHash = normalizeInfoHash(item.infoHash || parsedMagnet?.infoHash);
+      const playbackCandidates = [];
+      const seenHashes = new Set();
+      for (const mapping of mappings) {
+        const mappedHash = normalizeInfoHash(mapping.infoHash);
+        if (!mappedHash || seenHashes.has(mappedHash)) continue;
+        seenHashes.add(mappedHash);
+        playbackCandidates.push(Object.freeze({
+          infoHash: mappedHash,
+          title: item.title,
+          filename: compactText(mapping.filename || item.title),
+          resolution: detectResolution(mapping.filename || item.title),
+          indexer: 'sukebei-rd',
+          cached: true,
+          seeders: Math.max(Number(item.seeders || 0), 0),
+          size: item.size,
+        }));
+      }
+      if (sourceHash && !seenHashes.has(sourceHash)) {
+        playbackCandidates.push(Object.freeze({
+          infoHash: sourceHash,
+          title: item.title,
+          filename: compactText(item.filename || item.title),
+          resolution: detectResolution(item.filename || item.title),
+          indexer: 'sukebei',
+          seeders: Math.max(Number(item.seeders || 0), 0),
+          size: item.size,
+          ...(Number.isInteger(item.fileIdx) ? { fileIdx: item.fileIdx } : {}),
+        }));
+      }
+      if (!playbackCandidates.length) continue;
+      stats.rdCatalogMappingHits += mappings.length;
+      allowed[allowedIndex] = Object.freeze({
+        ...item,
+        playbackCandidates: Object.freeze(playbackCandidates),
+      });
+    }
+
     const window = allowed.slice(safeSkip, safeSkip + safeLimit);
     stats.returned = window.length;
     if (!searchMode && metatubeStrict && safeSkip === 0) {
@@ -1510,6 +1615,9 @@ function createSukebeiMetadataAdapter(options = {}) {
     const source = index.get(String(sourceId || '')) || encodedSource;
     if (!source) return [];
 
+    const code = extractSceneCodes(`${source.title || ''} ${source.filename || ''}`)[0];
+    const verifiedMappings = code ? await rdCatalogStore.mappingsForCode(code) : [];
+
     let magnet = parseMagnet(source.magnetLink);
     let infoHash = normalizeInfoHash(source.infoHash || magnet?.infoHash);
     let magnetLink = magnet ? source.magnetLink : '';
@@ -1517,29 +1625,30 @@ function createSukebeiMetadataAdapter(options = {}) {
     let filename = magnet?.displayName || source.title;
 
     if (!infoHash && detailClient?.configured && safeHttpsUrl(source.detailUrl)) {
-      let html = '';
       try {
-        html = await detailClient.fetchText(source.detailUrl, {
+        const html = await detailClient.fetchText(source.detailUrl, {
           cacheKey: `sukebei:detail:${source.sourceId}`,
         });
+        const detail = extractMagnetFromHtml(html);
+        if (detail?.infoHash) {
+          infoHash = detail.infoHash;
+          magnetLink = detail.magnetLink;
+          trackers = detail.trackers;
+          filename = detail.filename || filename;
+        }
       } catch {
-        return [];
+        // A verified downloaded RD mapping is sufficient on its own. Failure
+        // to refresh the original Sukebei detail page must not erase it.
       }
-      const detail = extractMagnetFromHtml(html);
-      if (!detail?.infoHash) return [];
-      infoHash = detail.infoHash;
-      magnetLink = detail.magnetLink;
-      trackers = detail.trackers;
-      filename = detail.filename || filename;
     }
-    if (!infoHash) return [];
+    if (!infoHash && !verifiedMappings.length) return [];
 
     let selectedFile = null;
     const selectionKey = `sukebei:torrent-file:${infoHash}`;
-    const cachedSelection = torrentSelectionCache.getEntry(selectionKey);
+    const cachedSelection = infoHash ? torrentSelectionCache.getEntry(selectionKey) : null;
     if (cachedSelection && !cachedSelection.negative) {
       selectedFile = cachedSelection.value;
-    } else if (!cachedSelection) {
+    } else if (infoHash && !cachedSelection) {
       const torrentUrl = sukebeiTorrentUrl(source);
       if (torrentUrl) {
         let request;
@@ -1580,20 +1689,43 @@ function createSukebeiMetadataAdapter(options = {}) {
       else torrentSelectionCache.setNegative(selectionKey, negativeTtlMs);
     }
 
-    return [Object.freeze({
-      source: 'sukebei',
-      sourceId: source.sourceId,
-      title: source.title,
-      filename: selectedFile?.path || filename,
-      magnet: magnetLink,
-      infoHash,
-      ...(selectedFile ? { fileIdx: selectedFile.index } : {}),
-      trackers: Object.freeze([...(trackers || [])]),
-      seeders: source.seeders,
-      size: selectedFile?.length || source.size,
-      resolution: detectResolution(selectedFile?.path || filename || source.title),
-      detailUrl: source.detailUrl,
-    })];
+    const candidates = [];
+    const seenHashes = new Set();
+    for (const mapping of verifiedMappings) {
+      const mappedHash = normalizeInfoHash(mapping.infoHash);
+      if (!mappedHash || seenHashes.has(mappedHash)) continue;
+      seenHashes.add(mappedHash);
+      candidates.push(Object.freeze({
+        source: 'sukebei-rd',
+        sourceId: source.sourceId,
+        title: source.title,
+        filename: compactText(mapping.filename || source.title),
+        infoHash: mappedHash,
+        cached: true,
+        seeders: source.seeders,
+        size: source.size,
+        resolution: detectResolution(mapping.filename || source.title),
+        detailUrl: source.detailUrl,
+        provenance: Object.freeze(['rd-catalog-verified-downloaded']),
+      }));
+    }
+    if (infoHash && !seenHashes.has(infoHash)) {
+      candidates.push(Object.freeze({
+        source: 'sukebei',
+        sourceId: source.sourceId,
+        title: source.title,
+        filename: selectedFile?.path || filename,
+        magnet: magnetLink,
+        infoHash,
+        ...(selectedFile ? { fileIdx: selectedFile.index } : {}),
+        trackers: Object.freeze([...(trackers || [])]),
+        seeders: source.seeders,
+        size: selectedFile?.length || source.size,
+        resolution: detectResolution(selectedFile?.path || filename || source.title),
+        detailUrl: source.detailUrl,
+      }));
+    }
+    return candidates;
   }
 
   return Object.freeze({
@@ -1603,7 +1735,11 @@ function createSukebeiMetadataAdapter(options = {}) {
     meta,
     resolve,
     diagnostics() {
-      return Object.freeze({ sukebeiMetadata: lastDiagnostics, sukebeiArtworkStore: artworkStore.diagnostics() });
+      return Object.freeze({
+        sukebeiMetadata: lastDiagnostics,
+        sukebeiArtworkStore: artworkStore.diagnostics(),
+        rdCatalog: lastRdCatalogStats,
+      });
     },
   });
 }

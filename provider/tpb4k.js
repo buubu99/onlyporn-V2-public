@@ -1521,18 +1521,21 @@ class Tpb4kProvider {
     const sukebeiNeedsFileSelection = ['sukebei', 'sukebei-hentai'].includes(decoded.source)
       && Array.isArray(decoded.torrents)
       && decoded.torrents.some(torrent => !Number.isInteger(torrent?.fileIdx));
-    const encodedSukebeiItem = decoded.source === 'sukebei'
+    const encodedSukebeiTorrent = decoded.source === 'sukebei'
       && Array.isArray(decoded.torrents)
-      && decoded.torrents[0]
+      ? (decoded.torrents.find(torrent => torrent?.indexer === 'sukebei') || decoded.torrents[0])
+      : null;
+    const encodedSukebeiItem = encodedSukebeiTorrent
       ? {
         source: 'sukebei',
         sourceId: decoded.sourceId,
         detailUrl: decoded.sourceId,
-        title: decoded.torrents[0].title || decoded.torrents[0].filename,
-        filename: decoded.torrents[0].filename || decoded.torrents[0].title,
-        infoHash: decoded.torrents[0].infoHash,
-        seeders: decoded.torrents[0].seeders,
-        size: decoded.torrents[0].size,
+        title: encodedSukebeiTorrent.title || encodedSukebeiTorrent.filename,
+        filename: encodedSukebeiTorrent.filename || encodedSukebeiTorrent.title,
+        infoHash: encodedSukebeiTorrent.infoHash,
+        seeders: encodedSukebeiTorrent.seeders,
+        size: encodedSukebeiTorrent.size,
+        playbackCandidates: decoded.torrents,
       }
       : null;
     // Keep every catalog-bound torrent as a final playback fallback.
@@ -1674,6 +1677,14 @@ class Tpb4kProvider {
       resolver: resolverAdapter.id,
       sourceId: decoded.sourceId,
       bundledCandidates: Array.isArray(decoded.torrents) ? decoded.torrents.length : 0,
+      rdVerifiedCandidates: normalized.filter(candidate =>
+        candidate.provenance.includes('rd-catalog-verified-downloaded')
+      ).length,
+      rdVerifiedHashes: normalized
+        .filter(candidate => candidate.provenance.includes('rd-catalog-verified-downloaded'))
+        .map(candidate => candidate.infoHash)
+        .filter(Boolean)
+        .slice(0, 12),
       candidates: normalized.length,
       streams: streams.length,
     }, 'OnlyPorn stream candidates normalized');

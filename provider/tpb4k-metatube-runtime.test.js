@@ -28,7 +28,8 @@ function withSQLiteFixture(callback) {
   const saved = Object.fromEntries([
     'METATUBE_DB', 'DSN', 'DB_AUTO_MIGRATE', 'DB_MAX_OPEN_CONNS',
     'DB_MAX_IDLE_CONNS', 'DB_PREPARED_STMT', 'ONLYPORN_PERSISTENT_CACHE_DIR',
-    'ONLYPORN_CACHE_DIR', 'TPB4K_METATUBE_PROXY_SECRET',
+    'ONLYPORN_CACHE_DIR', 'TPB4K_METATUBE_PROXY_SECRET', 'ONLYPORN_RD_CATALOG_REQUIRED',
+    'ONLYPORN_RD_CATALOG_DB',
   ].map(key => [key, process.env[key]]));
   const cacheDirectory = path.join(directory, 'cache');
   fs.mkdirSync(cacheDirectory, { recursive: true });
@@ -172,6 +173,21 @@ test('readiness proves file-backed migrated SQLite with one connection', () => w
   assert.equal(storage.sqlite, true);
   assert.equal(storage.artworkCacheExists, true);
   assert.equal(storage.catalogCacheExists, true);
+}));
+
+test('required RD catalog must be a persistent SQLite file before readiness opens', () => withSQLiteFixture(({ directory }) => {
+  process.env.ONLYPORN_RD_CATALOG_REQUIRED = 'true';
+  process.env.ONLYPORN_RD_CATALOG_DB = path.join(directory, 'rd-catalog.sqlite');
+  readiness.recordCatalogPrewarmResult({ success: true, activeCatalogs: 34, healthyCatalogs: 34 });
+  readiness.recordSukebeiResult({ ready: true, cards: 24, metatubePosters: 24, generatedPosters: 0 });
+  assert.equal(readiness.snapshot().ready, false);
+  const bytes = Buffer.alloc(4_096);
+  Buffer.from('SQLite format 3\0', 'binary').copy(bytes, 0);
+  fs.writeFileSync(process.env.ONLYPORN_RD_CATALOG_DB, bytes);
+  const state = readiness.snapshot();
+  assert.equal(state.ready, true);
+  assert.equal(state.storage.rdCatalogRequired, true);
+  assert.equal(state.storage.rdCatalogSqlite, true);
 }));
 
 test('strict Sukebei source publishes 24–40 MetaTube cards and no generated fallback', () => {
