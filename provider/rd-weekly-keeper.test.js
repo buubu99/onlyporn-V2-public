@@ -35,6 +35,8 @@ test('weekly RD keeper validates an audited-only fixture without exposing creden
   }));
   const state = path.join(directory, 'state');
   fs.mkdirSync(path.join(state, 'run.lock'), { recursive: true });
+  fs.mkdirSync(path.join(state, 'tmp.abandoned'));
+  fs.writeFileSync(path.join(state, 'tmp.abandoned', 'private.json'), '{}');
   try {
     const result = spawnSync('zsh', [
       SCRIPT, '--check', '--report', report, '--config', config,
@@ -53,6 +55,7 @@ test('weekly RD keeper validates an audited-only fixture without exposing creden
     assert.doesNotMatch(result.stdout, new RegExp(token));
     assert.doesNotMatch(result.stderr, new RegExp(token));
     assert.equal(fs.existsSync(path.join(state, 'run.lock')), false);
+    assert.equal(fs.existsSync(path.join(state, 'tmp.abandoned')), false);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }

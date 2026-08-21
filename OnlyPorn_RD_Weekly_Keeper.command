@@ -113,6 +113,14 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
   echo "Recovered a stale weekly keeper lock from an earlier interrupted run."
 fi
 print -r -- "$$" > "$LOCK_DIR/pid"
+stale_tmp_dirs=("$STATE_DIR"/tmp.*(N/))
+for stale_tmp_dir in "${stale_tmp_dirs[@]}"; do
+  [[ "$stale_tmp_dir" == "$STATE_DIR"/tmp.* ]] || {
+    echo "ERROR: Refusing unsafe temporary cleanup path: $stale_tmp_dir" >&2
+    exit 1
+  }
+  rm -rf -- "$stale_tmp_dir"
+done
 TMP_DIR="$(mktemp -d "$STATE_DIR/tmp.XXXXXX")"
 cleanup() {
   rm -rf "$TMP_DIR"
