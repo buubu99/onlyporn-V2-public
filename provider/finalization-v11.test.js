@@ -67,8 +67,9 @@ test('measured TPB4K poster contracts are corrected centrally', () => {
   assert.match(src, /tpb4k\.sukebei\.top'\) return 'poster'/);
   assert.match(src, /tpb4k\.yesporn\.recent'\) return 'landscape'/);
   assert.match(src, /startsWith\('tpb4k\.hentai\.'\)/);
-  assert.match(src, /_snapshot_/);
-  assert.match(src, /3d1_poster/);
+  assert.match(src, /tpb4k\.sukebei\.hentai'\) return 'poster'/);
+  assert.doesNotMatch(src, /_snapshot_/);
+  assert.doesNotMatch(src, /3d1_poster/);
   assert.match(src, /wide_/);
 });
 

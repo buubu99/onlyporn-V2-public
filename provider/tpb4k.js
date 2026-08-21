@@ -141,12 +141,12 @@ function resolvedPosterShape(item = {}, catalogId = '') {
   if (normalizedCatalogId === 'tpb4k.sukebei.top') return 'poster';
   if (normalizedCatalogId === 'tpb4k.yesporn.recent') return 'landscape';
 
-  // HentaiMama is normally portrait, but V9 measured specific 3D still-frame
-  // assets as landscape. Correct only those observed URL forms.
+  // HentaiMama and Sukebei Hentai are both series shelves. Keep every card in
+  // the same portrait grid even when an upstream filename describes a wide
+  // snapshot; mixed posterShape values make native Stremio render the shelf as
+  // two incompatible layouts.
   if (normalizedCatalogId.startsWith('tpb4k.hentai.')
-      && (/_snapshot_/i.test(posterUrl) || /\/3d1_poster\.jpg(?:$|\?)/i.test(posterUrl))) {
-    return 'landscape';
-  }
+      || normalizedCatalogId === 'tpb4k.sukebei.hentai') return 'poster';
 
   // Studio direct "wide_" assets are landscape while theporndb 800x1200
   // derivatives remain portrait. Never force an entire studio to one shape.

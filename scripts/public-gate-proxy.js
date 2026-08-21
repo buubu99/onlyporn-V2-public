@@ -10,8 +10,46 @@ const runtimeDir = path.resolve(String(
   process.env.ONLYPORN_RUNTIME_DIR || '/tmp/onlyporn-runtime'
 ));
 const readyMarkerPath = path.join(runtimeDir, 'startup-prewarm-ready.json');
+const rdCatalogPath = path.resolve(String(
+  process.env.ONLYPORN_RD_CATALOG_DB ||
+  path.join(runtimeDir, 'rd-catalog', 'rd-catalog-v1.sqlite')
+));
+const rdCatalogRequired = /^(?:1|true|yes|on)$/i.test(String(
+  process.env.ONLYPORN_RD_CATALOG_REQUIRED || ''
+));
 
 let readyAnnounced = false;
+
+function sqliteFileState(filePath) {
+  let descriptor;
+  try {
+    const stat = fs.statSync(filePath);
+    descriptor = fs.openSync(filePath, 'r');
+    const header = Buffer.alloc(16);
+    const bytes = fs.readSync(descriptor, header, 0, 16, 0);
+    return {
+      exists: true,
+      sqlite: bytes === 16 && header.toString('binary') === 'SQLite format 3\u0000',
+      bytes: Number(stat.size || 0),
+    };
+  } catch {
+    return { exists: false, sqlite: false, bytes: 0 };
+  } finally {
+    if (descriptor !== undefined) {
+      try { fs.closeSync(descriptor); } catch {}
+    }
+  }
+}
+
+function rdCatalogState() {
+  const state = sqliteFileState(rdCatalogPath);
+  return Object.freeze({
+    rdCatalogRequired,
+    rdCatalogExists: state.exists,
+    rdCatalogSqlite: state.sqlite,
+    rdCatalogBytes: state.bytes,
+  });
+}
 
 function sendJson(response, statusCode, payload, headOnly = false) {
   const body = `${JSON.stringify(payload)}\n`;
@@ -29,6 +67,7 @@ function readValidMarker() {
     const marker = JSON.parse(fs.readFileSync(readyMarkerPath, 'utf8'));
     const metas = Number(marker?.sukebei?.metas || 0);
     const posters = Number(marker?.sukebei?.metatubePosters || 0);
+    const storage = rdCatalogState();
 
     if (
       marker?.ready === true &&
@@ -48,8 +87,12 @@ function readValidMarker() {
       && Number(marker?.sukebeiHentai?.dbBytes || 0) > 0
       && Number(marker?.sukebeiHentai?.metas || 0) >= 18
       && Number(marker?.sukebeiHentai?.metas || 0) <= 40
+      && (
+        !storage.rdCatalogRequired
+        || (storage.rdCatalogExists && storage.rdCatalogSqlite && storage.rdCatalogBytes > 0)
+      )
     ) {
-      return marker;
+      return { ...marker, storage };
     }
   } catch {}
 
@@ -63,7 +106,8 @@ function handleReady(request, response) {
     sendJson(response, 503, {
       ready: false,
       gate: 'catalog-prewarm-success',
-      waitingFor: '34/34 prewarm + strict Sukebei MetaTube + complete Sukebei Hentai SQLite index',
+      waitingFor: '34/34 prewarm + strict Sukebei MetaTube + complete Sukebei Hentai/RD SQLite indexes',
+      storage: rdCatalogState(),
     }, request.method === 'HEAD');
     return;
   }
@@ -129,3 +173,9 @@ server.listen(publicPort, '0.0.0.0', () => {
     `waiting on ${readyMarkerPath}\n`
   );
 });
+
+module.exports = {
+  readValidMarker,
+  rdCatalogState,
+  sqliteFileState,
+};

@@ -190,6 +190,15 @@ test('required RD catalog must be a persistent SQLite file before readiness open
   assert.equal(state.storage.rdCatalogSqlite, true);
 }));
 
+test('public readiness gate exposes and enforces required RD SQLite state', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '../scripts/public-gate-proxy.js'), 'utf8');
+  assert.match(source, /ONLYPORN_RD_CATALOG_REQUIRED/);
+  assert.match(source, /ONLYPORN_RD_CATALOG_DB/);
+  assert.match(source, /SQLite format 3\\u0000/);
+  assert.match(source, /storage: rdCatalogState\(\)/);
+  assert.match(source, /return \{ \.\.\.marker, storage \}/);
+});
+
 test('strict Sukebei source publishes 24–40 MetaTube cards and no generated fallback', () => {
   const source = fs.readFileSync(require.resolve('./tpb4k/sukebei-metadata'), 'utf8');
   assert.match(source, /const strictMinimum = searchMode \? 0 : \(safeSkip === 0 \? Math\.min\(24, safeLimit\) : 0\)/);

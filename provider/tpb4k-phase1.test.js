@@ -503,7 +503,7 @@ test('provider supplies a branded HTTPS fallback when an upstream catalog omits 
   assert.equal(meta.meta.background, meta.meta.poster);
 });
 
-test('Sukebei cards use the landscape presentation of the reference TPB4K addon', async () => {
+test('Sukebei JAV cards use the portrait presentation selected for OnlyPorn', async () => {
   registerAdapter({
     id: 'sukebei',
     async catalog() {
@@ -534,6 +534,42 @@ test('Sukebei cards use the landscape presentation of the reference TPB4K addon'
   assert.equal(catalog.metas[0].posterShape, 'poster');
 
   const meta = await provider.handleMeta({ type: 'movie', id: catalog.metas[0].id });
+  assert.equal(meta.meta.posterShape, 'poster');
+});
+
+test('both Hentai series sources always publish portrait cards', async () => {
+  registerAdapter({
+    id: 'hentai',
+    async catalog() {
+      return [{
+        source: 'hentai',
+        sourceId: 'ophall-fixture',
+        title: 'Hentai portrait fixture',
+        poster: 'https://images.example/_snapshot_/3d1_poster.jpg',
+      }];
+    },
+    async meta({ sourceId }) {
+      return {
+        source: 'hentai',
+        sourceId,
+        title: 'Hentai portrait fixture',
+        poster: 'https://images.example/_snapshot_/3d1_poster.jpg',
+      };
+    },
+    async resolve() { return []; },
+  });
+  const provider = new Tpb4kProvider({
+    installBuiltIns: false,
+    env: { TPB4K_ENABLED: 'true', TPB4K_CATALOG_LIMIT: '1' },
+  });
+  const catalog = await provider.handleCatalog({
+    type: 'series',
+    id: 'tpb4k.hentai.all',
+    extra: {},
+  });
+  assert.equal(catalog.metas.length, 1);
+  assert.equal(catalog.metas[0].posterShape, 'poster');
+  const meta = await provider.handleMeta({ type: 'series', id: catalog.metas[0].id });
   assert.equal(meta.meta.posterShape, 'poster');
 });
 
