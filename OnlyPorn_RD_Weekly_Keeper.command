@@ -99,12 +99,24 @@ mkdir -p "$STATE_DIR"
 chmod 700 "$STATE_DIR"
 LOCK_DIR="$STATE_DIR/run.lock"
 if ! mkdir "$LOCK_DIR" 2>/dev/null; then
-  echo "ERROR: Another weekly keeper process is already running: $LOCK_DIR" >&2
-  exit 1
+  LOCK_PID=""
+  [[ -r "$LOCK_DIR/pid" ]] && read -r LOCK_PID < "$LOCK_DIR/pid"
+  if [[ "$LOCK_PID" == <-> ]] && kill -0 "$LOCK_PID" 2>/dev/null; then
+    echo "ERROR: Another weekly keeper process is already running (PID $LOCK_PID)." >&2
+    exit 1
+  fi
+  [[ -z "$LOCK_PID" ]] || rm -f "$LOCK_DIR/pid"
+  if ! rmdir "$LOCK_DIR" 2>/dev/null || ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    echo "ERROR: The weekly keeper lock could not be reclaimed safely: $LOCK_DIR" >&2
+    exit 1
+  fi
+  echo "Recovered a stale weekly keeper lock from an earlier interrupted run."
 fi
+print -r -- "$$" > "$LOCK_DIR/pid"
 TMP_DIR="$(mktemp -d "$STATE_DIR/tmp.XXXXXX")"
 cleanup() {
   rm -rf "$TMP_DIR"
+  rm -f "$LOCK_DIR/pid"
   rmdir "$LOCK_DIR" 2>/dev/null || true
 }
 trap cleanup EXIT INT TERM

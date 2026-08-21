@@ -33,6 +33,8 @@ test('weekly RD keeper validates an audited-only fixture without exposing creden
   fs.writeFileSync(config, JSON.stringify({
     services: [{ id: 'realdebrid', credentials: { apiKey: token } }],
   }));
+  const state = path.join(directory, 'state');
+  fs.mkdirSync(path.join(state, 'run.lock'), { recursive: true });
   try {
     const result = spawnSync('zsh', [
       SCRIPT, '--check', '--report', report, '--config', config,
@@ -40,15 +42,17 @@ test('weekly RD keeper validates an audited-only fixture without exposing creden
       encoding: 'utf8',
       env: {
         ...process.env,
-        ONLYPORN_RD_STATE_DIR: path.join(directory, 'state'),
+        ONLYPORN_RD_STATE_DIR: state,
       },
     });
     assert.equal(result.status, 0, result.stderr);
     assert.match(result.stdout, /Verified:\s+1 code mappings/);
     assert.match(result.stdout, /Unique hash:\s+1/);
+    assert.match(result.stdout, /Recovered a stale weekly keeper lock/);
     assert.match(result.stdout, /CHECK PASSED/);
     assert.doesNotMatch(result.stdout, new RegExp(token));
     assert.doesNotMatch(result.stderr, new RegExp(token));
+    assert.equal(fs.existsSync(path.join(state, 'run.lock')), false);
   } finally {
     fs.rmSync(directory, { recursive: true, force: true });
   }
