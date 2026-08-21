@@ -45,6 +45,14 @@ test('route metadata retains addon diagnostics but never records relay tokens', 
   assert.equal(media.resource, 'media');
   assert.equal(media.targetId, 'protected-relay');
   assert.doesNotMatch(JSON.stringify(media), /super-secret-token/);
+
+  const unknown = routeMetadata({
+    path: '/favicon.ico/private-value',
+  });
+  assert.equal(unknown.resource, 'http');
+  assert.equal(unknown.routeKey, 'favicon.ico');
+  assert.equal(unknown.pathHash.length, 12);
+  assert.doesNotMatch(JSON.stringify(unknown), /private-value/);
 });
 
 test('long encoded content identifiers are compact and remain correlatable', () => {
@@ -83,6 +91,8 @@ test('observability contract includes request, result, relay and deployment mark
   assert.match(relay, /originRid/);
   assert.match(relay, /RELAY_SESSION/);
   assert.match(relay, /JAVHD_SEGMENT_REJECTED/);
+  assert.match(relay, /JAVHD_SEGMENT_RECOVERY_ATTEMPT/);
+  assert.match(addon, /ONLYV2_ZERO_STREAMS/);
   assert.match(server, /DEPLOY_CONTAINER_START/);
   assert.match(server, /DEPLOY_CUTOVER_START/);
   assert.match(server, /DEPLOY_LIVE/);

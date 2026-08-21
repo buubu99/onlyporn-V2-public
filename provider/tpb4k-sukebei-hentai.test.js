@@ -186,6 +186,13 @@ test('isolated SQLite persists series, episodes, releases, metadata and a comple
   await store.putMetadata('anilist', 'fixture', [item]);
   assert.equal((await store.getMetadata('anilist', 'fixture'))[0].sourceId, 'anilist:1');
   assert.equal((await store.state()).value.status, 'complete');
+  await store.replaceIndex({
+    seriesItems: [{ sourceId: item.sourceId, parentId: item.sourceId, title: item.title, searchText: 'fixture uncensored', sortDate: 11, seeders: 6, item }],
+    episodeItems: [{ sourceId: episode.sourceId, parentId: item.sourceId, title: episode.title, searchText: 'fixture e1', sortDate: 11, seeders: 6, item: episode }],
+    releases: [release],
+    build: { status: 'complete', cards: 2 },
+  });
+  assert.equal((await store.state()).value.cards, 2, 'completed catalog state must update atomically');
   const stats = await store.stats();
   assert.equal(stats.seriesRows, 1);
   assert.equal(stats.episodeRows, 1);

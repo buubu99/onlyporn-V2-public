@@ -251,6 +251,20 @@ builder.defineStreamHandler(async args => {
       },
       'ONLYV2_COUNTS'
     );
+    if (normalizedCounts.streams === 0) {
+      logger.warn(
+        {
+          event: 'ONLYV2_ZERO_STREAMS',
+          resource: 'stream',
+          provider: name,
+          candidateStreams: rawCounts.streams,
+          filteredStreams: streamCounts(filtered.response).streams,
+          removed: Number(filtered.removed || 0),
+          metaPreflight,
+        },
+        'Stream request completed without a playable candidate'
+      );
+    }
     return normalized;
   } catch (error) {
     const totalMs = elapsedMs(startedAt);

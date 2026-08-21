@@ -91,6 +91,95 @@ test('JAVHDPorn accepts vdcdn only inside its own protected media profile', () =
   );
 });
 
+test('JAVHDPorn accepts only the observed cdnsync redirector host', () => {
+  assert.doesNotThrow(() => mediaRelay._test.validateTargetUrl(
+    'https://redirector.cdnsync.cloud/live/fixture/master.m3u8',
+    'javhdporn'
+  ));
+  for (const url of [
+    'https://other.cdnsync.cloud/live/fixture/master.m3u8',
+    'https://evil.redirector.cdnsync.cloud/live/fixture/master.m3u8',
+  ]) {
+    assert.throws(
+      () => mediaRelay._test.validateTargetUrl(url, 'javhdporn'),
+      /not approved/
+    );
+  }
+  assert.throws(
+    () => mediaRelay._test.validateTargetUrl(
+      'https://redirector.cdnsync.cloud/live/fixture/master.m3u8',
+      'xvideos'
+    ),
+    /not approved/
+  );
+});
+
+test('JAVHDPorn segment recovery retries a rejected byte range without Range', async () => {
+  const originalRequest = axios.request;
+  const calls = [];
+  let destroyed = false;
+  axios.request = async options => {
+    calls.push(options);
+    if (calls.length === 1) {
+      return {
+        status: 403,
+        headers: {},
+        data: { destroy() { destroyed = true; } },
+      };
+    }
+    return { status: 200, headers: { 'content-type': 'video/mp2t' }, data: Buffer.alloc(0) };
+  };
+
+  try {
+    const result = await mediaRelay._test.requestJavSegment(
+      {
+        provider: 'javhdporn',
+        kind: 'segment',
+        url: 'https://media.qooglecdn.com/fixture/segment.ts',
+        headers: { Referer: 'https://video.javhdporn.net/p/fixture' },
+      },
+      { range: 'bytes=100-200' }
+    );
+    assert.equal(result.response.status, 200);
+    assert.equal(calls.length, 2);
+    assert.equal(calls[0].headers.Range, 'bytes=100-200');
+    assert.equal(calls[1].headers.Range, undefined);
+    assert.equal(calls[0].timeout, 12_000);
+    assert.equal(calls[1].timeout, 12_000);
+    assert.equal(destroyed, true);
+  } finally {
+    axios.request = originalRequest;
+  }
+});
+
+test('JAVHDPorn segment recovery retries one upstream timeout and remains bounded', async () => {
+  const originalRequest = axios.request;
+  const calls = [];
+  axios.request = async options => {
+    calls.push(options);
+    if (calls.length === 1) {
+      const error = new Error('timeout');
+      error.code = 'ECONNABORTED';
+      throw error;
+    }
+    return { status: 200, headers: {}, data: Buffer.alloc(0) };
+  };
+
+  try {
+    const result = await mediaRelay._test.requestJavSegment({
+      provider: 'javhdporn',
+      kind: 'segment',
+      url: 'https://p16-ad-site-sign-sg.tiktokcdn.com/fixture/segment.ts',
+      headers: {},
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(calls.length, 2);
+    assert.equal(calls.every(call => call.timeout === 12_000), true);
+  } finally {
+    axios.request = originalRequest;
+  }
+});
+
 test('vdcdn master rewriting preserves custom token lines and relays image-named segments', () => {
   mediaRelay._test.entries.clear();
   const entry = {

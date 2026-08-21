@@ -134,6 +134,12 @@ function routeMetadata(req) {
     targetHash: compact.hash,
     targetLength: compact.length,
     targetTruncated: compact.truncated,
+    ...(resource === 'http'
+      ? {
+          routeKey: /^[a-z0-9._-]{1,48}$/.test(first) ? first : (first ? 'other' : 'root'),
+          pathHash: shortHash(path || '/', 12),
+        }
+      : {}),
     ...(search ? { search } : {}),
     ...(skip ? { skip } : {}),
   };

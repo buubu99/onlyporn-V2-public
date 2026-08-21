@@ -16,7 +16,15 @@ const HLS_SNAPSHOT_MAX_PLAYLISTS = 12;
 const HLS_SNAPSHOT_TIMEOUT_MS = 8_000;
 const HLS_SNAPSHOT_REQUEST_TIMEOUT_MS = 5_000;
 const JAV_SEGMENT_MAX_BYTES = 32 * 1024 * 1024;
+const JAV_SEGMENT_ATTEMPT_TIMEOUT_MS = 12_000;
+const JAV_SEGMENT_MAX_ATTEMPTS = 2;
 const entries = new BoundedTtlCache({ maxEntries: MAX_SESSIONS, ttlMs: SESSION_TTL_MS });
+
+const PROVIDER_EXACT_HOSTS = {
+  // Observed as a direct child of pianopic.com JAVHD playlists. Keep this
+  // exact instead of trusting every host below the shared cdnsync.cloud zone.
+  javhdporn: new Set(['redirector.cdnsync.cloud']),
+};
 
 const PROVIDER_SUFFIXES = {
   eporner: ['eporner.com'],
@@ -111,7 +119,10 @@ function mediaPathPrefix(env = process.env) {
 function hostnameAllowed(hostname, provider) {
   const suffixes = PROVIDER_SUFFIXES[provider] || [];
   const normalized = String(hostname || '').toLowerCase().replace(/\.$/, '');
-  return suffixes.some(suffix => normalized === suffix || normalized.endsWith(`.${suffix}`));
+  return (
+    PROVIDER_EXACT_HOSTS[provider]?.has(normalized) ||
+    suffixes.some(suffix => normalized === suffix || normalized.endsWith(`.${suffix}`))
+  );
 }
 
 function validateTargetUrl(value, provider) {
@@ -809,6 +820,92 @@ async function upstreamRequest(
   throw new Error('Media relay request failed');
 }
 
+function javSegmentRetryableStatus(status) {
+  return [403, 408, 425, 429, 500, 502, 503, 504].includes(Number(status));
+}
+
+function disposeUpstreamResponse(response) {
+  try { response?.data?.destroy?.(); } catch {}
+}
+
+async function requestJavSegment(
+  entry,
+  { method = 'GET', range, buffer = false } = {}
+) {
+  let lastResult;
+  let lastError;
+
+  for (let attempt = 1; attempt <= JAV_SEGMENT_MAX_ATTEMPTS; attempt += 1) {
+    const attemptRange = attempt === 1 ? range : undefined;
+    try {
+      const result = await upstreamRequest(entry, {
+        method,
+        range: attemptRange,
+        text: false,
+        buffer,
+        timeoutMs: JAV_SEGMENT_ATTEMPT_TIMEOUT_MS,
+      });
+      lastResult = result;
+      if (!javSegmentRetryableStatus(result.response.status) || attempt === JAV_SEGMENT_MAX_ATTEMPTS) {
+        if (attempt > 1) {
+          const recovered = !javSegmentRetryableStatus(result.response.status);
+          logger[recovered ? 'info' : 'warn'](
+            {
+              event: recovered
+                ? 'JAVHD_SEGMENT_RECOVERY_RESULT'
+                : 'JAVHD_SEGMENT_RECOVERY_EXHAUSTED',
+              provider: entry.provider,
+              ...relayDiagnosticFields(entry),
+              attempt,
+              upstreamStatus: result.response.status,
+              recovered,
+              rangeRemoved: Boolean(range),
+              upstreamHostname: relayUpstreamHostname(entry),
+            },
+            recovered
+              ? 'JAVHD segment recovery completed'
+              : 'JAVHD segment recovery attempts exhausted'
+          );
+        }
+        return result;
+      }
+
+      disposeUpstreamResponse(result.response);
+      logger.warn(
+        {
+          event: 'JAVHD_SEGMENT_RECOVERY_ATTEMPT',
+          provider: entry.provider,
+          ...relayDiagnosticFields(entry),
+          attempt: attempt + 1,
+          upstreamStatus: result.response.status,
+          rangeRemoved: Boolean(range),
+          upstreamHostname: relayUpstreamHostname(entry),
+        },
+        'Retrying JAVHD segment without a byte range'
+      );
+    } catch (error) {
+      lastError = error;
+      if (attempt === JAV_SEGMENT_MAX_ATTEMPTS) throw error;
+      logger.warn(
+        {
+          event: 'JAVHD_SEGMENT_RECOVERY_ATTEMPT',
+          provider: entry.provider,
+          ...relayDiagnosticFields(entry),
+          attempt: attempt + 1,
+          error: error.message,
+          errorCode: error.code || '',
+          rangeRemoved: Boolean(range),
+          upstreamHostname: relayUpstreamHostname(entry),
+        },
+        'Retrying JAVHD segment after an upstream error'
+      );
+    }
+  }
+
+  if (lastResult) return lastResult;
+  throw lastError || new Error('JAVHD segment request failed');
+}
+
 
 function mediaUsageLoggingEnabled(env = process.env) {
   return !/^(?:0|false|off|no)$/i.test(
@@ -1032,9 +1129,8 @@ async function handleRequest(req, res) {
     }
 
     if (isJavTransportSegment(entry)) {
-      const { response } = await upstreamRequest(entry, {
+      const { response } = await requestJavSegment(entry, {
         method: 'GET',
-        text: false,
         buffer: true,
       });
 
@@ -1094,11 +1190,13 @@ async function handleRequest(req, res) {
       return;
     }
 
-    const { response, finalUrl } = await upstreamRequest(entry, {
+    const requestOptions = {
       method: req.method === 'HEAD' ? 'HEAD' : 'GET',
       range: req.headers.range,
-      text: false,
-    });
+    };
+    const { response, finalUrl } = entry.provider === 'javhdporn' && entry.kind === 'segment'
+      ? await requestJavSegment(entry, requestOptions)
+      : await upstreamRequest(entry, { ...requestOptions, text: false });
 
     if (entry.provider === 'eporner' && /\/na\.mp4(?:$|[?#])/i.test(finalUrl)) {
       response.data?.destroy?.();
@@ -1193,6 +1291,7 @@ module.exports = {
     createChildToken,
     hostnameAllowed,
     isJavTransportSegment,
+    javSegmentRetryableStatus,
     normalizeJavTransportSegment,
     kindFromPlaylistTag,
     hlsChildPlaylistUrls,
@@ -1202,6 +1301,7 @@ module.exports = {
     relayContentType,
     relayChild,
     resolveRelayEntry,
+    requestJavSegment,
     rewritePlaylist,
     stripPngWrappedTsBuffer,
     validateTargetUrl,

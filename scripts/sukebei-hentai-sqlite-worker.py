@@ -255,7 +255,10 @@ def replace_index(payload):
         )
         conn.execute(
             """INSERT INTO build_state(state_key,value_json,updated_at)
-               VALUES('catalog',?,?)""",
+               VALUES('catalog',?,?)
+               ON CONFLICT(state_key) DO UPDATE SET
+                 value_json=excluded.value_json,
+                 updated_at=excluded.updated_at""",
             (json.dumps(build, separators=(",", ":"), ensure_ascii=False), now),
         )
         conn.execute("COMMIT")
