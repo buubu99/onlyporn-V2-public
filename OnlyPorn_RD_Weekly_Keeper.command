@@ -285,7 +285,7 @@ repair_missing_hash() {
   local codes="$1" hash="$2"
   local active_file="$TMP_DIR/active.json" add_file="$TMP_DIR/add.json"
   local select_file="$TMP_DIR/select.json"
-  local active=0 limit=0 torrent_id="" ids="" status="" link="" poll=1
+  local active=0 limit=0 torrent_id="" ids="" torrent_status="" link="" poll=1
   REPAIR_LINK=""
   api_request GET "torrents/activeCount" "$active_file" || return 1
   active="$(jq -r '.nb // 0' "$active_file")"
@@ -317,21 +317,21 @@ repair_missing_hash() {
   for poll in {1..5}; do
     sleep 12
     api_request GET "torrents/info/$torrent_id" "$INFO_FILE" || continue
-    status="$(jq -r '.status // "unknown"' "$INFO_FILE")"
-    if [[ "$status" == "downloaded" ]]; then
+    torrent_status="$(jq -r '.status // "unknown"' "$INFO_FILE")"
+    if [[ "$torrent_status" == "downloaded" ]]; then
       link="$(jq -r '.links[0] // empty' "$INFO_FILE")"
       if [[ -n "$link" ]]; then
         REPAIR_LINK="$link"
         return 0
       fi
     fi
-    if [[ "$status" == "dead" || "$status" == "error" ||
-          "$status" == "magnet_error" || "$status" == "virus" ]]; then
-      LAST_API_ERROR="re-added torrent became $status"
+    if [[ "$torrent_status" == "dead" || "$torrent_status" == "error" ||
+          "$torrent_status" == "magnet_error" || "$torrent_status" == "virus" ]]; then
+      LAST_API_ERROR="re-added torrent became $torrent_status"
       return 1
     fi
   done
-  LAST_API_ERROR="repair submitted; RD status is ${status:-pending}"
+  LAST_API_ERROR="repair submitted; RD status is ${torrent_status:-pending}"
   return 2
 }
 
@@ -394,10 +394,10 @@ while IFS=$'\t' read -r codes hash; do
   encoded="${RD_ROWS[$hash]-}"
   if [[ -n "$encoded" ]]; then
     row="$(decode_row "$encoded")"
-    status="$(print -r -- "$row" | jq -r '.status // "unknown"')"
+    torrent_status="$(print -r -- "$row" | jq -r '.status // "unknown"')"
     link="$(print -r -- "$row" | jq -r '.links[0] // empty')"
     name="$(print -r -- "$row" | jq -r '.filename // "unknown"')"
-    if [[ "$status" == "downloaded" && -n "$link" ]]; then
+    if [[ "$torrent_status" == "downloaded" && -n "$link" ]]; then
       if touch_original_link "$link"; then
         touched=$((touched + 1))
         mark_completed "$hash"
@@ -410,8 +410,8 @@ while IFS=$'\t' read -r codes hash; do
       fi
     else
       unhealthy=$((unhealthy + 1))
-      record_event "$codes" "$hash" "PRESENT_NOT_READY" "$status"
-      echo "[$position/$TARGET_HASHES] NOT READY $codes — $status"
+      record_event "$codes" "$hash" "PRESENT_NOT_READY" "$torrent_status"
+      echo "[$position/$TARGET_HASHES] NOT READY $codes — $torrent_status"
     fi
     unset row link
     continue

@@ -67,4 +67,6 @@ test('weekly RD keeper is scoped, resumable, rate-limited, and never deletes', (
   assert.match(source, /jq -rsc/);
   assert.doesNotMatch(source, /torrents\/delete/);
   assert.doesNotMatch(source, /downloads\/delete/);
+  assert.doesNotMatch(source, /\blocal [^\n]*\bstatus=/);
+  assert.doesNotMatch(source, /\bstatus="\$\(/);
 });
