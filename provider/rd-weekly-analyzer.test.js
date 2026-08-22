@@ -89,6 +89,7 @@ test('weekly analyzer wrapper is executable, resumable, and never deletes RD ent
   const source = fs.readFileSync(SCRIPT, 'utf8');
   const wrapper = fs.readFileSync(WRAPPER, 'utf8');
   assert.match(wrapper, /opn-rd-weekly-analyzer\.js/);
+  assert.match(wrapper, /caffeinate -dimsu node/);
   assert.match(source, /completed-\$\{summary\.week\}-\$\{reportSha256\.slice\(0, 12\)\}\.txt/);
   assert.match(source, /torrents\/addMagnet/);
   assert.match(source, /torrents\/selectFiles/);
