@@ -10,6 +10,7 @@ const BUNDLE_VERSION = 3;
 const MAX_SOURCE_ID_LENGTH = 512;
 const MAX_TITLE_LENGTH = 220;
 const MAX_CATALOG_ID_LENGTH = 160;
+const MAX_SCENE_CODE_LENGTH = 80;
 const MAX_BUNDLE_TORRENTS = 12;
 const MAX_DECODED_PAYLOAD_BYTES = 64 * 1024;
 
@@ -107,13 +108,14 @@ function compactToTorrent(row = {}) {
   });
 }
 
-function encodeTpb4kId({ source, sourceId, catalogId = '', torrent = null, torrents = null }) {
+function encodeTpb4kId({ source, sourceId, catalogId = '', sceneCode = '', torrent = null, torrents = null }) {
   const normalizedSource = String(source || '').trim().toLowerCase();
   const normalizedSourceId = String(sourceId || '').trim();
   if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(normalizedSource)) throw new Error('Invalid OnlyPorn source');
   if (!normalizedSourceId || normalizedSourceId.length > MAX_SOURCE_ID_LENGTH) throw new Error('Invalid OnlyPorn source item ID');
 
   const normalizedCatalogId = compactText(catalogId, MAX_CATALOG_ID_LENGTH);
+  const normalizedSceneCode = compactText(sceneCode, MAX_SCENE_CODE_LENGTH);
   const bundle = normalizeBoundTorrents(Array.isArray(torrents) ? torrents : (torrent ? [torrent] : []));
   const payload = {
     v: bundle.length > 1 ? BUNDLE_VERSION : (bundle.length === 1 ? TORRENT_VERSION : LEGACY_VERSION),
@@ -121,6 +123,7 @@ function encodeTpb4kId({ source, sourceId, catalogId = '', torrent = null, torre
     i: normalizedSourceId,
     c: normalizedCatalogId,
   };
+  if (normalizedSceneCode) payload.k = normalizedSceneCode;
   if (payload.v === TORRENT_VERSION) Object.assign(payload, torrentToCompact(bundle[0]));
   if (payload.v === BUNDLE_VERSION) payload.b = bundle.map(torrentToCompact);
   return `${PREFIX}${encodePayload(payload, payload.v === BUNDLE_VERSION)}`;
@@ -145,6 +148,9 @@ function decodeTpb4kId(value) {
     source: String(payload.s),
     sourceId: String(payload.i),
     catalogId: String(payload.c || ''),
+    ...(compactText(payload.k, MAX_SCENE_CODE_LENGTH)
+      ? { sceneCode: compactText(payload.k, MAX_SCENE_CODE_LENGTH) }
+      : {}),
     ...(bundle.length ? { torrents: bundle, torrent: bundle[0] } : {}),
   });
 }

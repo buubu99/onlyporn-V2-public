@@ -54,6 +54,7 @@ function normalizeFeedItem(source, item = {}, index = 0) {
   return Object.freeze({
     sourceId: stableId(source, item, index),
     title,
+    sourceTitle: text(item.sourceTitle || item.originalTitle || title),
     poster: safeHttps(item.poster || item.image || item.thumbnail),
     background: safeHttps(item.background || item.fanart || item.banner || item.poster || item.image),
     description: text(item.description || item.overview || item.summary),

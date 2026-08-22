@@ -13,7 +13,8 @@ function normalizeJavCode(value) {
   const text = String(value || '').normalize('NFKC').toUpperCase().trim();
   const fc2 = text.match(/\bFC2[\s._-]*(?:PPV[\s._-]*)?(\d{5,9})\b/);
   if (fc2) return `FC2-PPV-${fc2[1]}`;
-  const match = text.match(/\b([A-Z]{2,24})[\s._-]+(\d{2,7})\b/);
+  const match = text.match(/\b([A-Z]{2,24})[\s._-]+(\d{2,7})\b/)
+    || text.match(/\b([A-Z]{2,24})(\d{2,7})\b/);
   return match ? `${match[1]}-${match[2]}` : '';
 }
 

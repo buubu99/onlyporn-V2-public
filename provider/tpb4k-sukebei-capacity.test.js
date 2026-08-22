@@ -26,7 +26,7 @@ test('Sukebei has a dedicated catalogue cache revision', () => {
   );
   assert.match(
     provider,
-    /SUKEBEI_CATALOG_CACHE_REVISION = 's2'/
+    /SUKEBEI_CATALOG_CACHE_REVISION = 's3'/
   );
   assert.match(
     provider,
@@ -36,6 +36,8 @@ test('Sukebei has a dedicated catalogue cache revision', () => {
     provider,
     /`\$\{CATALOG_CACHE_REVISION\}-\$\{SUKEBEI_CATALOG_CACHE_REVISION\}`/
   );
+  assert.match(provider, /SUKEBEI_SEARCH_CACHE_REVISION = 's3'/);
+  assert.match(provider, /`\$\{SUKEBEI_SEARCH_CACHE_REVISION\}:\$\{query\}`/);
 });
 
 function hashFor(number) {

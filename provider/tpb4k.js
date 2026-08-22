@@ -41,7 +41,8 @@ const {
 const MOVIE_TYPE = 'movie';
 const SERIES_TYPE = 'series';
 const CATALOG_CACHE_REVISION = 'r7';
-const SUKEBEI_CATALOG_CACHE_REVISION = 's2';
+const SUKEBEI_CATALOG_CACHE_REVISION = 's3';
+const SUKEBEI_SEARCH_CACHE_REVISION = 's3';
 function catalogCacheRevision(args = {}) {
   return String(args?.id || '') === 'tpb4k.sukebei.top'
     ? `${CATALOG_CACHE_REVISION}-${SUKEBEI_CATALOG_CACHE_REVISION}`
@@ -63,7 +64,13 @@ let loggerInstance;
 
 function isSukebeiCodeSearch(value) {
   const query = normalizeSearchQuery(value);
-  return /^(?:[a-z]{2,12}[\s_-]*)?\d{2,6}$/i.test(query);
+  return /^(?:[a-z]{2,24}[\s_-]*)?\d{2,7}$/i.test(query);
+}
+
+function searchCacheQuery(definition = {}, query = '') {
+  return definition.id === 'tpb4k.sukebei.top'
+    ? `${SUKEBEI_SEARCH_CACHE_REVISION}:${query}`
+    : query;
 }
 
 function logger() {
@@ -175,6 +182,7 @@ function toMetaPreview(item, catalogId, config) {
       source: item.source,
       sourceId: item.sourceId,
       catalogId,
+      sceneCode: item.sceneCode,
       torrents: torrentBundle(item),
     });
   const poster = resolvedPoster(item, config, catalogId);
@@ -242,7 +250,7 @@ function catalogPreviewMeta(preview, id, decoded) {
         sourceId: decoded.sourceId,
         identity: '',
         releaseDate: '',
-        sceneCode: '',
+        sceneCode: String(decoded.sceneCode || ''),
         tags,
         metadataProvider: 'catalog-response',
         lookupSource: '',
@@ -411,7 +419,7 @@ class Tpb4kProvider {
     ) {
       const requestedSearch = String(args?.extra?.search || '').trim();
       const pureJavCodeMatch =
-        /^([a-z]{2,12})[\s_-]*(\d{2,6})$/i.exec(requestedSearch);
+        /^([a-z]{2,24})[\s_-]*(\d{2,7})$/i.exec(requestedSearch);
 
       if (pureJavCodeMatch) {
         const normalizedJavCode =
@@ -644,8 +652,9 @@ class Tpb4kProvider {
   async _handleCatalogSearch(args, definition, query) {
     const skip = Math.max(Number.parseInt(String(args?.extra?.skip || 0), 10) || 0, 0);
     const pageSize = 40;
-    const key = `${definition.id}\0${query}`;
-    const cachedRecord = await this.searchStore.getQuery(definition.id, query);
+    const cacheQuery = searchCacheQuery(definition, query);
+    const key = `${definition.id}\0${cacheQuery}`;
+    const cachedRecord = await this.searchStore.getQuery(definition.id, cacheQuery);
     // A prior warm-pool miss may have stored an empty result. Code-shaped
     // Sukebei searches are authoritative upstream lookups, so an empty query
     // cache must never suppress their recovery path.
@@ -668,7 +677,7 @@ class Tpb4kProvider {
     const operation = this._handleCatalogSearchFresh(args, definition, query)
       .then(async value => {
         const metas = Array.isArray(value?.metas) ? value.metas : [];
-        await this.searchStore.putQuery(definition.id, query, metas);
+        await this.searchStore.putQuery(definition.id, cacheQuery, metas);
         return { metas };
       })
       .catch(error => {
@@ -943,7 +952,7 @@ class Tpb4kProvider {
     // code-shaped query such as "SONE 620 UNCENSORED", search the stable JAV
     // code first and then enforce the uncensored qualifier locally.
     const requestedSearch = String(args?.extra?.search || '').trim();
-    const uncensoredCodeMatch = /\b(?:([a-z]{2,12})[\s_-]*)?(\d{2,6})\b/i.exec(requestedSearch);
+    const uncensoredCodeMatch = /\b(?:([a-z]{2,24})[\s_-]*)?(\d{2,7})\b/i.exec(requestedSearch);
     const uncensoredCodeSearch = (
       /\buncensored\b/i.test(requestedSearch) && uncensoredCodeMatch
     )
@@ -1026,6 +1035,8 @@ class Tpb4kProvider {
                 meta?.name,
                 meta?.title,
                 meta?.description,
+                ...(Array.isArray(meta?.tags) ? meta.tags : []),
+                ...(Array.isArray(meta?.genres) ? meta.genres : []),
               ];
               let dedupeKey = String(meta?.id || '');
 
@@ -1034,11 +1045,18 @@ class Tpb4kProvider {
               // even when a presentation field was normalized.
               try {
                 const id = String(meta?.id || '');
-                const encoded = id.split(':').slice(2).join(':');
-                if (encoded) {
-                  const payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
-                  searchableParts.push(payload?.t, payload?.i, payload?.c);
-                  dedupeKey = String(payload?.h || payload?.i || id);
+                const identity = decodeTpb4kId(id);
+                if (identity) {
+                  searchableParts.push(identity.sourceId, identity.catalogId, identity.sceneCode);
+                  for (const torrent of Array.isArray(identity.torrents) ? identity.torrents : []) {
+                    searchableParts.push(torrent?.title, torrent?.filename);
+                  }
+                  const hashKey = (Array.isArray(identity.torrents) ? identity.torrents : [])
+                    .map(torrent => String(torrent?.infoHash || '').toLowerCase())
+                    .filter(Boolean)
+                    .sort()
+                    .join(',');
+                  dedupeKey = hashKey || String(identity.sourceId || id);
                 }
               } catch (_error) {
                 // Visible metadata is still sufficient when an id is not decodable.
@@ -1123,7 +1141,7 @@ class Tpb4kProvider {
     const seenSceneKeys = new Set();
     const dedupedMetas = (Array.isArray(merged?.metas) ? merged.metas : []).filter(meta => {
       const visible = [meta?.name, meta?.title].filter(Boolean).join(' ');
-      const code = /\b([a-z]{2,12})[-_ ]?(\d{2,6})\b/i.exec(visible);
+      const code = /\b([a-z]{2,24})[-_ ]?(\d{2,7})\b/i.exec(visible);
       // One JAV code can legitimately have several different Sukebei torrents
       // (resolution, subtitle, censored and leaked/uncensored variants). Alias
       // expansion must remove the same hash repeated by multiple queries, not
@@ -1531,6 +1549,8 @@ class Tpb4kProvider {
         sourceId: decoded.sourceId,
         detailUrl: decoded.sourceId,
         title: encodedSukebeiTorrent.title || encodedSukebeiTorrent.filename,
+        sourceTitle: encodedSukebeiTorrent.title || encodedSukebeiTorrent.filename,
+        sceneCode: decoded.sceneCode,
         filename: encodedSukebeiTorrent.filename || encodedSukebeiTorrent.title,
         infoHash: encodedSukebeiTorrent.infoHash,
         seeders: encodedSukebeiTorrent.seeders,

@@ -58,6 +58,7 @@ function normalizeDiscoveryItem(adapter, item = {}) {
     source: adapter.id,
     sourceId,
     title,
+    sourceTitle: String(item.sourceTitle || item.originalTitle || title).replace(/\s+/g, ' ').trim(),
     poster: String(item.poster || '').trim(),
     background: String(item.background || item.poster || '').trim(),
     description: String(item.description || '').trim(),

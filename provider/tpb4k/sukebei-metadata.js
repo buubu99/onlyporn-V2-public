@@ -19,7 +19,7 @@ const { decodeTorrent, readBoundedBuffer, safeNativeRequest } = require('./nativ
 const { assertSafeHttpsUrl } = require('../url-security');
 const { evaluateContent, readContentFilterConfig } = require('../content-filter');
 const { createMetaTubeClient } = require('./metatube-client');
-const { createRdCatalogSqliteStore } = require('../rd-catalog-sqlite');
+const { createRdCatalogSqliteStore, normalizeJavCode } = require('../rd-catalog-sqlite');
 const { recordSukebeiResult } = require('../runtime-readiness');
 
 const CODE_EXCLUSIONS = new Set([
@@ -30,7 +30,8 @@ const CODE_EXCLUSIONS = new Set([
 const CODE_PREFIX_EXCLUSIONS = new Set([
   'RELEASE', 'SCENE', 'EPISODE', 'PART', 'VOL', 'VOLUME', 'DISC', 'DISK',
   'PACK', 'VIDEO', 'MOVIE', 'TITLE', 'DATE', 'UPDATE', 'COMPILATION',
-  'PPV',
+  'PPV', 'UNCENSORED', 'CENSORED', 'LEAK', 'LEAKED', 'JAPANESE',
+  'CHINESE', 'ENGLISH', 'SUBTITLE', 'SUBTITLES', 'SEEDERS', 'TORRENT',
 ]);
 
 const SUKEBEI_MAX_TORRENT_BYTES = 2_000_000;
@@ -69,11 +70,14 @@ function extractSceneCodes(value) {
     }
   }
 
-  const generic = text.match(/\b[A-Z]{2,24}[\s._-]+\d{2,7}\b/g) || [];
-  for (const raw of generic) {
-    const code = raw.replace(/[\s._-]+/g, '-');
+  const generic = [
+    ...text.matchAll(/\b([A-Z]{2,24})[\s._-]+(\d{2,7})\b/g),
+    ...text.matchAll(/\b([A-Z]{2,24})(\d{2,7})\b/g),
+  ];
+  for (const match of generic) {
+    const code = `${match[1]}-${match[2]}`;
     const key = compactKey(code);
-    const prefix = code.split('-')[0];
+    const prefix = match[1];
     if (!key || CODE_EXCLUSIONS.has(key) || CODE_PREFIX_EXCLUSIONS.has(prefix) ||
         /^(?:19|20)\d{2}$/.test(key)) continue;
     if (!seen.has(code)) {
@@ -83,6 +87,26 @@ function extractSceneCodes(value) {
   }
 
   return Object.freeze(output.slice(0, 4));
+}
+
+function sceneCodesForItem(item = {}) {
+  const output = [];
+  const seen = new Set();
+  const add = value => {
+    const normalized = normalizeJavCode(value);
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    output.push(normalized);
+  };
+  add(item.sceneCode);
+  for (const value of [item.sourceTitle, item.title, item.filename]) {
+    for (const code of extractSceneCodes(value)) add(code);
+  }
+  return Object.freeze(output.slice(0, 4));
+}
+
+function sceneCodeForItem(item = {}) {
+  return sceneCodesForItem(item)[0] || '';
 }
 
 function normalizedSceneCode(value) {
@@ -835,7 +859,7 @@ function createSukebeiMetadataAdapter(options = {}) {
       return cached.negative ? null : cached.value;
     }
 
-    const codes = options.skipCodes ? [] : extractSceneCodes(source.title);
+    const codes = options.skipCodes ? [] : sceneCodesForItem(source);
     let best = null;
     let successfulLookup = false;
     let lookupError = false;
@@ -922,7 +946,7 @@ function createSukebeiMetadataAdapter(options = {}) {
       ...merged,
       metadataProvider: candidate.provider,
       lookupSource: 'sukebei',
-      lookupQuery: compactText(lookupQuery || extractSceneCodes(source.title)[0] || '').slice(0, 240),
+      lookupQuery: compactText(lookupQuery || sceneCodeForItem(source) || '').slice(0, 240),
       contentClassificationKnown: Array.isArray(merged.tags) && merged.tags.length > 0,
     });
     cache.set(`sukebei:${source.sourceId}`, enriched, positiveTtlMs);
@@ -1184,10 +1208,19 @@ function createSukebeiMetadataAdapter(options = {}) {
     const normalized = dedupeAndRank(
       feed
         .map((item, position) => normalizeFeedItem('sukebei', item, position))
+        .map(item => {
+          if (!item) return null;
+          const sceneCode = sceneCodeForItem(item);
+          return Object.freeze({
+            ...item,
+            sourceTitle: item.sourceTitle || item.title,
+            ...(sceneCode ? { sceneCode } : {}),
+          });
+        })
         .filter(Boolean)
     );
     const normalizedCodes = [...new Set(normalized
-      .flatMap(item => extractSceneCodes(item.title))
+      .flatMap(item => sceneCodesForItem(item))
       .filter(Boolean))];
     const [rdPostersByCode, rdMappingsByCode] = await Promise.all([
       rdCatalogStore.postersForCodes(normalizedCodes),
@@ -1198,7 +1231,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     const priorityCodeSearch = searchCodes.length === 1
       && compactKey(searchQuery) === compactKey(searchCodes[0]);
     stats.inspected = normalized.length;
-    stats.codeCandidates = normalized.filter(item => extractSceneCodes(item.title).length > 0).length;
+    stats.codeCandidates = normalized.filter(item => sceneCodesForItem(item).length > 0).length;
 
     const codeLimit = searchMode
       ? Math.min(Math.max(Number(env.ONLYPORN_SEARCH_SUKEBEI_CODE_LIMIT || 12), 1), 24)
@@ -1240,12 +1273,13 @@ function createSukebeiMetadataAdapter(options = {}) {
     for (const item of normalized) {
       const sourceId = String(item.sourceId);
       if (resolvedById.has(sourceId)) continue;
-      const code = extractSceneCodes(item.title)[0];
+      const code = sceneCodeForItem(item);
       const persisted = code ? rdPostersByCode[code] : null;
       if (!persisted?.poster) continue;
       stats.rdCatalogPosterHits += 1;
       resolvedById.set(sourceId, Object.freeze({
         ...item,
+        sourceTitle: item.sourceTitle || item.title,
         title: persisted.title || item.title,
         poster: persisted.poster,
         background: persisted.background || persisted.poster,
@@ -1307,7 +1341,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     const codeJobsByKey = new Map();
     for (const item of normalized) {
       if (resolvedById.has(String(item.sourceId))) continue;
-      for (const code of extractSceneCodes(item.title)) {
+      for (const code of sceneCodesForItem(item)) {
         const key = normalizedSceneCode(code);
         if (!key) continue;
         let job = codeJobsByKey.get(key);
@@ -1427,8 +1461,8 @@ function createSukebeiMetadataAdapter(options = {}) {
     const unresolvedDetails = normalized
       .filter(item => !resolvedById.has(String(item.sourceId)) && safeHttpsUrl(item.detailUrl));
     const detailJobs = [
-      ...unresolvedDetails.filter(item => extractSceneCodes(item.title).length > 0),
-      ...unresolvedDetails.filter(item => extractSceneCodes(item.title).length === 0),
+      ...unresolvedDetails.filter(item => sceneCodesForItem(item).length > 0),
+      ...unresolvedDetails.filter(item => sceneCodesForItem(item).length === 0),
     ].slice(0, detailLimit);
     const detailDeadlineAt = Math.min(deadlineAt, Date.now() + detailReserveMs);
     stats.detailStageJobs = detailJobs.length;
@@ -1447,7 +1481,7 @@ function createSukebeiMetadataAdapter(options = {}) {
 
     stats.lookupEligible = normalized.filter(item =>
       safeHttpsUrl(item.poster) ||
-      extractSceneCodes(item.title).length > 0 ||
+      sceneCodesForItem(item).length > 0 ||
       safeHttpsUrl(item.detailUrl)
     ).length;
     stats.lookupSkipped = normalized.length - stats.lookupEligible;
@@ -1476,7 +1510,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     }
     stats.persistentArtworkWrites += artworkStore.setMany(allowed);
     await rdCatalogStore.upsertPosters?.(allowed.map(item => {
-      const code = extractSceneCodes(item.title)[0];
+      const code = sceneCodeForItem(item);
       if (!code || !isMetaTubePoster(item.poster) || !rdMappingsByCode[code]?.length) return null;
       return {
         code,
@@ -1529,7 +1563,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     // Honor Stremio pagination over the combined, deduplicated upstream pool.
     for (let allowedIndex = 0; allowedIndex < allowed.length; allowedIndex += 1) {
       const item = allowed[allowedIndex];
-      const code = extractSceneCodes(item.title)[0];
+      const code = sceneCodeForItem(item);
       const mappings = code && Array.isArray(rdMappingsByCode[code])
         ? rdMappingsByCode[code]
         : [];
@@ -1543,7 +1577,7 @@ function createSukebeiMetadataAdapter(options = {}) {
         seenHashes.add(mappedHash);
         playbackCandidates.push(Object.freeze({
           infoHash: mappedHash,
-          title: item.title,
+          title: item.sourceTitle || item.title,
           filename: compactText(mapping.filename || item.title),
           resolution: detectResolution(mapping.filename || item.title),
           indexer: 'sukebei-rd',
@@ -1555,7 +1589,7 @@ function createSukebeiMetadataAdapter(options = {}) {
       if (sourceHash && !seenHashes.has(sourceHash)) {
         playbackCandidates.push(Object.freeze({
           infoHash: sourceHash,
-          title: item.title,
+          title: item.sourceTitle || item.title,
           filename: compactText(item.filename || item.title),
           resolution: detectResolution(item.filename || item.title),
           indexer: 'sukebei',
@@ -1615,7 +1649,7 @@ function createSukebeiMetadataAdapter(options = {}) {
     const source = index.get(String(sourceId || '')) || encodedSource;
     if (!source) return [];
 
-    const code = extractSceneCodes(`${source.title || ''} ${source.filename || ''}`)[0];
+    const code = sceneCodeForItem(source);
     const verifiedMappings = code ? await rdCatalogStore.mappingsForCode(code) : [];
 
     let magnet = parseMagnet(source.magnetLink);

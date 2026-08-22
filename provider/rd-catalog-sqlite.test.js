@@ -101,7 +101,7 @@ test('RD audit import persists only verified downloaded hashes and exact MetaTub
 
 test('Sukebei cards and resolver prefer the verified RD hash while retaining the live source hash', async () => {
   const rss = `<?xml version="1.0"?><rss xmlns:nyaa="https://nyaa.si/xmlns/nyaa"><channel><item>
-    <guid>https://sukebei.example/view/663</guid><title>(Uncensored) IPX-663</title>
+    <guid>https://sukebei.example/view/663</guid><title>(Uncensored) IPX663</title>
     <link>https://sukebei.example/view/663</link><nyaa:infoHash>${ORIGINAL}</nyaa:infoHash>
     <nyaa:seeders>12</nyaa:seeders><nyaa:size>2.0 GiB</nyaa:size>
   </item></channel></rss>`;
@@ -118,7 +118,7 @@ test('Sukebei cards and resolver prefer the verified RD hash while retaining the
     async postersForCodes() {
       return {
         'IPX-663': {
-          title: 'IPX-663 title', poster: 'https://onlyporn.example/onlyporn/poster/metatube/a/b/c',
+          title: 'Japanese presentation title without a code', poster: 'https://onlyporn.example/onlyporn/poster/metatube/a/b/c',
           background: 'https://onlyporn.example/onlyporn/poster/metatube/a/b/c', provider: 'JavBus',
           providerId: 'ipx663', studio: 'IdeaPocket', performers: ['Actor'], tags: ['Uncensored'],
         },
@@ -150,7 +150,11 @@ test('Sukebei cards and resolver prefer the verified RD hash while retaining the
 
   const [item] = await adapter.catalog({ catalog: { id: 'tpb4k.sukebei.top', mode: 'top' }, limit: 40 });
   assert.equal(item.poster, 'https://onlyporn.example/onlyporn/poster/metatube/a/b/c');
+  assert.equal(item.sceneCode, 'IPX-663');
+  assert.equal(item.sourceTitle, '(Uncensored) IPX663');
+  assert.equal(item.title, 'Japanese presentation title without a code');
   assert.deepEqual(item.playbackCandidates.map(row => row.infoHash), [REPLACEMENT, ORIGINAL]);
+  assert.equal(item.playbackCandidates[0].title, '(Uncensored) IPX663');
   const resolved = await adapter.resolve({ sourceId: item.sourceId, item });
   assert.deepEqual(resolved.map(row => row.infoHash), [REPLACEMENT, ORIGINAL]);
   assert.equal(resolved[0].provenance.includes('rd-catalog-verified-downloaded'), true);
@@ -158,5 +162,6 @@ test('Sukebei cards and resolver prefer the verified RD hash while retaining the
 
 test('JAV normalization covers long prefixes from the real monthly report', () => {
   assert.equal(normalizeJavCode('fellatiojapan 333'), 'FELLATIOJAPAN-333');
+  assert.equal(normalizeJavCode('IPX663'), 'IPX-663');
   assert.equal(normalizeJavCode('fc2 ppv 1234567'), 'FC2-PPV-1234567');
 });

@@ -218,6 +218,81 @@ test('opaque TPB4K IDs carry source identity without credentials or raw playable
   assert.equal(decodeTpb4kId(`${id}broken`), null);
 });
 
+test('opaque TPB4K IDs preserve the canonical scene code across enriched display titles', () => {
+  const id = encodeTpb4kId({
+    source: 'sukebei',
+    sourceId: 'https://sukebei.example/view/675',
+    catalogId: 'tpb4k.sukebei.top',
+    sceneCode: 'SONE-675',
+    torrents: [
+      { infoHash: HASH_4K, title: 'SONE-675 uncensored source title', indexer: 'sukebei-rd' },
+      { infoHash: HASH_1080, title: 'SONE-675 source fallback', indexer: 'sukebei' },
+    ],
+  });
+  const decoded = decodeTpb4kId(id);
+  assert.equal(decoded.sceneCode, 'SONE-675');
+  assert.deepEqual(decoded.torrents.map(item => item.infoHash), [HASH_4K, HASH_1080]);
+});
+
+test('Sukebei stream resolution emits the verified RD replacement before its source fallback', async () => {
+  registerAdapter({
+    id: 'sukebei',
+    async catalog() {
+      return [{
+        sourceId: 'https://sukebei.example/view/675',
+        title: 'Japanese presentation title without a code',
+        sourceTitle: 'SONE-675 uncensored source title',
+        sceneCode: 'SONE-675',
+        poster: 'https://images.example/sone-675.jpg',
+        playbackCandidates: [
+          {
+            infoHash: HASH_4K,
+            title: 'SONE-675 uncensored downloaded replacement',
+            filename: 'SONE-675-uncensored-HD.mp4',
+            indexer: 'sukebei-rd',
+          },
+          {
+            infoHash: HASH_1080,
+            title: 'SONE-675 uncensored source fallback',
+            filename: 'SONE-675-source.mkv',
+            indexer: 'sukebei',
+          },
+        ],
+      }];
+    },
+    async meta() { return null; },
+    async resolve({ item }) {
+      assert.equal(item.sceneCode, 'SONE-675');
+      return item.playbackCandidates.map(candidate => ({
+        ...candidate,
+        source: candidate.indexer,
+        cached: candidate.indexer === 'sukebei-rd',
+        provenance: candidate.indexer === 'sukebei-rd'
+          ? ['rd-catalog-verified-downloaded']
+          : ['catalog-bound-torrent'],
+      }));
+    },
+  });
+  const provider = new Tpb4kProvider({
+    installBuiltIns: false,
+    env: {
+      TPB4K_ENABLED: 'true',
+      TPB4K_CATALOG_LIMIT: '1',
+      ONLYPORN_DISABLE_PERSISTENT_CACHE: 'true',
+    },
+  });
+  const catalog = await provider.handleCatalog({
+    type: 'movie', id: 'tpb4k.sukebei.top', extra: {},
+  });
+  const identity = decodeTpb4kId(catalog.metas[0].id);
+  assert.equal(identity.sceneCode, 'SONE-675');
+  assert.deepEqual(identity.torrents.map(item => item.infoHash), [HASH_4K, HASH_1080]);
+
+  const result = await provider.handleStream({ type: 'movie', id: catalog.metas[0].id });
+  assert.deepEqual(result.streams.map(stream => stream.infoHash), [HASH_4K, HASH_1080]);
+  assert.match(result.streams[0].name, /Cached/);
+});
+
 test('scene identity is stable across release-noise variations', () => {
   const left = buildSceneIdentity({
     studio: 'Example Studio',
@@ -298,6 +373,7 @@ test('provider recovers metadata from the persisted catalog card when a transien
       return [{
         sourceId: 'forgotten-after-catalog',
         title: 'Durable Catalog Metadata Fixture',
+        sceneCode: 'DURABLE-123',
         poster: 'https://images.example/durable-catalog.jpg',
         description: 'Metadata retained with the catalog response',
         studio: 'Fixture Studio',
@@ -326,6 +402,7 @@ test('provider recovers metadata from the persisted catalog card when a transien
   assert.equal(result.meta.name, 'Durable Catalog Metadata Fixture');
   assert.equal(result.meta.poster, 'https://images.example/durable-catalog.jpg');
   assert.equal(result.meta.extra.onlyporn.metadataProvider, 'catalog-response');
+  assert.equal(result.meta.extra.onlyporn.sceneCode, 'DURABLE-123');
   assert.equal(result.meta.extra.onlyporn.playbackCandidates, 1);
 });
 

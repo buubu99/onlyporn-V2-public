@@ -9,7 +9,7 @@ const {
   isSukebeiAliasCatalog,
 } = require('./tpb4k/sukebei-search-aliases');
 const { encodeTpb4kId } = require('./tpb4k/id-codec');
-const { __testOnlySukebeiSearchMetaKey } = require('./tpb4k');
+const { __testOnlySukebeiSearchMetaKey, Tpb4kProvider } = require('./tpb4k');
 
 test('uncensored expands to original plus the five curated Japanese Sukebei variants', () => {
   assert.deepEqual(
@@ -172,4 +172,55 @@ test('Sukebei alias dedupe preserves distinct torrent hashes for one JAV code', 
 
   assert.equal(__testOnlySukebeiSearchMetaKey(first), __testOnlySukebeiSearchMetaKey(duplicate));
   assert.notEqual(__testOnlySukebeiSearchMetaKey(first), __testOnlySukebeiSearchMetaKey(second));
+});
+
+test('every JAV code plus uncensored keeps a bundled RD result after display-title enrichment', async () => {
+  const sourceHash = '3'.repeat(40);
+  const replacementHash = '4'.repeat(40);
+  const meta = {
+    id: encodeTpb4kId({
+      source: 'sukebei',
+      sourceId: 'https://sukebei.example/view/675',
+      catalogId: 'tpb4k.sukebei.top',
+      sceneCode: 'SONE-675',
+      torrents: [
+        {
+          infoHash: replacementHash,
+          title: 'SONE-675 uncensored downloaded replacement',
+          indexer: 'sukebei-rd',
+        },
+        {
+          infoHash: sourceHash,
+          title: 'SONE-675 無修正 original source',
+          indexer: 'sukebei',
+        },
+      ],
+    }),
+    name: 'Japanese presentation title without the code or marker',
+    tags: ['Uncensored'],
+    genres: ['JAV'],
+  };
+  const provider = new Tpb4kProvider({
+    installBuiltIns: false,
+    env: { TPB4K_ENABLED: 'true', TPB4K_CATALOG_LIMIT: '40' },
+    searchStore: {
+      enabled: true,
+      async searchPool() { return Array.from({ length: 4 }, () => ({ sourceId: 'fixture' })); },
+    },
+  });
+  provider.handleCatalog = async args => {
+    assert.equal(args.extra.search, 'SONE 675');
+    return { metas: [meta] };
+  };
+
+  const response = await provider._handleSukebeiAliasCatalog({
+    type: 'movie',
+    id: 'tpb4k.sukebei.top',
+    extra: { search: 'SONE 675 uncensored' },
+  }, expandSukebeiSearchQueries('SONE 675 uncensored', {
+    catalogId: 'tpb4k.sukebei.top',
+  }));
+
+  assert.equal(response.metas.length, 1);
+  assert.equal(response.metas[0].id, meta.id);
 });
