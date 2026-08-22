@@ -186,18 +186,18 @@ test('every JAV code plus uncensored keeps a bundled RD result after display-tit
       torrents: [
         {
           infoHash: replacementHash,
-          title: 'SONE-675 uncensored downloaded replacement',
+          title: 'SONE-675 verified downloaded replacement',
           indexer: 'sukebei-rd',
         },
         {
           infoHash: sourceHash,
-          title: 'SONE-675 無修正 original source',
+          title: 'SONE-675 original source',
           indexer: 'sukebei',
         },
       ],
     }),
     name: 'Japanese presentation title without the code or marker',
-    tags: ['Uncensored'],
+    tags: [],
     genres: ['JAV'],
   };
   const provider = new Tpb4kProvider({
@@ -223,4 +223,53 @@ test('every JAV code plus uncensored keeps a bundled RD result after display-tit
 
   assert.equal(response.metas.length, 1);
   assert.equal(response.metas[0].id, meta.id);
+});
+
+test('Sukebei SQLite search rows reuse the verified RD portrait and mapped hash by JAV code', async () => {
+  const sourceHash = '5'.repeat(40);
+  const mappedHash = '6'.repeat(40);
+  const provider = new Tpb4kProvider({
+    installBuiltIns: false,
+    env: { TPB4K_ENABLED: 'true', TPB4K_CATALOG_LIMIT: '40' },
+    rdCatalogStore: {
+      enabled: true,
+      async postersForCodes(codes) {
+        assert.deepEqual(codes, ['IPX-663']);
+        return {
+          'IPX-663': {
+            poster: 'https://onlyporn.example/onlyporn/poster/metatube/IPX-663',
+            background: 'https://onlyporn.example/onlyporn/poster/metatube/IPX-663-wide',
+            provider: 'metatube',
+          },
+        };
+      },
+      async mappingsForCodes(codes) {
+        assert.deepEqual(codes, ['IPX-663']);
+        return {
+          'IPX-663': [{ infoHash: mappedHash, filename: 'IPX-663.mp4' }],
+        };
+      },
+    },
+  });
+
+  const [item] = await provider._rehydrateSukebeiSearchItems([{
+    source: 'sukebei',
+    sourceId: 'https://sukebei.example/view/663',
+    title: 'IPX663 Japanese title',
+    sourceTitle: 'IPX663 Japanese title',
+    poster: `https://onlyporn.example/onlyporn/poster/sukebei-rss/${sourceHash}.svg`,
+    infoHash: sourceHash,
+    filename: 'IPX663 source.mp4',
+  }], 'IPX 663');
+
+  assert.equal(item.sceneCode, 'IPX-663');
+  assert.equal(item.poster, 'https://onlyporn.example/onlyporn/poster/metatube/IPX-663');
+  assert.equal(item.provenance.lookupSource, 'rd-catalog-search-rehydration');
+  assert.deepEqual(
+    item.playbackCandidates.map(candidate => [candidate.indexer, candidate.infoHash]),
+    [
+      ['sukebei-rd', mappedHash],
+      ['sukebei', sourceHash],
+    ]
+  );
 });

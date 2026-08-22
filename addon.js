@@ -84,12 +84,17 @@ function providerName(provider) {
 
 function catalogCounts(response) {
   const metas = Array.isArray(response?.metas) ? response.metas : [];
+  const posterPath = item => {
+    try { return new URL(String(item?.poster || '')).pathname; } catch { return ''; }
+  };
   return {
     results: metas.length,
     postersPresent: metas.filter(item => String(item?.poster || '').trim()).length,
     postersMissing: metas.filter(item => !String(item?.poster || '').trim()).length,
     landscapePosters: metas.filter(item => item?.posterShape === 'landscape').length,
     portraitPosters: metas.filter(item => item?.posterShape === 'poster').length,
+    metaTubePosters: metas.filter(item => /\/onlyporn\/poster\/metatube\//i.test(posterPath(item))).length,
+    generatedSukebeiPosters: metas.filter(item => /\/onlyporn\/poster\/sukebei-rss\//i.test(posterPath(item))).length,
   };
 }
 

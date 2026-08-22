@@ -21,7 +21,9 @@ const DEFAULT_POSTER = 'https://thumb-cdn77.xvideos-cdn.com/default.jpg';
 const PLAYBACK_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36';
 const HTML_TTL = 1000 * 60 * 5;
-const META_TTL = 1000 * 60 * 5;
+const META_TTL = 1000 * 60 * 15;
+const CATALOG_PREFLIGHT_CONCURRENCY = 10;
+const CATALOG_PREFLIGHT_TIMEOUT_MS = 4_500;
 const htmlCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: HTML_TTL });
 const metaCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: META_TTL });
 const resolvedPageCache = new BoundedTtlCache({ maxEntries: 300, ttlMs: META_TTL });
@@ -104,10 +106,12 @@ function sourceLabel(candidate) {
 }
 
 const { filterCatalogResponse } = require('./search-relevance');
+const { evaluateContent, readContentFilterConfig } = require('./content-filter');
 
 class XvideosProvider extends Provider {
   constructor() {
     super('https://www.xvideos.com', 'xvideos', 50);
+    this.contentFilter = readContentFilterConfig(process.env);
   }
 
   static create() {
@@ -120,7 +124,81 @@ class XvideosProvider extends Provider {
     return search ? filterCatalogResponse(response, search) : response;
   }
 
-  async fetchHtml(url) {
+  async postProcessCatalogMetas(metas = []) {
+    const candidates = Array.isArray(metas) ? metas : [];
+    if (!candidates.length) return [];
+    const decisions = new Array(candidates.length);
+    let cursor = 0;
+
+    const inspect = async index => {
+      const candidate = candidates[index];
+      try {
+        let parsed = metaCache.get(candidate.id);
+        if (parsed === undefined) {
+          const html = await this.fetchHtml(candidate.id, {
+            timeout: CATALOG_PREFLIGHT_TIMEOUT_MS,
+            retries: 0,
+          });
+          const resolvedId = resolvedPageCache.get(candidate.id)
+            || normalizeXvideosPageUrl(candidate.id, this.baseUrl);
+          parsed = this.parseVideoPage({ id: resolvedId || candidate.id, html });
+          if (parsed?.metaResponse) metaCache.set(candidate.id, parsed);
+        }
+
+        const playable = Boolean(parsed?.directMp4Streams?.length || parsed?.videoPageUrl);
+        if (!playable) {
+          decisions[index] = { keep: false, reason: 'unplayable' };
+          return;
+        }
+        const evaluation = evaluateContent(parsed.metaResponse, this.contentFilter);
+        decisions[index] = evaluation.excluded
+          ? { keep: false, reason: evaluation.reason }
+          : { keep: true, reason: '' };
+      } catch (error) {
+        // Never publish a card whose detail contract could not be verified.
+        // Stremio turns the later {meta:{}} response into "Failed to parse
+        // meta", which is worse than omitting the unusable card up front.
+        decisions[index] = {
+          keep: false,
+          reason: 'metadata-unavailable',
+          error: error?.message || String(error),
+        };
+      }
+    };
+
+    const worker = async () => {
+      while (cursor < candidates.length) {
+        const index = cursor;
+        cursor += 1;
+        await inspect(index);
+      }
+    };
+    await Promise.all(Array.from(
+      { length: Math.min(CATALOG_PREFLIGHT_CONCURRENCY, candidates.length) },
+      worker
+    ));
+
+    const reasons = {};
+    const kept = [];
+    for (let index = 0; index < candidates.length; index += 1) {
+      const decision = decisions[index] || { keep: false, reason: 'metadata-unavailable' };
+      if (decision.keep) {
+        kept.push(candidates[index]);
+        continue;
+      }
+      reasons[decision.reason] = (reasons[decision.reason] || 0) + 1;
+    }
+    logger.info({
+      provider: this.name,
+      candidates: candidates.length,
+      validated: kept.length,
+      removed: candidates.length - kept.length,
+      reasons,
+    }, 'XVideos catalog metadata preflight completed before publication');
+    return kept;
+  }
+
+  async fetchHtml(url, requestOptions = {}) {
     const cached = htmlCache.get(url);
     if (cached !== undefined) return cached;
     if (inFlight.has(url)) return inFlight.get(url);
@@ -132,7 +210,7 @@ class XvideosProvider extends Provider {
       for (let index = 0; index < candidates.length; index += 1) {
         const candidate = candidates[index];
         try {
-          const html = await super.fetchHtml(candidate, { cache: false });
+          const html = await super.fetchHtml(candidate, { cache: false, ...requestOptions });
           if (/cf-chl|just a moment|captcha|access denied/i.test(html)) {
             throw new Error('XVideos returned a challenge page');
           }

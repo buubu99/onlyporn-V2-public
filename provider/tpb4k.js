@@ -37,12 +37,16 @@ const {
   filterItems,
   readContentFilterConfig,
 } = require('./content-filter');
+const {
+  createRdCatalogSqliteStore,
+  normalizeJavCode,
+} = require('./rd-catalog-sqlite');
 
 const MOVIE_TYPE = 'movie';
 const SERIES_TYPE = 'series';
 const CATALOG_CACHE_REVISION = 'r7';
 const SUKEBEI_CATALOG_CACHE_REVISION = 's3';
-const SUKEBEI_SEARCH_CACHE_REVISION = 's3';
+const SUKEBEI_SEARCH_CACHE_REVISION = 's4';
 function catalogCacheRevision(args = {}) {
   return String(args?.id || '') === 'tpb4k.sukebei.top'
     ? `${CATALOG_CACHE_REVISION}-${SUKEBEI_CATALOG_CACHE_REVISION}`
@@ -172,6 +176,58 @@ function torrentBundle(item = {}) {
     size: item.size,
     fileIdx: item.fileIdx,
   }] : [];
+}
+
+function sukebeiSearchSceneCode(item = {}) {
+  for (const value of [item.sceneCode, item.sourceTitle, item.title, item.filename]) {
+    const code = normalizeJavCode(value);
+    if (code) return code;
+  }
+  return '';
+}
+
+function isGeneratedSukebeiPoster(value) {
+  try {
+    return /\/onlyporn\/poster\/sukebei-rss\//i.test(new URL(String(value || '')).pathname);
+  } catch {
+    return false;
+  }
+}
+
+function mergeSukebeiSearchPlaybackCandidates(item = {}, mappings = []) {
+  const output = [];
+  const seen = new Set();
+  const add = candidate => {
+    const infoHash = String(candidate?.infoHash || candidate?.hash || '').trim().toLowerCase();
+    if (!/^[a-f0-9]{40}$/.test(infoHash)) return;
+    const fileIdx = Number.isInteger(candidate?.fileIdx) ? candidate.fileIdx : null;
+    const key = `${infoHash}:${fileIdx ?? ''}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    output.push(Object.freeze({ ...candidate, infoHash }));
+  };
+
+  for (const mapping of Array.isArray(mappings) ? mappings : []) {
+    add({
+      infoHash: mapping.infoHash,
+      title: item.sourceTitle || item.title,
+      filename: mapping.filename || item.filename || item.title,
+      resolution: item.resolution,
+      indexer: 'sukebei-rd',
+      cached: true,
+      seeders: Math.max(Number(item.seeders || 0), 0),
+      size: item.size,
+    });
+  }
+  for (const candidate of torrentBundle(item)) {
+    add({
+      ...candidate,
+      indexer: item.source === 'sukebei' && candidate.indexer === 'torrent-index'
+        ? 'sukebei'
+        : candidate.indexer,
+    });
+  }
+  return Object.freeze(output);
 }
 function toMetaPreview(item, catalogId, config) {
   const type = catalogType(catalogId);
@@ -393,6 +449,7 @@ class Tpb4kProvider {
     this.catalogInFlight = new Map();
     this.catalogResponseStore = options.catalogResponseStore || createCatalogResponseStore({ env: this.env });
     this.searchStore = options.searchStore || createSearchSqliteStore({ env: this.env });
+    this.rdCatalogStore = options.rdCatalogStore || createRdCatalogSqliteStore({ env: this.env });
     this.searchInFlight = new Map();
     this.facetInFlight = new Map();
     this.searchNetworkActive = 0;
@@ -873,6 +930,10 @@ class Tpb4kProvider {
       }
     }
 
+    if (definition.id === 'tpb4k.sukebei.top' && rawItems.length) {
+      rawItems = await this._rehydrateSukebeiSearchItems(rawItems, query);
+    }
+
     const normalizedItems = (Array.isArray(rawItems) ? rawItems : [])
       .map(item => {
         const itemAdapter = getAdapter(item?.source) || adapter;
@@ -909,6 +970,63 @@ class Tpb4kProvider {
     }, 'OnlyPorn source-aware search completed');
 
     return { metas };
+  }
+
+  async _rehydrateSukebeiSearchItems(items = [], query = '') {
+    const sourceItems = Array.isArray(items) ? items : [];
+    const codes = [...new Set(sourceItems.map(sukebeiSearchSceneCode).filter(Boolean))];
+    if (!codes.length || !this.rdCatalogStore?.enabled) return sourceItems;
+
+    const [postersByCode, mappingsByCode] = await Promise.all([
+      this.rdCatalogStore.postersForCodes(codes),
+      this.rdCatalogStore.mappingsForCodes(codes),
+    ]);
+    let posterHits = 0;
+    let mappingHits = 0;
+
+    const rehydrated = sourceItems.map(item => {
+      const code = sukebeiSearchSceneCode(item);
+      if (!code) return item;
+      const poster = postersByCode?.[code];
+      const mappings = Array.isArray(mappingsByCode?.[code]) ? mappingsByCode[code] : [];
+      const playbackCandidates = mergeSukebeiSearchPlaybackCandidates(item, mappings);
+      const shouldReusePoster = Boolean(
+        poster?.poster && (!safePoster(item.poster) || isGeneratedSukebeiPoster(item.poster))
+      );
+      if (shouldReusePoster) posterHits += 1;
+      if (mappings.length) mappingHits += mappings.length;
+      if (!shouldReusePoster && !mappings.length && item.sceneCode === code) return item;
+
+      return Object.freeze({
+        ...item,
+        sceneCode: code,
+        ...(shouldReusePoster ? {
+          poster: poster.poster,
+          background: poster.background || poster.poster,
+          studio: poster.studio || item.studio,
+          performers: poster.performers?.length ? poster.performers : item.performers,
+          tags: poster.tags?.length ? poster.tags : item.tags,
+          releaseDate: poster.releaseDate || item.releaseDate,
+          provenance: Object.freeze({
+            ...(item.provenance || {}),
+            metadataProvider: poster.provider || 'metatube',
+            lookupSource: 'rd-catalog-search-rehydration',
+          }),
+        } : {}),
+        ...(playbackCandidates.length ? { playbackCandidates } : {}),
+      });
+    });
+
+    logger().info({
+      provider: this.name,
+      catalogId: 'tpb4k.sukebei.top',
+      search: query,
+      candidates: sourceItems.length,
+      codes: codes.length,
+      posterHits,
+      mappingHits,
+    }, 'OnlyPorn Sukebei search rows rehydrated from verified RD catalog');
+    return rehydrated;
   }
 
   async _handleSukebeiPlainJavCodeCatalog(args, normalizedSearch) {
@@ -1039,6 +1157,7 @@ class Tpb4kProvider {
                 ...(Array.isArray(meta?.genres) ? meta.genres : []),
               ];
               let dedupeKey = String(meta?.id || '');
+              let hasVerifiedRdMapping = false;
 
               // OnlyPorn TPB4K IDs embed the original Sukebei payload. Decode it
               // too, because the uncensored marker may exist in the source title
@@ -1050,6 +1169,9 @@ class Tpb4kProvider {
                   searchableParts.push(identity.sourceId, identity.catalogId, identity.sceneCode);
                   for (const torrent of Array.isArray(identity.torrents) ? identity.torrents : []) {
                     searchableParts.push(torrent?.title, torrent?.filename);
+                    if (String(torrent?.indexer || '').toLowerCase() === 'sukebei-rd') {
+                      hasVerifiedRdMapping = true;
+                    }
                   }
                   const hashKey = (Array.isArray(identity.torrents) ? identity.torrents : [])
                     .map(torrent => String(torrent?.infoHash || '').toLowerCase())
@@ -1067,7 +1189,11 @@ class Tpb4kProvider {
                 .join(' ')
                 .toLocaleLowerCase('en-US');
 
-              const isUncensored = uncensoredMarkers.some(marker =>
+              // The persistent RD catalog is populated exclusively from the
+              // audited uncensored Sukebei curator. Its downloaded mapping is
+              // therefore stronger evidence than an uploader title that omits
+              // the word "uncensored" after presentation-title enrichment.
+              const isUncensored = hasVerifiedRdMapping || uncensoredMarkers.some(marker =>
                 searchable.includes(marker.toLocaleLowerCase('en-US'))
               );
               if (!isUncensored) return false;
