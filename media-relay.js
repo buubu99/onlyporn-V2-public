@@ -186,6 +186,22 @@ function filenameFor(kind, provider = '', sourceUrl = '') {
 
 function relayContentType(entry = {}, upstreamValue = '') {
   const upstream = String(upstreamValue || '').trim();
+  let pathname = '';
+  try {
+    pathname = new URL(String(entry.url || '')).pathname.toLowerCase();
+  } catch {
+    // Content-type repair is best effort; preserve the upstream value below.
+  }
+
+  // Some XVideos CDN edges serve valid MPEG-TS HLS chunks as generic binary.
+  // Browser-based Stremio players can fetch and demux those bytes but reject
+  // the resource contract before playback when the MIME type is not video.
+  // The signed child URL retains the exact upstream URL, so a .ts suffix is a
+  // safe, deterministic signal and does not require sniffing untrusted bytes.
+  if (entry.kind === 'segment' && pathname.endsWith('.ts')) {
+    return 'video/mp2t';
+  }
+
   if (
     entry.kind === 'mp4' &&
     (!upstream || /^(?:application\/(?:force-download|octet-stream)|binary\/octet-stream)(?:;|$)/i.test(upstream))
@@ -991,6 +1007,7 @@ function attachRelayUsageLogging(req, res, entry) {
         requestRange: req.headers.range || '',
         responseContentRange: res.getHeader('content-range') || '',
         responseContentLength: res.getHeader('content-length') || '',
+        responseContentType: res.getHeader('content-type') || '',
         bytesSent,
         durationMs: Date.now() - startedAt,
         completed: Boolean(completed),

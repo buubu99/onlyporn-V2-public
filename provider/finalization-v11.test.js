@@ -170,3 +170,37 @@ test('generic relayed MP4 downloads are exposed to Android players as video/mp4'
     'application/vnd.apple.mpegurl'
   );
 });
+
+test('relayed HLS transport-stream segments expose their actual video MIME type', () => {
+  const mediaRelay = require('../media-relay');
+  assert.equal(
+    mediaRelay._test.relayContentType(
+      {
+        kind: 'segment',
+        url: 'https://hls-cdn77.xvideos-cdn.com/path/hls-1080p-000001.ts',
+      },
+      'application/octet-stream'
+    ),
+    'video/mp2t'
+  );
+  assert.equal(
+    mediaRelay._test.relayContentType(
+      {
+        kind: 'segment',
+        url: 'https://hls-cdn77.xvideos-cdn.com/path/hls-480p-000001.ts',
+      },
+      ''
+    ),
+    'video/mp2t'
+  );
+  assert.equal(
+    mediaRelay._test.relayContentType(
+      {
+        kind: 'segment',
+        url: 'https://cdn.example/video-000001.m4s',
+      },
+      'video/iso.segment'
+    ),
+    'video/iso.segment'
+  );
+});
