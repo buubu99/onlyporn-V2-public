@@ -380,7 +380,14 @@ class XvideosProvider extends Provider {
         })),
         { url: low, label: 'Low', context: 'player low', priority: 50 },
       ],
-      { baseUrl: id, allowKnownVideoPath: true }
+      {
+        baseUrl: id,
+        allowKnownVideoPath: true,
+        // Current XVideos pages use signed URLs such as
+        // /<uuid>/<revision>/mp4_sd.mp4?secure=... rather than /videos/.
+        // Preview/trailer tokens are still rejected before this exception.
+        allowGenericVideoBasename: true,
+      }
     );
 
     const playbackHeaders = {
@@ -508,14 +515,7 @@ class XvideosProvider extends Provider {
               }),
               name: `XVideos ${resolution}`,
               quality: resolution,
-              behaviorHints: {
-                notWebReady: false,
-                proxyHeaders: {
-                  response: {
-                    'content-type': 'application/vnd.apple.mpegurl',
-                  },
-                },
-              },
+              behaviorHints: { notWebReady: false },
             };
           })
           .sort(

@@ -91,6 +91,29 @@ test('XVideos direct MP4 streams force protected playback headers', () => {
   assert.match(parsed.directMp4Streams[0].url, /^https:\/\/onlyporn\.example\/media\//);
 });
 
+test('XVideos accepts current signed mp4_sd paths and prefers direct MP4 over HLS', () => {
+  const provider = createXvideos();
+  const page = 'https://www.xvideos.com/video.currentfixture/current_fixture';
+  const signedMp4 =
+    'https://mp4-cdn77.xvideos-cdn.com/05248c16-0ce8-482f-84a0-48afbec20b21/6/mp4_sd.mp4?secure=fixture';
+  const parsed = provider.parseVideoPage({
+    id: page,
+    html: `<!doctype html><html><head>
+      <meta property="og:title" content="Current XVideos Fixture">
+      <meta property="og:image" content="https://thumb-cdn77.xvideos-cdn.com/x.jpg">
+      </head><body><script>
+      html5player.setVideoUrlLow('${signedMp4}');
+      html5player.setVideoUrlHigh('${signedMp4}');
+      html5player.setVideoHLS('https://hls-cdn77.xvideos-cdn.com/current/hls.m3u8');
+      </script></body></html>`,
+  });
+
+  assert.equal(parsed.directMp4Streams.length, 1);
+  assert.match(parsed.directMp4Streams[0].url, /^https:\/\/onlyporn\.example\/media\//);
+  assert.equal(parsed.directMp4Streams[0].behaviorHints.notWebReady, false);
+  assert.equal(parsed.videoPageUrl, 'https://hls-cdn77.xvideos-cdn.com/current/hls.m3u8');
+});
+
 test('XVideos fetches HLS playlists with protected page headers', async () => {
   const provider = createXvideos();
   const page = 'https://www.xvideos.com/video.hlsfixture/fixture';

@@ -208,10 +208,10 @@ test('XVideos source routes HLS variants through the internal relay', () => {
   assert.match(processStreams, /mediaRelay\.register\(\{/);
   assert.match(processStreams, /kind:\s*'hls'/);
   assert.match(processStreams, /notWebReady:\s*false/);
-  assert.match(
+  assert.doesNotMatch(
     processStreams,
     /proxyHeaders:\s*\{\s*response:\s*\{\s*'content-type':\s*'application\/vnd\.apple\.mpegurl'/,
-    'the exact HLS type must survive AIOStreams and bypass Stremio redirect-time probing'
+    'AIOStreams must not inject a response hint that makes WebStremio reject the HLS link before its first request'
   );
   assert.doesNotMatch(processStreams, /proxyHeaders:\s*\{\s*request:\s*requestHeaders/);
 });

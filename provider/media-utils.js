@@ -88,8 +88,13 @@ function isLikelyFullVideoMp4(value, options = {}) {
   const lower = url.toLowerCase();
   const knownVideoPath =
     /\/(?:contents\/videos|videos?|media|files|uploads|download)\//i.test(lower);
+  const knownGenericVideoBasename =
+    /\/mp4_(?:sd|hd|uhd|low|high)\.mp4(?:[?#]|$)/i.test(lower);
 
-  return Boolean(options.allowKnownVideoPath && knownVideoPath);
+  return Boolean(
+    options.allowKnownVideoPath &&
+      (knownVideoPath || (options.allowGenericVideoBasename && knownGenericVideoBasename))
+  );
 }
 
 function resolutionNumber(value) {
@@ -101,6 +106,7 @@ function selectDirectMp4Candidates(candidates, options = {}) {
   const {
     baseUrl,
     allowKnownVideoPath = true,
+    allowGenericVideoBasename = false,
     requireResolution = false,
   } = options;
 
@@ -114,7 +120,11 @@ function selectDirectMp4Candidates(candidates, options = {}) {
     const context = [candidate.label, candidate.context].filter(Boolean).join(' ');
 
     if (!url) continue;
-    if (!isLikelyFullVideoMp4(url, { allowKnownVideoPath, context })) continue;
+    if (!isLikelyFullVideoMp4(url, {
+      allowKnownVideoPath,
+      allowGenericVideoBasename,
+      context,
+    })) continue;
 
     const resolution = extractResolution(context, url);
     if (requireResolution && !resolution) continue;
