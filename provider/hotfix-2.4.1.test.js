@@ -207,7 +207,12 @@ test('XVideos source routes HLS variants through the internal relay', () => {
   const processStreams = source.slice(source.indexOf('async processStreams'));
   assert.match(processStreams, /mediaRelay\.register\(\{/);
   assert.match(processStreams, /kind:\s*'hls'/);
-  assert.match(processStreams, /behaviorHints:\s*\{\s*notWebReady:\s*false\s*\}/);
+  assert.match(processStreams, /notWebReady:\s*false/);
+  assert.match(
+    processStreams,
+    /proxyHeaders:\s*\{\s*response:\s*\{\s*'content-type':\s*'application\/vnd\.apple\.mpegurl'/,
+    'the exact HLS type must survive AIOStreams and bypass Stremio redirect-time probing'
+  );
   assert.doesNotMatch(processStreams, /proxyHeaders:\s*\{\s*request:\s*requestHeaders/);
 });
 

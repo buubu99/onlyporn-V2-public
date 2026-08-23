@@ -508,7 +508,14 @@ class XvideosProvider extends Provider {
               }),
               name: `XVideos ${resolution}`,
               quality: resolution,
-              behaviorHints: { notWebReady: false },
+              behaviorHints: {
+                notWebReady: false,
+                proxyHeaders: {
+                  response: {
+                    'content-type': 'application/vnd.apple.mpegurl',
+                  },
+                },
+              },
             };
           })
           .sort(
