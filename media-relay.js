@@ -1078,7 +1078,11 @@ async function handleRequest(req, res) {
       const playlistSnapshot = entry.playlistSnapshots?.get(entry.url);
       if (playlistSnapshot) {
         res.status(200);
-        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
+        // Stremio's HTMLVideo player compares this value as an exact string
+        // before selecting hls.js. A charset parameter makes it fall through to
+        // Chrome's native video element, which rejects HLS after the first TS
+        // segment with MEDIA_ERR_SRC_NOT_SUPPORTED.
+        res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
         res.setHeader('Cache-Control', 'no-store, max-age=0');
         res.setHeader('Pragma', 'no-cache');
         res.setHeader('Accept-Ranges', 'none');
@@ -1135,7 +1139,7 @@ async function handleRequest(req, res) {
         return;
       }
       res.status(200);
-      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl; charset=utf-8');
+      res.setHeader('Content-Type', 'application/vnd.apple.mpegurl');
       res.setHeader('Cache-Control', 'no-store, max-age=0');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Accept-Ranges', 'none');

@@ -286,6 +286,7 @@ test('vdcdn root snapshot remains playable after its one-use upstream master exp
     );
 
     assert.equal(response.statusCode, 200);
+    assert.equal(response.headers['content-type'], 'application/vnd.apple.mpegurl');
     assert.match(response.body.toString(), /^#EXTM3U/);
     assert.match(response.body.toString(), /\/index\.m3u8/);
     const childUrl = response.body.toString().split('\n').find(line => /^https:\/\//.test(line));
@@ -295,6 +296,7 @@ test('vdcdn root snapshot remains playable after its one-use upstream master exp
       childResponse
     );
     assert.equal(childResponse.statusCode, 200);
+    assert.equal(childResponse.headers['content-type'], 'application/vnd.apple.mpegurl');
     assert.match(childResponse.body.toString(), /segment\.ts/);
     assert.equal(upstreamRequests, 2, 'serving the root and child must use preserved snapshots');
   } finally {

@@ -131,9 +131,42 @@ test('HLS relay converts partial text/plain upstream playlists into web-ready 20
 
   assert.equal(forwardedRange, undefined, 'playlist Range must not be forwarded upstream');
   assert.equal(response.statusCode, 200);
-  assert.match(response.headers['content-type'], /application\/vnd\.apple\.mpegurl/);
+  assert.equal(
+    response.headers['content-type'],
+    'application/vnd.apple.mpegurl',
+    'Stremio requires the exact HLS MIME value to select hls.js'
+  );
   assert.match(response.body, /https:\/\/onlyporn\.example\/media\//);
   assert.doesNotMatch(response.body, /segments\/part-0001\.ts/);
+
+  const headResponse = {
+    headers: {},
+    statusCode: 200,
+    setHeader(name, value) { this.headers[name.toLowerCase()] = value; },
+    status(value) { this.statusCode = value; return this; },
+    type(value) { this.setHeader('content-type', value); return this; },
+    send() { return this; },
+    end() {},
+  };
+  axios.request = async () => ({
+    status: 206,
+    data: '#EXTM3U\n#EXTINF:6.0,\nsegments/part-0001.ts',
+    headers: { 'content-type': 'text/plain' },
+  });
+  try {
+    await mediaRelay.handleRequest(
+      { method: 'HEAD', params: { token }, headers: {} },
+      headResponse
+    );
+  } finally {
+    axios.request = originalRequest;
+  }
+  assert.equal(headResponse.statusCode, 200);
+  assert.equal(
+    headResponse.headers['content-type'],
+    'application/vnd.apple.mpegurl',
+    'Stremio probes HLS with HEAD and requires the exact MIME value'
+  );
 });
 
 test('Eporner streams are relayed by OnlyPorn so signed media stays on the Render egress IP', async () => {
