@@ -23,7 +23,9 @@ function report() {
         batch: 1, position: 1, code: 'IPX-663', original_hash: ORIGINAL,
         final_state: 'COMPLETE', hash_relation: 'MODIFIED_NEW_HASH', current_hash: REPLACEMENT,
         current_rd_id: 'RD-COMPLETE', status: 'downloaded', progress: 100,
-        filename: 'hhd800.com@IPX-663.mp4', match_source: 'CURRENT_FILENAME', candidate_count: 1,
+        filename: 'hhd800.com@IPX-663.mp4', file_index: 1,
+        file_path: '/hhd800.com@IPX-663.mp4', file_bytes: 7_625_857_315,
+        match_source: 'CURRENT_FILENAME', candidate_count: 1,
       },
       {
         batch: 1, position: 2, code: 'CAWB-023', original_hash: PENDING,
@@ -60,7 +62,11 @@ test('RD audit import persists only verified downloaded hashes and exact MetaTub
   assert.equal(imported.complete, 1);
   assert.equal(imported.modifiedHashes, 1);
   assert.equal(imported.verifiedDownloadedHashes, 1);
-  assert.deepEqual((await store.mappingsForCode('ipx 663')).map(row => row.infoHash), [REPLACEMENT]);
+  const importedMappings = await store.mappingsForCode('ipx 663');
+  assert.deepEqual(importedMappings.map(row => row.infoHash), [REPLACEMENT]);
+  assert.equal(importedMappings[0].fileIdx, 1);
+  assert.equal(importedMappings[0].filePath, '/hhd800.com@IPX-663.mp4');
+  assert.equal(importedMappings[0].fileBytes, 7_625_857_315);
   assert.deepEqual(await store.mappingsForCode('CAWB-023'), []);
   assert.deepEqual(await store.mappingsForCode('HND-895'), []);
 
@@ -109,11 +115,15 @@ test('Sukebei cards and resolver prefer the verified RD hash while retaining the
     enabled: true,
     async mappingsForCodes(codes) {
       return Object.fromEntries(codes.map(code => [code, code === 'IPX-663' ? [{
-        infoHash: REPLACEMENT, filename: 'hhd800.com@IPX-663.mp4', preferred: true,
+        infoHash: REPLACEMENT, filename: 'hhd800.com@IPX-663.mp4', fileIdx: 1,
+        filePath: '/hhd800.com@IPX-663.mp4', preferred: true,
       }] : []]));
     },
     async mappingsForCode(code) {
-      return code === 'IPX-663' ? [{ infoHash: REPLACEMENT, filename: 'hhd800.com@IPX-663.mp4' }] : [];
+      return code === 'IPX-663' ? [{
+        infoHash: REPLACEMENT, filename: 'hhd800.com@IPX-663.mp4', fileIdx: 1,
+        filePath: '/hhd800.com@IPX-663.mp4',
+      }] : [];
     },
     async postersForCodes() {
       return {
@@ -157,6 +167,8 @@ test('Sukebei cards and resolver prefer the verified RD hash while retaining the
   assert.equal(item.playbackCandidates[0].title, '(Uncensored) IPX663');
   const resolved = await adapter.resolve({ sourceId: item.sourceId, item });
   assert.deepEqual(resolved.map(row => row.infoHash), [REPLACEMENT, ORIGINAL]);
+  assert.equal(resolved[0].fileIdx, 1);
+  assert.equal(resolved[0].filename, '/hhd800.com@IPX-663.mp4');
   assert.equal(resolved[0].provenance.includes('rd-catalog-verified-downloaded'), true);
 });
 

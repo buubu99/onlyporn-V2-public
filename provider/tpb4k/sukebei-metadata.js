@@ -1733,8 +1733,11 @@ function createSukebeiMetadataAdapter(options = {}) {
         source: 'sukebei-rd',
         sourceId: source.sourceId,
         title: source.title,
-        filename: compactText(mapping.filename || source.title),
+        filename: compactText(mapping.filePath || mapping.filename || source.title),
         infoHash: mappedHash,
+        ...(Number.isInteger(mapping.fileIdx) && mapping.fileIdx >= 0
+          ? { fileIdx: mapping.fileIdx }
+          : {}),
         cached: true,
         seeders: source.seeders,
         size: source.size,

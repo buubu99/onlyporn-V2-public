@@ -246,7 +246,10 @@ test('Sukebei SQLite search rows reuse the verified RD portrait and mapped hash 
       async mappingsForCodes(codes) {
         assert.deepEqual(codes, ['IPX-663']);
         return {
-          'IPX-663': [{ infoHash: mappedHash, filename: 'IPX-663.mp4' }],
+          'IPX-663': [{
+            infoHash: mappedHash, filename: 'IPX-663.mp4', fileIdx: 1,
+            filePath: '/IPX-663-main.mp4',
+          }],
         };
       },
     },
@@ -266,10 +269,11 @@ test('Sukebei SQLite search rows reuse the verified RD portrait and mapped hash 
   assert.equal(item.poster, 'https://onlyporn.example/onlyporn/poster/metatube/IPX-663');
   assert.equal(item.provenance.lookupSource, 'rd-catalog-search-rehydration');
   assert.deepEqual(
-    item.playbackCandidates.map(candidate => [candidate.indexer, candidate.infoHash]),
+    item.playbackCandidates.map(candidate => [candidate.indexer, candidate.infoHash, candidate.fileIdx]),
     [
-      ['sukebei-rd', mappedHash],
-      ['sukebei', sourceHash],
+      ['sukebei-rd', mappedHash, 1],
+      ['sukebei', sourceHash, undefined],
     ]
   );
+  assert.equal(item.playbackCandidates[0].filename, '/IPX-663-main.mp4');
 });

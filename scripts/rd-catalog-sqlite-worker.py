@@ -64,6 +64,9 @@ CREATE TABLE IF NOT EXISTS rd_hashes (
  rd_id TEXT NOT NULL,
  status TEXT NOT NULL,
  filename TEXT NOT NULL,
+ file_idx INTEGER,
+ file_path TEXT NOT NULL DEFAULT '',
+ file_bytes INTEGER NOT NULL DEFAULT 0,
  hash_relation TEXT NOT NULL,
  match_source TEXT NOT NULL,
  verified_downloaded INTEGER NOT NULL,
@@ -96,6 +99,19 @@ CREATE TABLE IF NOT EXISTS poster_attempts (
  attempts INTEGER NOT NULL
 );
 ''')
+
+# Migrate the persistent OVH database in place. These columns bind every
+# audited RD hash to its verified main video instead of allowing a resolver to
+# default to the first selected file (which is often a short advertisement).
+existing_rd_hash_columns = {
+    row[1] for row in conn.execute('PRAGMA table_info(rd_hashes)').fetchall()
+}
+if 'file_idx' not in existing_rd_hash_columns:
+    conn.execute('ALTER TABLE rd_hashes ADD COLUMN file_idx INTEGER')
+if 'file_path' not in existing_rd_hash_columns:
+    conn.execute("ALTER TABLE rd_hashes ADD COLUMN file_path TEXT NOT NULL DEFAULT ''")
+if 'file_bytes' not in existing_rd_hash_columns:
+    conn.execute('ALTER TABLE rd_hashes ADD COLUMN file_bytes INTEGER NOT NULL DEFAULT 0')
 try:
     os.chmod(db_path, 0o600)
 except OSError:
@@ -184,6 +200,15 @@ def import_report(report_path_value):
             'batch': max(int(row.get('batch') or 0), 0),
             'position': max(int(row.get('position') or 0), 0),
             'filename': compact(row.get('filename'), 1000),
+            'file_idx': (
+                int(row.get('file_index'))
+                if isinstance(row.get('file_index'), int)
+                and not isinstance(row.get('file_index'), bool)
+                and int(row.get('file_index')) >= 0
+                else None
+            ),
+            'file_path': compact(row.get('file_path') or row.get('filename'), 1000),
+            'file_bytes': max(int(row.get('file_bytes') or 0), 0),
             'rd_id': compact(row.get('current_rd_id'), 100),
             'status': compact(row.get('status'), 32).lower(),
             'progress': float(row.get('progress') or 0),
@@ -218,15 +243,19 @@ def import_report(report_path_value):
             if row['current_hash']:
                 downloaded = 1 if row['state'] == 'COMPLETE' and row['status'] == 'downloaded' else 0
                 conn.execute('''INSERT INTO rd_hashes(
-                  code,info_hash,rd_id,status,filename,hash_relation,match_source,verified_downloaded,
-                  preferred,first_seen_at,last_seen_at
-                ) VALUES(?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(code,info_hash) DO UPDATE SET
+                  code,info_hash,rd_id,status,filename,file_idx,file_path,file_bytes,
+                  hash_relation,match_source,verified_downloaded,preferred,first_seen_at,last_seen_at
+                ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(code,info_hash) DO UPDATE SET
                   rd_id=excluded.rd_id,status=excluded.status,filename=excluded.filename,
+                  file_idx=COALESCE(excluded.file_idx,rd_hashes.file_idx),
+                  file_path=CASE WHEN excluded.file_path<>'' THEN excluded.file_path ELSE rd_hashes.file_path END,
+                  file_bytes=MAX(rd_hashes.file_bytes,excluded.file_bytes),
                   hash_relation=excluded.hash_relation,match_source=excluded.match_source,
                   verified_downloaded=MAX(rd_hashes.verified_downloaded,excluded.verified_downloaded),
                   preferred=excluded.preferred,last_seen_at=excluded.last_seen_at''', (
                     row['code'], row['current_hash'], row['rd_id'], row['status'], row['filename'],
-                    row['hash_relation'], row['match_source'], downloaded, downloaded, stamp, stamp,
+                    row['file_idx'], row['file_path'], row['file_bytes'], row['hash_relation'],
+                    row['match_source'], downloaded, downloaded, stamp, stamp,
                 ))
         conn.execute('COMMIT')
     except Exception:
@@ -263,15 +292,16 @@ def get_mappings(codes):
     if not codes:
         return output
     placeholders = ','.join('?' for _ in codes)
-    rows = conn.execute(f'''SELECT code,info_hash,rd_id,status,filename,hash_relation,match_source,
-      verified_downloaded,preferred,last_seen_at FROM rd_hashes
+    rows = conn.execute(f'''SELECT code,info_hash,rd_id,status,filename,file_idx,file_path,file_bytes,
+      hash_relation,match_source,verified_downloaded,preferred,last_seen_at FROM rd_hashes
       WHERE code IN ({placeholders}) AND verified_downloaded=1
       ORDER BY code,preferred DESC,last_seen_at DESC,info_hash''', codes).fetchall()
     for row in rows:
         output.setdefault(row[0], []).append({
             'code': row[0], 'infoHash': row[1], 'rdId': row[2], 'status': row[3],
-            'filename': row[4], 'hashRelation': row[5], 'matchSource': row[6],
-            'verifiedDownloaded': bool(row[7]), 'preferred': bool(row[8]), 'lastSeenAt': row[9],
+            'filename': row[4], 'fileIdx': row[5], 'filePath': row[6], 'fileBytes': row[7],
+            'hashRelation': row[8], 'matchSource': row[9],
+            'verifiedDownloaded': bool(row[10]), 'preferred': bool(row[11]), 'lastSeenAt': row[12],
         })
     return output
 

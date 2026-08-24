@@ -211,7 +211,10 @@ function mergeSukebeiSearchPlaybackCandidates(item = {}, mappings = []) {
     add({
       infoHash: mapping.infoHash,
       title: item.sourceTitle || item.title,
-      filename: mapping.filename || item.filename || item.title,
+      filename: mapping.filePath || mapping.filename || item.filename || item.title,
+      ...(Number.isInteger(mapping.fileIdx) && mapping.fileIdx >= 0
+        ? { fileIdx: mapping.fileIdx }
+        : {}),
       resolution: item.resolution,
       indexer: 'sukebei-rd',
       cached: true,
