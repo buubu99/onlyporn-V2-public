@@ -12,6 +12,10 @@ const {
   sanitizeUrlForLogs,
 } = require('./url-security');
 const logger = require('../logger');
+const {
+  curateWebHome,
+  shouldCurateWebHome,
+} = require('./web-home-curator');
 
 const DEFAULT_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36';
@@ -380,32 +384,43 @@ class Provider {
     return `${event}-${this.getName()}`;
   }
 
+  async _fetchCatalogPage(args, options = {}) {
+    let url = this.getInitialUrl(args.id);
+    const extra = args.extra || {};
+
+    if (extra.search) url = this.handleSearch(args);
+    if (extra.genre) url = this.handleGenre(args);
+
+    if (Number(extra.skip || 0) > 0) {
+      const paginated = this.handlePagination(url, args);
+      url = paginated.startsWith('http') ? paginated : url + paginated;
+    }
+
+    return this._fetchCatalogUrl(args, url, options);
+  }
+
+  async _fetchCatalogUrl(args, url, options = {}) {
+    const { postProcess = true } = options;
+    const html = await this.fetchHtml(url);
+    const parsed = this.getCatalogMetas.length >= 2
+      ? this.getCatalogMetas(html, url)
+      : this.getCatalogMetas(html);
+    const parsedMetas = Array.isArray(parsed) ? parsed : [];
+    if (!postProcess || typeof this.postProcessCatalogMetas !== 'function') return parsedMetas;
+    const processed = await this.postProcessCatalogMetas(parsedMetas, { args, url });
+    return Array.isArray(processed) ? processed : [];
+  }
+
   async handleCatalog(args) {
     if (args.type !== Provider.TYPE || !this.activate(args.id)) return { metas: [] };
 
     logger.info({ provider: this.name, catalogId: args.id }, 'handleCatalog');
 
     try {
-      let url = this.getInitialUrl(args.id);
-      const extra = args.extra || {};
-
-      if (extra.search) url = this.handleSearch(args);
-      if (extra.genre) url = this.handleGenre(args);
-
-      if (Number(extra.skip || 0) > 0) {
-        const paginated = this.handlePagination(url, args);
-        url = paginated.startsWith('http') ? paginated : url + paginated;
-      }
-
-      const html = await this.fetchHtml(url);
-      const parsed = this.getCatalogMetas.length >= 2
-        ? this.getCatalogMetas(html, url)
-        : this.getCatalogMetas(html);
-      const parsedMetas = Array.isArray(parsed) ? parsed : [];
-      const processed = typeof this.postProcessCatalogMetas === 'function'
-        ? await this.postProcessCatalogMetas(parsedMetas, { args, url })
-        : parsedMetas;
-      const metas = (Array.isArray(processed) ? processed : []).map(item => ({
+      const parsedMetas = shouldCurateWebHome(this, args)
+        ? await curateWebHome(this, args)
+        : await this._fetchCatalogPage(args);
+      const metas = parsedMetas.map(item => ({
         ...item,
         id: this.toStremioId(item.id),
       }));
