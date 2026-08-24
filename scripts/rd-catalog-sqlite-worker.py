@@ -127,6 +127,12 @@ def now_ms():
 def compact(value, limit=1000):
     return ' '.join(str(value or '').split()).strip()[:limit]
 
+def exact_file_path(value, limit=1000):
+    # Torrent paths are identity-bearing metadata. Leading/repeated spaces are
+    # legal and must not be normalized (MXGS-792 is a real example). Remove
+    # only NUL, which SQLite text values and downstream JSON cannot use safely.
+    return str(value or '').replace('\x00', '')[:limit]
+
 def normalize_hash(value):
     text = compact(value, 80).lower()
     return text if HASH_RE.fullmatch(text) else ''
@@ -207,7 +213,7 @@ def import_report(report_path_value):
                 and int(row.get('file_index')) >= 0
                 else None
             ),
-            'file_path': compact(row.get('file_path') or row.get('filename'), 1000),
+            'file_path': exact_file_path(row.get('file_path') or row.get('filename'), 1000),
             'file_bytes': max(int(row.get('file_bytes') or 0), 0),
             'rd_id': compact(row.get('current_rd_id'), 100),
             'status': compact(row.get('status'), 32).lower(),

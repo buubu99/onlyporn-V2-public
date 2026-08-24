@@ -24,7 +24,7 @@ function report() {
         final_state: 'COMPLETE', hash_relation: 'MODIFIED_NEW_HASH', current_hash: REPLACEMENT,
         current_rd_id: 'RD-COMPLETE', status: 'downloaded', progress: 100,
         filename: 'hhd800.com@IPX-663.mp4', file_index: 1,
-        file_path: '/hhd800.com@IPX-663.mp4', file_bytes: 7_625_857_315,
+        file_path: '/  hhd800.com@IPX-663.mp4', file_bytes: 7_625_857_315,
         match_source: 'CURRENT_FILENAME', candidate_count: 1,
       },
       {
@@ -65,7 +65,7 @@ test('RD audit import persists only verified downloaded hashes and exact MetaTub
   const importedMappings = await store.mappingsForCode('ipx 663');
   assert.deepEqual(importedMappings.map(row => row.infoHash), [REPLACEMENT]);
   assert.equal(importedMappings[0].fileIdx, 1);
-  assert.equal(importedMappings[0].filePath, '/hhd800.com@IPX-663.mp4');
+  assert.equal(importedMappings[0].filePath, '/  hhd800.com@IPX-663.mp4');
   assert.equal(importedMappings[0].fileBytes, 7_625_857_315);
   assert.deepEqual(await store.mappingsForCode('CAWB-023'), []);
   assert.deepEqual(await store.mappingsForCode('HND-895'), []);
