@@ -245,7 +245,15 @@ def import_report(report_path_value):
                 row['batch'], row['position'], row['filename'], row['rd_id'], row['status'], row['progress'],
                 row['match_source'], row['candidate_count'], generated_at, stamp,
             ))
-            conn.execute('UPDATE rd_hashes SET preferred=0 WHERE code=?', (row['code'],))
+            # The newly imported row is the current verification authority for
+            # this code. Revoke every older hash first so a vanished RD object
+            # cannot remain exposed only because a previous report once marked
+            # it downloaded. A current COMPLETE hash is re-enabled below;
+            # PENDING/MISSING/TERMINAL intentionally leave no verified stream.
+            conn.execute(
+                'UPDATE rd_hashes SET preferred=0,verified_downloaded=0 WHERE code=?',
+                (row['code'],),
+            )
             if row['current_hash']:
                 downloaded = 1 if row['state'] == 'COMPLETE' and row['status'] == 'downloaded' else 0
                 conn.execute('''INSERT INTO rd_hashes(
@@ -257,7 +265,7 @@ def import_report(report_path_value):
                   file_path=CASE WHEN excluded.file_path<>'' THEN excluded.file_path ELSE rd_hashes.file_path END,
                   file_bytes=MAX(rd_hashes.file_bytes,excluded.file_bytes),
                   hash_relation=excluded.hash_relation,match_source=excluded.match_source,
-                  verified_downloaded=MAX(rd_hashes.verified_downloaded,excluded.verified_downloaded),
+                  verified_downloaded=excluded.verified_downloaded,
                   preferred=excluded.preferred,last_seen_at=excluded.last_seen_at''', (
                     row['code'], row['current_hash'], row['rd_id'], row['status'], row['filename'],
                     row['file_idx'], row['file_path'], row['file_bytes'], row['hash_relation'],

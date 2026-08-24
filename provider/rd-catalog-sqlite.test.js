@@ -83,8 +83,26 @@ test('RD audit import persists only verified downloaded hashes and exact MetaTub
   await store.importReport(laterPath);
   assert.deepEqual(
     (await store.mappingsForCode('IPX-663')).map(row => row.infoHash),
-    [LATER_REPLACEMENT, REPLACEMENT]
+    [LATER_REPLACEMENT]
   );
+
+  const pendingLater = report();
+  pendingLater.generated_at = '2026-10-21T00:00:00Z';
+  pendingLater.universe = 1;
+  pendingLater.summary = { complete: 0, pending: 1, missing: 0 };
+  pendingLater.records = [{
+    ...pendingLater.records[0],
+    final_state: 'PENDING',
+    current_hash: LATER_REPLACEMENT,
+    current_rd_id: 'RD-LATER-ACTIVE',
+    status: 'downloading',
+    progress: 49.3,
+    filename: 'IPX-663-later.mp4',
+  }];
+  const pendingLaterPath = path.join(root, 'pending-later-audit.json');
+  fs.writeFileSync(pendingLaterPath, JSON.stringify(pendingLater));
+  await store.importReport(pendingLaterPath);
+  assert.deepEqual(await store.mappingsForCode('IPX-663'), []);
 
   await store.upsertPoster('IPX-663', {
     id: 'JavBus:ipx663', title: 'IPX-663 title', poster: 'https://onlyporn.example/onlyporn/poster/metatube/a/b/c',
@@ -94,10 +112,7 @@ test('RD audit import persists only verified downloaded hashes and exact MetaTub
   await store.close();
 
   store = createRdCatalogSqliteStore({ env: env(root) });
-  assert.deepEqual(
-    (await store.mappingsForCode('IPX-663')).map(row => row.infoHash),
-    [LATER_REPLACEMENT, REPLACEMENT]
-  );
+  assert.deepEqual(await store.mappingsForCode('IPX-663'), []);
   const posters = await store.postersForCodes(['IPX-663']);
   assert.equal(posters['IPX-663'].provider, 'JavBus');
   assert.equal(posters['IPX-663'].studio, 'IdeaPocket');
