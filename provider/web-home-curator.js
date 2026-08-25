@@ -21,7 +21,10 @@ const SOURCE_CONCURRENCY = 3;
 const DETAIL_CONCURRENCY = Object.freeze({ spankbang: 4, pornhub: 4 });
 const SOURCE_TIMEOUT_MS = 6_500;
 const DETAIL_TIMEOUT_MS = 5_500;
-const TOTAL_BUDGET_MS = 38_000;
+// AIOStreams aborts catalog requests after 30 seconds. Keep a meaningful
+// safety margin for JSON serialization, the reverse proxy, and the wrapper.
+// Detail work must never be allowed to overrun this deadline.
+const TOTAL_BUDGET_MS = 24_000;
 const CACHE_TTL_MS = 10 * 60 * 1_000;
 const LAST_KNOWN_GOOD_TTL_MS = 24 * 60 * 60 * 1_000;
 
@@ -351,23 +354,30 @@ async function inspectCandidate(provider, candidate) {
   return { playable, meta: mergeDetail(candidate, detail) };
 }
 
-async function validateCandidates(provider, arranged, config, startedAt) {
+async function validateCandidates(provider, arranged, config, startedAt, options = {}) {
   const validated = [];
   const reasons = { ...arranged.reasons };
   const candidates = arranged.candidates;
   const concurrency = DETAIL_CONCURRENCY[provider.name] || 8;
+  const totalBudgetMs = Number(options.totalBudgetMs || TOTAL_BUDGET_MS);
+  const detailTimeoutMs = Number(options.detailTimeoutMs || DETAIL_TIMEOUT_MS);
   let cursor = 0;
+  let deadlineReached = false;
 
   const worker = async () => {
     while (cursor < candidates.length && validated.length < HOME_LIMIT) {
-      if (Date.now() - startedAt >= TOTAL_BUDGET_MS) return;
+      const remainingMs = totalBudgetMs - (Date.now() - startedAt);
+      if (remainingMs <= 0) {
+        deadlineReached = true;
+        return;
+      }
       const index = cursor;
       cursor += 1;
       const candidate = candidates[index].meta;
       try {
         const inspected = await withTimeout(
           inspectCandidate(provider, candidate),
-          DETAIL_TIMEOUT_MS,
+          Math.max(1, Math.min(detailTimeoutMs, remainingMs)),
           `${provider.name}:detail`
         );
         if (!inspected.playable) {
@@ -381,14 +391,23 @@ async function validateCandidates(provider, arranged, config, startedAt) {
         }
         if (validated.length < HOME_LIMIT) validated.push({ index, meta: inspected.meta });
       } catch (error) {
-        incrementReason(reasons, /timed out/i.test(error.message) ? 'DETAIL_TIMEOUT' : 'METADATA_UNAVAILABLE');
+        if (Date.now() - startedAt >= totalBudgetMs) {
+          deadlineReached = true;
+          incrementReason(reasons, 'GLOBAL_DEADLINE');
+        } else {
+          incrementReason(reasons, /timed out/i.test(error.message) ? 'DETAIL_TIMEOUT' : 'METADATA_UNAVAILABLE');
+        }
       }
     }
   };
 
   await Promise.all(Array.from({ length: Math.min(concurrency, candidates.length) }, worker));
   validated.sort((left, right) => left.index - right.index);
-  return { metas: validated.slice(0, HOME_LIMIT).map(item => item.meta), reasons };
+  return {
+    metas: validated.slice(0, HOME_LIMIT).map(item => item.meta),
+    reasons,
+    deadlineReached,
+  };
 }
 
 async function buildCuratedHome(provider, args, cacheKey) {
@@ -396,6 +415,7 @@ async function buildCuratedHome(provider, args, cacheKey) {
   const plan = sourcePlanFor(provider, args);
   const config = readContentFilterConfig(process.env);
   const sourceResults = await fetchSources(provider, args, plan);
+  const sourceDurationMs = Date.now() - startedAt;
   const sourceFailures = sourceResults.filter(result => result?.error);
   const arranged = arrangeCandidates(sourceResults, plan, config);
   const validated = await validateCandidates(provider, arranged, config, startedAt);
@@ -410,6 +430,9 @@ async function buildCuratedHome(provider, args, cacheKey) {
       candidates: arranged.candidates.length,
       published: validated.metas.length,
       strictMinimum: MIN_STRICT_RESULTS,
+      totalBudgetMs: TOTAL_BUDGET_MS,
+      sourceDurationMs,
+      deadlineReached: validated.deadlineReached,
       reasons: validated.reasons,
       durationMs: Date.now() - startedAt,
     },
@@ -479,5 +502,7 @@ module.exports = {
     homeCache,
     lastKnownGoodCache,
     pendingHomes,
+    TOTAL_BUDGET_MS,
+    validateCandidates,
   },
 };

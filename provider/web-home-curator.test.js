@@ -143,3 +143,33 @@ test('curated Home validates detail playback, enriches metadata, and caches the 
   assert.deepEqual(second, first);
   assert.equal(sourceCalls, SOURCE_PLANS.xvideos.length);
 });
+
+test('detail validation obeys the global Home deadline even when upstream detail pages hang', async () => {
+  const provider = {
+    name: 'xvideos',
+    async fetchHtml() {
+      return new Promise(() => {});
+    },
+    parseVideoPage() {
+      throw new Error('unreachable');
+    },
+  };
+  const arranged = {
+    candidates: Array.from({ length: 16 }, (_, index) => ({ meta: preview(`hung-${index}`) })),
+    reasons: {},
+  };
+  const startedAt = Date.now();
+  const result = await _test.validateCandidates(
+    provider,
+    arranged,
+    filterConfig,
+    startedAt,
+    { totalBudgetMs: 100, detailTimeoutMs: 5_000 }
+  );
+  const elapsedMs = Date.now() - startedAt;
+
+  assert.equal(result.metas.length, 0);
+  assert.equal(result.deadlineReached, true);
+  assert.ok(result.reasons.GLOBAL_DEADLINE >= 1);
+  assert.ok(elapsedMs < 500, `deadline overran: ${elapsedMs}ms`);
+});
