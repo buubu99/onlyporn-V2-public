@@ -1575,15 +1575,23 @@ function createSukebeiMetadataAdapter(options = {}) {
         const mappedHash = normalizeInfoHash(mapping.infoHash);
         if (!mappedHash || seenHashes.has(mappedHash)) continue;
         seenHashes.add(mappedHash);
+        const mappedFile = compactText(
+          mapping.filePath || mapping.filename || item.filename || item.title
+        );
+        const mappedBytes = Number(mapping.fileBytes || 0);
         playbackCandidates.push(Object.freeze({
           infoHash: mappedHash,
           title: item.sourceTitle || item.title,
-          filename: compactText(mapping.filename || item.title),
-          resolution: detectResolution(mapping.filename || item.title),
+          filename: mappedFile,
+          ...(Number.isInteger(mapping.fileIdx) && mapping.fileIdx >= 0
+            ? { fileIdx: mapping.fileIdx }
+            : {}),
+          resolution: detectResolution(mappedFile),
           indexer: 'sukebei-rd',
           cached: true,
           seeders: Math.max(Number(item.seeders || 0), 0),
-          size: item.size,
+          size: mappedBytes > 0 ? mappedBytes : item.size,
+          provenance: Object.freeze(['rd-catalog-verified-downloaded']),
         }));
       }
       if (sourceHash && !seenHashes.has(sourceHash)) {
@@ -1729,19 +1737,23 @@ function createSukebeiMetadataAdapter(options = {}) {
       const mappedHash = normalizeInfoHash(mapping.infoHash);
       if (!mappedHash || seenHashes.has(mappedHash)) continue;
       seenHashes.add(mappedHash);
+      const mappedFile = compactText(
+        mapping.filePath || mapping.filename || source.title
+      );
+      const mappedBytes = Number(mapping.fileBytes || 0);
       candidates.push(Object.freeze({
         source: 'sukebei-rd',
         sourceId: source.sourceId,
         title: source.title,
-        filename: compactText(mapping.filePath || mapping.filename || source.title),
+        filename: mappedFile,
         infoHash: mappedHash,
         ...(Number.isInteger(mapping.fileIdx) && mapping.fileIdx >= 0
           ? { fileIdx: mapping.fileIdx }
           : {}),
         cached: true,
         seeders: source.seeders,
-        size: source.size,
-        resolution: detectResolution(mapping.filename || source.title),
+        size: mappedBytes > 0 ? mappedBytes : source.size,
+        resolution: detectResolution(mappedFile),
         detailUrl: source.detailUrl,
         provenance: Object.freeze(['rd-catalog-verified-downloaded']),
       }));

@@ -249,6 +249,7 @@ test('Sukebei SQLite search rows reuse the verified RD portrait and mapped hash 
           'IPX-663': [{
             infoHash: mappedHash, filename: 'IPX-663.mp4', fileIdx: 1,
             filePath: '/IPX-663-main.mp4',
+            fileBytes: 9_013_991_542,
           }],
         };
       },
@@ -263,6 +264,7 @@ test('Sukebei SQLite search rows reuse the verified RD portrait and mapped hash 
     poster: `https://onlyporn.example/onlyporn/poster/sukebei-rss/${sourceHash}.svg`,
     infoHash: sourceHash,
     filename: 'IPX663 source.mp4',
+    size: 2_254_857_830,
   }], 'IPX 663');
 
   assert.equal(item.sceneCode, 'IPX-663');
@@ -276,4 +278,10 @@ test('Sukebei SQLite search rows reuse the verified RD portrait and mapped hash 
     ]
   );
   assert.equal(item.playbackCandidates[0].filename, '/IPX-663-main.mp4');
+  assert.equal(item.playbackCandidates[0].size, 9_013_991_542);
+  assert.deepEqual(
+    item.playbackCandidates[0].provenance,
+    ['rd-catalog-verified-downloaded']
+  );
+  assert.equal(item.playbackCandidates[1].size, 2_254_857_830);
 });

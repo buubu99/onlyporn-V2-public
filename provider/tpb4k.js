@@ -7,6 +7,7 @@ const { resolveTpb4kFacet } = require('../catalog/discovery-profiles');
 const {
   dedupeCandidates,
   normalizeCandidate,
+  normalizeResolution,
   sortCandidates,
   toStremioStream,
 } = require('./tpb4k/candidate');
@@ -208,18 +209,24 @@ function mergeSukebeiSearchPlaybackCandidates(item = {}, mappings = []) {
   };
 
   for (const mapping of Array.isArray(mappings) ? mappings : []) {
+    const mappedFile = mapping.filePath || mapping.filename || item.filename || item.title;
+    const mappedBytes = Number(mapping.fileBytes || 0);
     add({
       infoHash: mapping.infoHash,
       title: item.sourceTitle || item.title,
-      filename: mapping.filePath || mapping.filename || item.filename || item.title,
+      filename: mappedFile,
       ...(Number.isInteger(mapping.fileIdx) && mapping.fileIdx >= 0
         ? { fileIdx: mapping.fileIdx }
         : {}),
-      resolution: item.resolution,
+      resolution: normalizeResolution(mappedFile, item.resolution),
       indexer: 'sukebei-rd',
       cached: true,
       seeders: Math.max(Number(item.seeders || 0), 0),
-      size: item.size,
+      // Hash, file index, path and bytes are one atomic RD binding. Never
+      // combine a verified hash with size metadata from a different live RSS
+      // torrent carrying the same JAV code.
+      size: mappedBytes > 0 ? mappedBytes : item.size,
+      provenance: Object.freeze(['rd-catalog-verified-downloaded']),
     });
   }
   for (const candidate of torrentBundle(item)) {
