@@ -209,7 +209,10 @@ function activeCatalogsFromManifest(manifest) {
     catalog &&
     typeof catalog.id === 'string' &&
     typeof catalog.type === 'string' &&
-    !DEFERRED_CATALOG_IDS.has(catalog.id)
+    !DEFERRED_CATALOG_IDS.has(catalog.id) &&
+    !(Array.isArray(catalog.extra) && catalog.extra.some(extra =>
+      extra?.name === 'search' && extra?.isRequired === true
+    ))
   );
 }
 

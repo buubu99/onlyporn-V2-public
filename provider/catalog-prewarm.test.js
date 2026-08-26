@@ -30,19 +30,25 @@ const silentLogger = Object.freeze({
   error() {},
 });
 
-test('catalog prewarm selects exactly 35 active catalogs and excludes only Stripchat', () => {
-  const catalogs = Array.from({ length: 35 }, (_, index) => ({
+test('catalog prewarm selects exactly 34 browse catalogs and excludes Stripchat plus search-only rows', () => {
+  const catalogs = Array.from({ length: 34 }, (_, index) => ({
     id: `active.${index + 1}`,
     type: 'movie',
   }));
   catalogs.push(
     { id: 'tpb4k.stripchat.girls', type: 'movie' },
-    { id: 'tpb4k.stripchat.couples', type: 'movie' }
+    { id: 'tpb4k.stripchat.couples', type: 'movie' },
+    {
+      id: 'tpb4k.studios.search',
+      type: 'movie',
+      extra: [{ name: 'search', isRequired: true }],
+    }
   );
 
   const active = activeCatalogsFromManifest({ catalogs });
-  assert.equal(active.length, 35);
+  assert.equal(active.length, 34);
   assert.equal(active.some(item => item.id.includes('stripchat')), false);
+  assert.equal(active.some(item => item.id === 'tpb4k.studios.search'), false);
 });
 
 test('catalog prewarm retries only missing rows and verifies the complete state', async () => {
