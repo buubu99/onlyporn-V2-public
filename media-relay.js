@@ -17,7 +17,10 @@ const HLS_SNAPSHOT_TIMEOUT_MS = 8_000;
 const HLS_SNAPSHOT_REQUEST_TIMEOUT_MS = 5_000;
 const JAV_SEGMENT_MAX_BYTES = 32 * 1024 * 1024;
 const JAV_SEGMENT_ATTEMPT_TIMEOUT_MS = 12_000;
-const JAV_SEGMENT_MAX_ATTEMPTS = 2;
+const JAV_SEGMENT_MAX_ATTEMPTS = 4;
+const JAV_SEGMENT_RETRY_DELAYS_MS = Object.freeze([0, 250, 750, 1_500]);
+const JAV_PLAYLIST_REFRESH_MAX_PLAYLISTS = 12;
+const JAV_PLAYLIST_REFRESH_TIMEOUT_MS = 8_000;
 const entries = new BoundedTtlCache({ maxEntries: MAX_SESSIONS, ttlMs: SESSION_TTL_MS });
 
 const PROVIDER_EXACT_HOSTS = {
@@ -846,14 +849,150 @@ function disposeUpstreamResponse(response) {
   try { response?.data?.destroy?.(); } catch {}
 }
 
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
+}
+
+function hlsChildrenByKind(content, finalUrl) {
+  const playlists = [];
+  const segments = [];
+  let pendingKind = '';
+
+  const remember = (value, kind) => {
+    const resolved = resolveChildUrl(finalUrl, value);
+    if (!resolved) return;
+    if (kind === 'hls') playlists.push(resolved);
+    else if (kind === 'segment') segments.push(resolved);
+  };
+
+  for (const line of String(content || '').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    if (!trimmed.startsWith('#')) {
+      remember(trimmed, pendingKind || kindFromUrl(resolveChildUrl(finalUrl, trimmed)));
+      pendingKind = '';
+      continue;
+    }
+
+    if (trimmed.startsWith('#EXT-X-STREAM-INF')) pendingKind = 'hls';
+    else if (trimmed.startsWith('#EXTINF')) pendingKind = 'segment';
+
+    if (!/URI="[^"]+"/.test(line)) continue;
+    const uriKind = kindFromPlaylistTag(trimmed);
+    for (const match of line.matchAll(/URI="([^"]+)"/g)) {
+      remember(match[1], uriKind);
+    }
+  }
+
+  return { playlists, segments };
+}
+
+function refreshedJavSegmentUrl(targetUrl, candidates) {
+  let target;
+  try {
+    target = new URL(targetUrl);
+  } catch {
+    return '';
+  }
+
+  const valid = [];
+  for (const value of candidates || []) {
+    try {
+      const parsed = new URL(validateTargetUrl(value, 'javhdporn'));
+      valid.push(parsed);
+    } catch {
+      // A refreshed playlist is still subject to the normal JAVHD allowlist.
+    }
+  }
+
+  const exactPath = valid.find(candidate => (
+    candidate.pathname === target.pathname && candidate.toString() !== target.toString()
+  ));
+  if (exactPath) return exactPath.toString();
+
+  const basename = target.pathname.split('/').filter(Boolean).pop() || '';
+  if (!basename) return '';
+  const basenameMatches = valid.filter(candidate => (
+    candidate.pathname.split('/').filter(Boolean).pop() === basename &&
+    candidate.toString() !== target.toString()
+  ));
+  return basenameMatches.length === 1 ? basenameMatches[0].toString() : '';
+}
+
+async function refreshJavSegmentEntry(entry) {
+  const sessionEntry = entry?.sessionToken ? entries.get(entry.sessionToken) : undefined;
+  if (
+    !sessionEntry ||
+    sessionEntry.provider !== 'javhdporn' ||
+    sessionEntry.kind !== 'hls'
+  ) {
+    return null;
+  }
+
+  if (!sessionEntry.javPlaylistRefreshPromise) {
+    sessionEntry.javPlaylistRefreshPromise = (async () => {
+      const deadlineAt = Date.now() + JAV_PLAYLIST_REFRESH_TIMEOUT_MS;
+      const queue = [sessionEntry.url];
+      const visited = new Set();
+      const segments = [];
+      const snapshots = new Map(sessionEntry.playlistSnapshots || []);
+
+      while (queue.length && visited.size < JAV_PLAYLIST_REFRESH_MAX_PLAYLISTS) {
+        const playlistUrl = validateTargetUrl(queue.shift(), sessionEntry.provider);
+        if (visited.has(playlistUrl)) continue;
+        visited.add(playlistUrl);
+
+        const remainingMs = deadlineAt - Date.now();
+        if (remainingMs <= 0) break;
+        const playlistEntry = { ...sessionEntry, url: playlistUrl, kind: 'hls' };
+        const { response, finalUrl } = await upstreamRequest(playlistEntry, {
+          method: 'GET',
+          text: true,
+          timeoutMs: Math.min(HLS_SNAPSHOT_REQUEST_TIMEOUT_MS, remainingMs),
+        });
+        if (response.status < 200 || response.status >= 300) continue;
+
+        const content = String(response.data || '');
+        if (!content.includes('#EXTM3U')) continue;
+        const rewritten = rewritePlaylist(content, finalUrl, sessionEntry);
+        snapshots.set(playlistUrl, rewritten);
+        snapshots.set(finalUrl, rewritten);
+
+        const children = hlsChildrenByKind(content, finalUrl);
+        queue.push(...children.playlists);
+        segments.push(...children.segments);
+      }
+
+      sessionEntry.playlistSnapshots = snapshots;
+      return { playlists: visited.size, segments };
+    })().finally(() => {
+      delete sessionEntry.javPlaylistRefreshPromise;
+    });
+  }
+
+  const refreshed = await sessionEntry.javPlaylistRefreshPromise;
+  const changedUrl = refreshedJavSegmentUrl(entry.url, refreshed.segments);
+  return {
+    url: changedUrl || entry.url,
+    urlChanged: Boolean(changedUrl),
+    playlists: refreshed.playlists,
+    segments: refreshed.segments.length,
+  };
+}
+
 async function requestJavSegment(
   entry,
   { method = 'GET', range, buffer = false, acceptResponse } = {}
 ) {
   let lastResult;
   let lastError;
+  let lastRejectedPayload = false;
 
   for (let attempt = 1; attempt <= JAV_SEGMENT_MAX_ATTEMPTS; attempt += 1) {
+    if (attempt > 1) {
+      await wait(JAV_SEGMENT_RETRY_DELAYS_MS[attempt - 1]);
+    }
     const attemptRange = attempt === 1 ? range : undefined;
     try {
       const result = await upstreamRequest(entry, {
@@ -870,63 +1009,146 @@ async function requestJavSegment(
         typeof acceptResponse === 'function' &&
         !acceptResponse(result.response)
       );
-      if ((!retryableStatus && !rejectedPayload) || attempt === JAV_SEGMENT_MAX_ATTEMPTS) {
+      lastRejectedPayload = rejectedPayload;
+      if (!retryableStatus && !rejectedPayload) {
         if (attempt > 1) {
-          const recovered = !retryableStatus && !rejectedPayload;
-          logger[recovered ? 'info' : 'warn'](
+          logger.info(
             {
-              event: recovered
-                ? 'JAVHD_SEGMENT_RECOVERY_RESULT'
-                : 'JAVHD_SEGMENT_RECOVERY_EXHAUSTED',
+              event: 'JAVHD_SEGMENT_RECOVERY_RESULT',
               provider: entry.provider,
               ...relayDiagnosticFields(entry),
               attempt,
               upstreamStatus: result.response.status,
-              recovered,
+              recovered: true,
               rejectedPayload,
               rangeRemoved: Boolean(range),
               upstreamHostname: relayUpstreamHostname(entry),
             },
-            recovered
-              ? 'JAVHD segment recovery completed'
-              : 'JAVHD segment recovery attempts exhausted'
+            'JAVHD segment recovery completed'
           );
         }
         return result;
       }
 
-      disposeUpstreamResponse(result.response);
-      logger.warn(
-        {
-          event: 'JAVHD_SEGMENT_RECOVERY_ATTEMPT',
-          provider: entry.provider,
-          ...relayDiagnosticFields(entry),
-          attempt: attempt + 1,
-          upstreamStatus: result.response.status,
-          rejectedPayload,
-          rangeRemoved: Boolean(range),
-          upstreamHostname: relayUpstreamHostname(entry),
-        },
-        'Retrying JAVHD segment without a byte range'
-      );
+      if (attempt < JAV_SEGMENT_MAX_ATTEMPTS) {
+        disposeUpstreamResponse(result.response);
+        logger.warn(
+          {
+            event: 'JAVHD_SEGMENT_RECOVERY_ATTEMPT',
+            provider: entry.provider,
+            ...relayDiagnosticFields(entry),
+            attempt: attempt + 1,
+            delayMs: JAV_SEGMENT_RETRY_DELAYS_MS[attempt],
+            upstreamStatus: result.response.status,
+            rejectedPayload,
+            rangeRemoved: Boolean(attemptRange),
+            upstreamHostname: relayUpstreamHostname(entry),
+          },
+          attemptRange
+            ? 'Retrying JAVHD segment without a byte range'
+            : 'Retrying JAVHD segment after a paced transient-status delay'
+        );
+      }
     } catch (error) {
       lastError = error;
-      if (attempt === JAV_SEGMENT_MAX_ATTEMPTS) throw error;
-      logger.warn(
-        {
-          event: 'JAVHD_SEGMENT_RECOVERY_ATTEMPT',
-          provider: entry.provider,
-          ...relayDiagnosticFields(entry),
-          attempt: attempt + 1,
-          error: error.message,
-          errorCode: error.code || '',
-          rangeRemoved: Boolean(range),
-          upstreamHostname: relayUpstreamHostname(entry),
-        },
-        'Retrying JAVHD segment after an upstream error'
-      );
+      if (attempt < JAV_SEGMENT_MAX_ATTEMPTS) {
+        logger.warn(
+          {
+            event: 'JAVHD_SEGMENT_RECOVERY_ATTEMPT',
+            provider: entry.provider,
+            ...relayDiagnosticFields(entry),
+            attempt: attempt + 1,
+            delayMs: JAV_SEGMENT_RETRY_DELAYS_MS[attempt],
+            error: error.message,
+            errorCode: error.code || '',
+            rangeRemoved: Boolean(attemptRange),
+            upstreamHostname: relayUpstreamHostname(entry),
+          },
+          'Retrying JAVHD segment after a paced upstream-error delay'
+        );
+      }
     }
   }
+
+  try {
+    const refreshed = await refreshJavSegmentEntry(entry);
+    if (refreshed) {
+      logger.warn(
+        {
+          event: 'JAVHD_SEGMENT_PLAYLIST_REFRESH_ATTEMPT',
+          provider: entry.provider,
+          ...relayDiagnosticFields(entry),
+          attempt: JAV_SEGMENT_MAX_ATTEMPTS + 1,
+          playlists: refreshed.playlists,
+          segments: refreshed.segments,
+          urlChanged: refreshed.urlChanged,
+          upstreamHostname: relayUpstreamHostname({ ...entry, url: refreshed.url }),
+        },
+        'Retrying JAVHD segment after refreshing the parent playlist tree'
+      );
+
+      const refreshResult = await upstreamRequest({ ...entry, url: refreshed.url }, {
+        method,
+        text: false,
+        buffer,
+        timeoutMs: JAV_SEGMENT_ATTEMPT_TIMEOUT_MS,
+      });
+      const retryableStatus = javSegmentRetryableStatus(refreshResult.response.status);
+      const rejectedPayload = Boolean(
+        !retryableStatus &&
+        typeof acceptResponse === 'function' &&
+        !acceptResponse(refreshResult.response)
+      );
+      if (!retryableStatus && !rejectedPayload) {
+        logger.info(
+          {
+            event: 'JAVHD_SEGMENT_PLAYLIST_REFRESH_RESULT',
+            provider: entry.provider,
+            ...relayDiagnosticFields(entry),
+            attempt: JAV_SEGMENT_MAX_ATTEMPTS + 1,
+            upstreamStatus: refreshResult.response.status,
+            recovered: true,
+            urlChanged: refreshed.urlChanged,
+            upstreamHostname: relayUpstreamHostname({ ...entry, url: refreshed.url }),
+          },
+          'JAVHD segment recovered after refreshing the parent playlist tree'
+        );
+        return refreshResult;
+      }
+      lastResult = refreshResult;
+      lastRejectedPayload = rejectedPayload;
+    }
+  } catch (error) {
+    lastError = error;
+    logger.warn(
+      {
+        event: 'JAVHD_SEGMENT_PLAYLIST_REFRESH_FAILED',
+        provider: entry.provider,
+        ...relayDiagnosticFields(entry),
+        error: error.message,
+        errorCode: error.code || '',
+        upstreamHostname: relayUpstreamHostname(entry),
+      },
+      'JAVHD parent-playlist recovery failed safely'
+    );
+  }
+
+  logger.warn(
+    {
+      event: 'JAVHD_SEGMENT_RECOVERY_EXHAUSTED',
+      provider: entry.provider,
+      ...relayDiagnosticFields(entry),
+      attempt: JAV_SEGMENT_MAX_ATTEMPTS + 1,
+      upstreamStatus: lastResult?.response?.status || 0,
+      recovered: false,
+      rejectedPayload: lastRejectedPayload,
+      error: lastError?.message || '',
+      errorCode: lastError?.code || '',
+      rangeRemoved: Boolean(range),
+      upstreamHostname: relayUpstreamHostname(entry),
+    },
+    'JAVHD segment recovery attempts exhausted'
+  );
 
   if (lastResult) return lastResult;
   throw lastError || new Error('JAVHD segment request failed');

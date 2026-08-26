@@ -180,6 +180,104 @@ test('JAVHDPorn segment recovery retries one upstream timeout and remains bounde
   }
 });
 
+test('JAVHDPorn segment recovery survives three transient CDN failures with paced retries', async () => {
+  const originalRequest = axios.request;
+  const calls = [];
+  axios.request = async options => {
+    calls.push(options);
+    if (calls.length < 4) {
+      return { status: 500, headers: {}, data: Buffer.from('temporary edge failure') };
+    }
+    return { status: 200, headers: { 'content-type': 'video/mp2t' }, data: transportStream() };
+  };
+
+  try {
+    const result = await mediaRelay._test.requestJavSegment({
+      provider: 'javhdporn',
+      kind: 'segment',
+      url: 'https://media.qooglecdn.com/fixture/transient-segment.ts',
+      headers: { Referer: 'https://video.javhdporn.net/p/fixture' },
+    });
+    assert.equal(result.response.status, 200);
+    assert.equal(calls.length, 4);
+    assert.equal(calls.every(call => call.timeout === 12_000), true);
+  } finally {
+    axios.request = originalRequest;
+  }
+});
+
+test('JAVHDPorn refreshes the parent playlist and uses a renewed signed segment URL', async () => {
+  mediaRelay._test.entries.clear();
+  const originalRequest = axios.request;
+  const transport = transportStream();
+  const oldSegment = 'https://media.qooglecdn.com/hls/segment-01.png?token=old';
+  const newSegment = 'https://media.qooglecdn.com/hls/segment-01.png?token=new';
+  let phase = 'snapshot';
+  let oldRequests = 0;
+  let refreshRequests = 0;
+  let renewedRequests = 0;
+
+  axios.request = async options => {
+    if (options.responseType === 'text') {
+      if (phase === 'playback') refreshRequests += 1;
+      return {
+        status: 200,
+        data: `#EXTM3U\n#EXTINF:4.0,\n${phase === 'snapshot' ? oldSegment : newSegment}\n#EXT-X-ENDLIST\n`,
+        headers: { 'content-type': 'application/vnd.apple.mpegurl' },
+      };
+    }
+
+    if (String(options.url).includes('token=new')) {
+      renewedRequests += 1;
+      return {
+        status: 200,
+        data: transport,
+        headers: { 'content-type': 'image/png' },
+      };
+    }
+
+    oldRequests += 1;
+    return { status: 403, data: Buffer.from('expired'), headers: {} };
+  };
+
+  try {
+    const rootRelayUrl = await mediaRelay.registerHlsSnapshot({
+      url: 'https://streamhls.click/hls/signed/index.m3u8',
+      headers: { Referer: 'https://video.javhdporn.net/p/fixture' },
+      provider: 'javhdporn',
+    });
+    const rootResponse = responseCapture();
+    await mediaRelay.handleRequest(
+      { method: 'GET', params: { token: tokenFromRelayUrl(rootRelayUrl) }, headers: {} },
+      rootResponse
+    );
+    const segmentRelayUrl = rootResponse.body.toString().split('\n').find(line => (
+      line.includes('/media/')
+    ));
+    assert.ok(segmentRelayUrl);
+
+    phase = 'playback';
+    const segmentResponse = responseCapture();
+    await mediaRelay.handleRequest(
+      {
+        method: 'GET',
+        params: { token: tokenFromRelayUrl(segmentRelayUrl) },
+        headers: { range: 'bytes=0-' },
+      },
+      segmentResponse
+    );
+
+    assert.equal(segmentResponse.statusCode, 200);
+    assert.equal(segmentResponse.headers['content-type'], 'video/mp2t');
+    assert.deepEqual(segmentResponse.body, transport);
+    assert.equal(oldRequests, 4);
+    assert.equal(refreshRequests, 1);
+    assert.equal(renewedRequests, 1);
+  } finally {
+    axios.request = originalRequest;
+  }
+});
+
 test('vdcdn master rewriting preserves custom token lines and relays image-named segments', () => {
   mediaRelay._test.entries.clear();
   const entry = {
