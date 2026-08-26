@@ -4,6 +4,12 @@ const FEATURE_FLAG = 'TPB4K_ENABLED';
 
 const SELECTED_CATALOGS = [
   {
+    id: 'tpb4k.studios.search',
+    name: 'OnlyPorn: Studios · Search',
+    source: 'studio-search',
+    mode: 'search-only',
+  },
+  {
     id: 'tpb4k.pornrips.recent',
     name: 'OnlyPorn: PornRips · Recent',
     source: 'pornrips',
@@ -214,7 +220,9 @@ function isTpb4kEnabled(env = process.env) {
 }
 
 function toManifestCatalog(definition) {
-  const extra = definition.source === 'stripchat'
+  const extra = definition.source === 'studio-search'
+    ? [{ name: 'search', isRequired: true }]
+    : definition.source === 'stripchat'
     ? [{ name: 'skip' }]
     : [{ name: 'search' }, { name: 'skip' }];
 

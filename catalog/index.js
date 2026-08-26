@@ -86,6 +86,17 @@ function compactLegacyCatalog(catalog) {
   return compact;
 }
 function compactTpb4kCatalog(catalog) {
+  const searchOnly = (Array.isArray(catalog.extra) ? catalog.extra : [])
+    .some(item => item?.name === 'search' && item?.isRequired === true);
+  if (searchOnly) {
+    return {
+      id: catalog.id,
+      type: catalog.type,
+      name: compactCatalogName(catalog.name),
+      extra: [{ name: 'search', isRequired: true }],
+    };
+  }
+
   const names = new Set(
     (Array.isArray(catalog.extra) ? catalog.extra : [])
       .map(item => String(item?.name || ''))
@@ -96,7 +107,9 @@ function compactTpb4kCatalog(catalog) {
   return {
     id: catalog.id,
     type: catalog.type,
-    name: compactCatalogName(catalog.name),
+    // Every studio row is already the curated Top view. Repeating "· Top" 18
+    // times wastes more than 100 bytes in Stremio's strict 8 KiB manifest.
+    name: compactCatalogName(catalog.name).replace(/\s*·\s*Top$/i, ''),
     extra: [...names].map(name => ({ name })),
   };
 }

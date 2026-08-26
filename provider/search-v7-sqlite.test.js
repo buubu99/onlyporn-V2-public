@@ -67,6 +67,16 @@ test('search ranking ignores hidden provenance and matches visible metadata', ()
   assert.deepEqual(rankSearchItems([hidden, visible], 'uncensored').map(row => row.id), ['visible']);
 });
 
+test('studio search canonicalizes common customer intent aliases', () => {
+  const items = [
+    { id: 'one', name: 'Office Encounter', tags: ['Huge Tits', 'Secretary'] },
+    { id: 'two', name: 'Different Scene', tags: ['Blonde'] },
+  ];
+  assert.deepEqual(rankSearchItems(items, 'big breasts').map(row => row.id), ['one']);
+  assert.deepEqual(rankSearchItems(items, 'office lady').map(row => row.id), ['one']);
+  assert.deepEqual(rankSearchItems(items, 'big boobs office lady').map(row => row.id), ['one']);
+});
+
 test('search SQLite is separate from MetaTube and persists exact-query + pool rows', async t => {
   const root = fs.mkdtempSync('/tmp/onlyporn-search-v7-');
   const env = {

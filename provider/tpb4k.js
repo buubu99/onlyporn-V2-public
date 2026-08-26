@@ -2,7 +2,7 @@
 
 const { expandSukebeiSearchQueries } = require('./tpb4k/sukebei-search-aliases');
 
-const { getCatalogDefinition, isTpb4kEnabled } = require('../catalog/tpb4k');
+const { catalogDefinitions, getCatalogDefinition, isTpb4kEnabled } = require('../catalog/tpb4k');
 const { resolveTpb4kFacet } = require('../catalog/discovery-profiles');
 const {
   dedupeCandidates,
@@ -771,7 +771,8 @@ class Tpb4kProvider {
 
   async _handleCatalogSearchFresh(args, definition, query) {
     if (!this.enabled()) return { metas: [] };
-    const adapter = getAdapter(definition.source);
+    const aggregateStudioSearch = definition.source === 'studio-search';
+    const adapter = getAdapter(aggregateStudioSearch ? 'studio-metadata' : definition.source);
     if (!adapter) return { metas: [] };
 
     const config = readTpb4kConfig(this.env);
@@ -787,10 +788,25 @@ class Tpb4kProvider {
       ? 'tpb4k.source.hentai'
       : definition.id;
 
-    const [cachedPool, poolCount] = await Promise.all([
-      this.searchStore.listPool(poolCatalogId, poolLimit),
-      this.searchStore.countPool(poolCatalogId),
-    ]);
+    let cachedPool;
+    let poolCount;
+    if (aggregateStudioSearch) {
+      const studioDefinitions = catalogDefinitions.filter(item =>
+        ['studio-metadata', 'platform-hybrid'].includes(item.source) &&
+        item.lookupSource === 'torrent-index'
+      );
+      const groups = await Promise.all(studioDefinitions.map(async studioDefinition => {
+        const items = await this.searchStore.listPool(studioDefinition.id, poolLimit);
+        return items.map(item => ({ ...item, catalogId: studioDefinition.id }));
+      }));
+      cachedPool = mergeSearchItems(...groups);
+      poolCount = cachedPool.length;
+    } else {
+      [cachedPool, poolCount] = await Promise.all([
+        this.searchStore.listPool(poolCatalogId, poolLimit),
+        this.searchStore.countPool(poolCatalogId),
+      ]);
+    }
 
     let rawItems = [];
     let searchMode = 'sqlite-pool';
@@ -800,7 +816,12 @@ class Tpb4kProvider {
     const requiresPlayableBinding = ['studio-metadata', 'platform-hybrid'].includes(definition.source)
       && definition.lookupSource === 'torrent-index';
 
-    if (requiresPlayableBinding) {
+    if (aggregateStudioSearch) {
+      searchMode = 'sqlite-aggregate-studio-search';
+      rawItems = rankSearchItems(cachedPool, query)
+        .filter(item => torrentBundle(item).length > 0 && Boolean(realStudioPoster(item?.poster)))
+        .slice(0, generalResultLimit);
+    } else if (requiresPlayableBinding) {
       const resolverAdapter = getAdapter(definition.lookupSource);
       if (!resolverAdapter) return { metas: [] };
 
@@ -947,18 +968,27 @@ class Tpb4kProvider {
     const normalizedItems = (Array.isArray(rawItems) ? rawItems : [])
       .map(item => {
         const itemAdapter = getAdapter(item?.source) || adapter;
-        return normalizeDiscoveryItem(itemAdapter, { ...item, catalogId: definition.id });
+        return normalizeDiscoveryItem(itemAdapter, {
+          ...item,
+          catalogId: aggregateStudioSearch ? item.catalogId : definition.id,
+        });
       })
       .filter(Boolean)
       .filter(item => definition.id !== 'tpb4k.sukebei.top' || Boolean(safePoster(item.poster)))
-      .filter(item => !['studio-metadata', 'platform-hybrid'].includes(definition.source)
+      .filter(item => !(['studio-metadata', 'platform-hybrid'].includes(definition.source) || aggregateStudioSearch)
         || Boolean(realStudioPoster(item.poster)));
 
     const contentFiltered = filterItems(normalizedItems, this.contentFilter);
     const ranked = rankSearchItems(contentFiltered.items, query);
-    const resultLimit = requiresPlayableBinding ? 40 : generalResultLimit;
+    const resultLimit = (requiresPlayableBinding || aggregateStudioSearch) ? 40 : generalResultLimit;
     const finalItems = ranked.slice(0, resultLimit);
-    const metas = finalItems.map(item => toMetaPreview(item, definition.id, config));
+    const metas = finalItems.map(item => toMetaPreview(
+      item,
+      aggregateStudioSearch
+        ? (item?.provenance?.catalogId || definition.id)
+        : definition.id,
+      config
+    ));
 
     this._rememberSearchPool(definition.id, finalItems);
 

@@ -39,7 +39,7 @@ function torrent(hash, title) {
 test('manifest exposes distinct live-action and Anime Sukebei catalogues without the removed duplicate RSS row', () => {
   const sukebei = catalogDefinitions.filter(item => item.id.startsWith('tpb4k.sukebei.'));
   assert.deepEqual(sukebei.map(item => item.id), ['tpb4k.sukebei.top', 'tpb4k.sukebei.hentai']);
-  assert.equal(catalogDefinitions.length, 27);
+  assert.equal(catalogDefinitions.length, 28);
 });
 
 test('generic studio assets, generated title cards, and ImageTwist are never real catalogue artwork', () => {

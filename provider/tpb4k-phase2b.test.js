@@ -74,9 +74,9 @@ test('discovery and native smoke scripts are present and do not contain configur
   }
 });
 
-test('all 27 OnlyPorn catalog IDs remain unique and unified-resolution', () => {
-  assert.equal(tpb4kCatalogs.length, 27);
-  assert.equal(new Set(tpb4kCatalogs.map(item => item.id)).size, 27);
+test('all 28 OnlyPorn catalog IDs remain unique and unified-resolution', () => {
+  assert.equal(tpb4kCatalogs.length, 28);
+  assert.equal(new Set(tpb4kCatalogs.map(item => item.id)).size, 28);
   assert.equal(tpb4kCatalogs.some(item => /\.(?:2160p|1080p|4k)\./i.test(item.id.replace(/^tpb4k\./, ''))), false);
 });
 

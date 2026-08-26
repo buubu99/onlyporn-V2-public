@@ -38,7 +38,7 @@ function torrent(index, studio = 'DigitalPlayground', extra = {}) {
   };
 }
 
-test('enabled manifest has the intentional 36 total / 27 internal contract below 8 KiB', () => {
+test('enabled manifest has the intentional 37 total / 28 internal contract below 8 KiB', () => {
   const probe = spawnSync(process.execPath, ['-e', `
     const addon = require('./addon');
     const serialized = JSON.stringify(addon.manifest);
@@ -46,7 +46,7 @@ test('enabled manifest has the intentional 36 total / 27 internal contract below
     const internal = addon.manifest.catalogs.filter(item => String(item.id || '').startsWith('tpb4k.')).length;
     const bytes = Buffer.byteLength(serialized, 'utf8');
     console.log(JSON.stringify({ total, internal, bytes }));
-    if (total !== 36 || internal !== 27 || bytes >= 8192) process.exit(41);
+    if (total !== 37 || internal !== 28 || bytes >= 8192) process.exit(41);
   `], { cwd: ROOT, env: { ...process.env, TPB4K_ENABLED: 'true', LOG_ENABLED: 'false', ONLYPORN_DISABLE_PERSISTENT_CACHE: '1' }, encoding: 'utf8' });
   assert.equal(probe.status, 0, `${probe.stdout}\n${probe.stderr}`);
 });

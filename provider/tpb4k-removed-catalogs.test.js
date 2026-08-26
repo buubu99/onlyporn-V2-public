@@ -23,8 +23,8 @@ const REMOVED = [
 test.afterEach(() => clearAdapters());
 
 test('standalone TPDB Recent and XVideosRED catalogues are completely absent', () => {
-  assert.equal(catalogDefinitions.length, 27);
-  assert.equal(tpb4kCatalogs.length, 27);
+  assert.equal(catalogDefinitions.length, 28);
+  assert.equal(tpb4kCatalogs.length, 28);
   for (const id of REMOVED) {
     assert.equal(getCatalogDefinition(id), null);
     assert.equal(catalogDefinitions.some(item => item.id === id), false);

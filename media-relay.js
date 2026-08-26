@@ -590,7 +590,9 @@ function isJavTransportSegment(entry) {
       hostname === 'tiktokcdn.com' ||
       hostname.endsWith('.tiktokcdn.com') ||
       hostname === 'vdcdn.xyz' ||
-      hostname.endsWith('.vdcdn.xyz')
+      hostname.endsWith('.vdcdn.xyz') ||
+      hostname === 'qooglecdn.com' ||
+      hostname.endsWith('.qooglecdn.com')
     );
   } catch {
     return false;
@@ -846,7 +848,7 @@ function disposeUpstreamResponse(response) {
 
 async function requestJavSegment(
   entry,
-  { method = 'GET', range, buffer = false } = {}
+  { method = 'GET', range, buffer = false, acceptResponse } = {}
 ) {
   let lastResult;
   let lastError;
@@ -862,9 +864,15 @@ async function requestJavSegment(
         timeoutMs: JAV_SEGMENT_ATTEMPT_TIMEOUT_MS,
       });
       lastResult = result;
-      if (!javSegmentRetryableStatus(result.response.status) || attempt === JAV_SEGMENT_MAX_ATTEMPTS) {
+      const retryableStatus = javSegmentRetryableStatus(result.response.status);
+      const rejectedPayload = Boolean(
+        !retryableStatus &&
+        typeof acceptResponse === 'function' &&
+        !acceptResponse(result.response)
+      );
+      if ((!retryableStatus && !rejectedPayload) || attempt === JAV_SEGMENT_MAX_ATTEMPTS) {
         if (attempt > 1) {
-          const recovered = !javSegmentRetryableStatus(result.response.status);
+          const recovered = !retryableStatus && !rejectedPayload;
           logger[recovered ? 'info' : 'warn'](
             {
               event: recovered
@@ -875,6 +883,7 @@ async function requestJavSegment(
               attempt,
               upstreamStatus: result.response.status,
               recovered,
+              rejectedPayload,
               rangeRemoved: Boolean(range),
               upstreamHostname: relayUpstreamHostname(entry),
             },
@@ -894,6 +903,7 @@ async function requestJavSegment(
           ...relayDiagnosticFields(entry),
           attempt: attempt + 1,
           upstreamStatus: result.response.status,
+          rejectedPayload,
           rangeRemoved: Boolean(range),
           upstreamHostname: relayUpstreamHostname(entry),
         },
@@ -1153,6 +1163,9 @@ async function handleRequest(req, res) {
       const { response } = await requestJavSegment(entry, {
         method: 'GET',
         buffer: true,
+        acceptResponse: candidate => Boolean(
+          normalizeJavTransportSegment(Buffer.from(candidate?.data || ''))
+        ),
       });
 
       if (response.status < 200 || response.status >= 300) {

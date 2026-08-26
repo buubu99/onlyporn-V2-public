@@ -35,6 +35,7 @@ const pendingHomes = new Map();
 const AGE_SAFETY_PATTERN = /\b(?:minor|underage|child|children|kid|kids|preteen|teen|teens|teenager|barely[\s-]*legal|school[\s-]*(?:girl|boy)|schoolgirl|schoolboy|high[\s-]*school|loli|lolita|shota|freshly\s+18|(?:18|19)[\s-]*(?:yo|y\/o|year[\s-]*old))\b/i;
 const OLDER_CONTENT_PATTERN = /\b(?:granny|grannies|grandma|grandmother|grandpa|grandfather|elderly|senior|old[\s-]*(?:woman|women|lady|ladies|man|men)|mature)\b/i;
 const GRAPHIC_CONTENT_PATTERN = /\b(?:scat|toilet|vomit|puke|feces|faeces|prolapse|gore|bloodplay|injury|close[\s-]*up|extreme[\s-]*(?:gaping|insertion)|violent|forced|rape|hidden[\s-]*(?:cam|camera)|spy[\s-]*cam|bodily[\s-]*fluid)\b/i;
+const EXCLUDED_PRESENTATION_PATTERN = /\b(?:transsexual|transgender|shemale|lady[\s-]*boy|t[\s-]*girl|tranny|futanari|futa)\b/i;
 const PLACEHOLDER_POSTER_PATTERN = /(?:placeholder|no[\s_-]*image|image[\s_-]*not[\s_-]*found|default\.(?:gif|png|jpe?g|webp)|blank\.(?:gif|png)|loading(?:\.|[\s_-])|spacer\.(?:gif|png)|sprite|avatar|logo)/i;
 const LOW_RESOLUTION_POSTER_PATTERN = /(?:\/tiny\/|\/small\/|[?&](?:w|width)=(?:[1-2]?\d\d)(?:&|$)|(?:^|[_-])(?:80x|120x|160x|180x|200x|240x)(?:[_-]|\.))/i;
 const AI_EVIDENCE_PATTERN = /\b(?:a\.?i\.?|ai[\s-]*(?:generated|girl|model|video)|artificial[\s-]*intelligence|synthetic[\s-]*model)\b/i;
@@ -48,45 +49,49 @@ function source(kind, value, bucket, quota) {
 const SOURCE_PLANS = Object.freeze({
   xvideos: Object.freeze([
     source('url', 'https://www.xvideos.com/best', 'best', 16),
-    source('default', '', 'trending', 9),
-    source('page', 1, 'latest', 8),
-    source('search', '1080p HD', 'hd', 4),
-    source('search', '4K', '4k', 2),
+    source('default', '', 'trending', 7),
+    source('search', 'OnlyFans stars', 'creator-stars', 7),
+    source('search', 'TikTok stars', 'social-stars', 4),
+    source('search', '4K', '4k', 5),
     source('search', 'AI generated', 'ai', 1),
   ]),
   xhamster: Object.freeze([
     source('genre', 'Best (Weekly)', 'weekly-best', 16),
-    source('default', '', 'trending', 8),
     source('genre', 'Best (Monthly)', 'monthly-best', 8),
-    source('genre', '4K', '4k', 7),
+    source('search', 'OnlyFans stars', 'creator-stars', 7),
+    source('search', 'TikTok stars', 'social-stars', 4),
+    source('genre', '4K', '4k', 4),
     source('search', 'AI generated', 'ai', 1),
   ]),
   eporner: Object.freeze([
     source('genre', 'HQ Porn (Weekly Top)', 'weekly-best', 16),
-    source('genre', 'HQ Porn (Most Viewed)', 'most-viewed', 8),
-    source('genre', 'HQ Porn (Top Rated)', 'top-rated', 8),
-    source('genre', 'HD 1080p (Most Recent)', 'latest-hd', 5),
-    source('genre', '4k Porn (Weekly Top)', '4k', 3),
+    source('genre', 'HQ Porn (Most Viewed)', 'most-viewed', 7),
+    source('genre', 'HQ Porn (Top Rated)', 'top-rated', 7),
+    source('search', 'OnlyFans stars', 'creator-stars', 6),
+    source('search', 'TikTok stars', 'social-stars', 2),
+    source('genre', '4k Porn (Weekly Top)', '4k', 2),
   ]),
   spankbang: Object.freeze([
-    source('genre', 'Trending', 'trending', 15),
-    source('genre', 'Popular', 'popular', 9),
-    source('genre', 'New', 'latest', 8),
-    source('genre', '4K (Popular)', '4k', 7),
+    source('genre', 'Trending', 'trending', 14),
+    source('genre', 'Popular', 'popular', 8),
+    source('search', 'OnlyFans stars', 'creator-stars', 7),
+    source('search', 'TikTok stars', 'social-stars', 4),
+    source('genre', '4K (Popular)', '4k', 6),
     source('search', 'AI generated', 'ai', 1),
   ]),
   porntrex: Object.freeze([
     source('genre', 'Most Popular', 'most-popular', 17),
-    source('genre', 'Top Rated', 'top-rated', 11),
-    source('default', '', 'latest', 8),
+    source('genre', 'Top Rated', 'top-rated', 10),
+    source('search', 'OnlyFans stars', 'creator-stars', 6),
+    source('search', 'TikTok stars', 'social-stars', 3),
     source('genre', '4K porn', '4k', 4),
   ]),
   pornhub: Object.freeze([
-    source('url', 'https://www.pornhub.com/video?o=ht&hd=1', 'trending-hd', 15),
-    source('url', 'https://www.pornhub.com/video?o=mv', 'most-viewed', 8),
-    source('url', 'https://www.pornhub.com/video?o=tr', 'top-rated', 8),
-    source('url', 'https://www.pornhub.com/video?o=cm', 'latest', 4),
-    source('search', '4K', '4k', 4),
+    source('url', 'https://www.pornhub.com/video?o=ht&hd=1', 'trending-hd', 14),
+    source('url', 'https://www.pornhub.com/video?o=tr', 'top-rated', 10),
+    source('search', 'OnlyFans stars', 'creator-stars', 8),
+    source('search', 'TikTok stars', 'social-stars', 4),
+    source('search', '4K', '4k', 3),
     source('search', 'AI generated', 'ai', 1),
   ]),
 });
@@ -137,6 +142,9 @@ function evaluateHomeCandidate(item, config = readContentFilterConfig()) {
   }
   if (GRAPHIC_CONTENT_PATTERN.test(text)) {
     return Object.freeze({ excluded: true, reason: 'GRAPHIC_CONTENT' });
+  }
+  if (EXCLUDED_PRESENTATION_PATTERN.test(text)) {
+    return Object.freeze({ excluded: true, reason: 'EXCLUDED_PRESENTATION' });
   }
   const poster = posterReason(item?.poster);
   if (poster) return Object.freeze({ excluded: true, reason: poster });
@@ -498,6 +506,7 @@ module.exports = {
     AI_EVIDENCE_PATTERN,
     AGE_SAFETY_PATTERN,
     GRAPHIC_CONTENT_PATTERN,
+    EXCLUDED_PRESENTATION_PATTERN,
     OLDER_CONTENT_PATTERN,
     homeCache,
     lastKnownGoodCache,

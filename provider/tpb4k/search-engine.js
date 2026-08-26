@@ -4,8 +4,15 @@ function normalizeSearchQuery(value) {
   return String(value || '').normalize('NFKC').replace(/\s+/g, ' ').trim().slice(0, MAX_SEARCH_LENGTH);
 }
 function normalizeForMatch(value) {
-  return String(value || '').normalize('NFKD').replace(/\p{M}/gu, '').toLocaleLowerCase('en-US')
+  const normalized = String(value || '').normalize('NFKD').replace(/\p{M}/gu, '').toLocaleLowerCase('en-US')
     .replace(/[^\p{L}\p{N}]+/gu, ' ').replace(/\s+/g, ' ').trim();
+  return normalized
+    .replace(/\b(?:huge|large|massive|enormous)\b/g, 'big')
+    .replace(/\b(?:breasts?|boobs?|tits?|busts?|oppai)\b/g, 'breast')
+    .replace(/\bbusty\b/g, 'big breast')
+    .replace(/\b(?:secretar(?:y|ies)|businesswom(?:an|en)|office[\s-]*girls?)\b/g, 'office lady')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 function listText(value) {
   if (!Array.isArray(value)) return '';

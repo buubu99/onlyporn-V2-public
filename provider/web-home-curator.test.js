@@ -36,6 +36,9 @@ test('web Home plans publish 40 slots and reserve only four global AI positions'
   let aiSlots = 0;
   for (const [provider, plan] of Object.entries(SOURCE_PLANS)) {
     assert.equal(plan.reduce((total, item) => total + item.quota, 0), HOME_LIMIT, provider);
+    assert.ok(plan.length <= 6, `${provider} exceeds the two-wave source budget`);
+    assert.equal(plan.some(item => item.bucket === 'creator-stars'), true, provider);
+    assert.equal(plan.some(item => item.bucket === 'social-stars'), true, provider);
     const providerAi = plan.filter(item => item.bucket === 'ai');
     if (AI_HOME_PROVIDERS.has(provider)) {
       assert.equal(providerAi.length, 1, provider);
@@ -69,6 +72,8 @@ test('strict Home evaluation blocks prohibited age, older, graphic, global, and 
   assert.equal(evaluateHomeCandidate(preview('3', 'Mature granny'), filterConfig).reason, 'OLDER_CONTENT');
   assert.equal(evaluateHomeCandidate(preview('4', 'Hidden camera forced scene'), filterConfig).reason, 'GRAPHIC_CONTENT');
   assert.match(evaluateHomeCandidate(preview('5', 'Interracial scene'), filterConfig).reason, /^PROHIBITED_TAG:/);
+  assert.equal(evaluateHomeCandidate(preview('6', 'Transgender superstar'), filterConfig).reason, 'EXCLUDED_PRESENTATION');
+  assert.equal(evaluateHomeCandidate(preview('7', 'Shemale creator'), filterConfig).reason, 'EXCLUDED_PRESENTATION');
   assert.equal(posterReason('https://cdn.example.test/default.jpg'), 'PLACEHOLDER');
   assert.equal(posterReason('https://cdn.example.test/small/poster.jpg'), 'LOW_RESOLUTION');
   assert.equal(posterReason('http://cdn.example.test/poster.jpg'), 'BROKEN_IMAGE');

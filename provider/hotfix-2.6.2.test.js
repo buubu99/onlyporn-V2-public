@@ -368,6 +368,73 @@ test('vdcdn image/webp handler returns video/mp2t without altering raw TS', asyn
   assert.deepEqual(response.body, transport);
 });
 
+test('qooglecdn image/png handler exposes raw MPEG-TS as video/mp2t', async () => {
+  mediaRelay._test.entries.clear();
+  const relayUrl = mediaRelay.register({
+    url: 'https://media.qooglecdn.com/fixture/segment-01.png',
+    headers: { Referer: 'https://video.javhdporn.net/p/fixture' },
+    provider: 'javhdporn',
+    kind: 'segment',
+  });
+  const transport = transportStream();
+  const originalRequest = axios.request;
+  axios.request = async () => ({
+    status: 200,
+    data: transport,
+    headers: { 'content-type': 'image/png' },
+  });
+
+  const response = responseCapture();
+  try {
+    await mediaRelay.handleRequest(
+      { method: 'GET', params: { token: tokenFromRelayUrl(relayUrl) }, headers: {} },
+      response
+    );
+  } finally {
+    axios.request = originalRequest;
+  }
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers['content-type'], 'video/mp2t');
+  assert.deepEqual(response.body, transport);
+});
+
+test('qooglecdn retries an invalid HTTP-200 payload before returning a valid segment', async () => {
+  mediaRelay._test.entries.clear();
+  const relayUrl = mediaRelay.register({
+    url: 'https://media.qooglecdn.com/fixture/segment-02.png',
+    headers: { Referer: 'https://video.javhdporn.net/p/fixture' },
+    provider: 'javhdporn',
+    kind: 'segment',
+  });
+  const transport = transportStream();
+  const originalRequest = axios.request;
+  let calls = 0;
+  axios.request = async () => {
+    calls += 1;
+    return {
+      status: 200,
+      data: calls === 1 ? Buffer.from('<html>temporary edge response</html>') : transport,
+      headers: { 'content-type': calls === 1 ? 'text/html' : 'image/png' },
+    };
+  };
+
+  const response = responseCapture();
+  try {
+    await mediaRelay.handleRequest(
+      { method: 'GET', params: { token: tokenFromRelayUrl(relayUrl) }, headers: {} },
+      response
+    );
+  } finally {
+    axios.request = originalRequest;
+  }
+
+  assert.equal(calls, 2);
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.headers['content-type'], 'video/mp2t');
+  assert.deepEqual(response.body, transport);
+});
+
 test('TikTok PNG-wrapped segment behavior remains intact', async () => {
   mediaRelay._test.entries.clear();
   const relayUrl = mediaRelay.register({

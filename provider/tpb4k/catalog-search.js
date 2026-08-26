@@ -21,11 +21,18 @@ function normalizeCatalogSearchArgs(args = {}) {
 }
 
 function normalizeForMatch(value) {
-  return String(value || '')
+  const normalized = String(value || '')
     .normalize('NFKD')
     .replace(/\p{M}/gu, '')
     .toLocaleLowerCase('en-US')
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return normalized
+    .replace(/\b(?:huge|large|massive|enormous)\b/g, 'big')
+    .replace(/\b(?:breasts?|boobs?|tits?|busts?|oppai)\b/g, 'breast')
+    .replace(/\bbusty\b/g, 'big breast')
+    .replace(/\b(?:secretar(?:y|ies)|businesswom(?:an|en)|office[\s-]*girls?)\b/g, 'office lady')
     .replace(/\s+/g, ' ')
     .trim();
 }

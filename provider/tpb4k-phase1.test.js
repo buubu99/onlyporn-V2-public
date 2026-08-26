@@ -109,10 +109,10 @@ function memoryAdapter() {
 
 test.afterEach(() => clearAdapters());
 
-test('Phase 1 plus Sukebei Hentai defines the exact 27 selected OnlyPorn board catalogs', () => {
-  assert.equal(catalogDefinitions.length, 27);
-  assert.equal(tpb4kCatalogs.length, 27);
-  assert.equal(new Set(catalogDefinitions.map(item => item.id)).size, 27);
+test('Phase 1 plus the search-only Studios row defines the exact 28 OnlyPorn catalogs', () => {
+  assert.equal(catalogDefinitions.length, 28);
+  assert.equal(tpb4kCatalogs.length, 28);
+  assert.equal(new Set(catalogDefinitions.map(item => item.id)).size, 28);
   assert.ok(getCatalogDefinition('tpb4k.pornrips.recent'));
   assert.ok(getCatalogDefinition('tpb4k.hentai.top'));
   assert.ok(getCatalogDefinition('tpb4k.stripchat.couples'));
@@ -123,10 +123,10 @@ test('Phase 1 plus Sukebei Hentai defines the exact 27 selected OnlyPorn board c
   assert.equal(catalogDefinitions.some(item => /(?: 4K| 1080p) · Top/.test(item.name)), false);
 });
 
-test('OnlyPorn board catalogs stay disabled by default and expose 27 descriptors only behind the feature flag', () => {
+test('OnlyPorn catalogs stay disabled by default and expose 28 descriptors only behind the feature flag', () => {
   assert.equal(isTpb4kEnabled({}), false);
   assert.equal(isTpb4kEnabled({ TPB4K_ENABLED: 'true' }), true);
-  assert.equal(tpb4kCatalogs.filter(item => item.id.startsWith('tpb4k.')).length, 27);
+  assert.equal(tpb4kCatalogs.filter(item => item.id.startsWith('tpb4k.')).length, 28);
 });
 
 test('magnet and info-hash normalization accepts valid hashes and rejects HTML placeholders', () => {
