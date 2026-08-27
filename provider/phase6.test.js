@@ -60,7 +60,16 @@ test('Pornhub metadata parser uses canonical page metadata and JSON-LD', () => {
   assert.equal(response.name, 'Fixture Pornhub Video');
   assert.equal(response.description, 'Fixture description');
   assert.match(response.poster, /^https:\/\/ei\.phncdn\.com\//);
-  assert.deepEqual(response.genres, ['Fixture', '1080p', 'Test']);
+  assert.deepEqual(response.genres, [
+    'Fixture',
+    '1080p',
+    'Test',
+    'Verified Models',
+    'Interracial',
+    'MILF',
+    'bbc',
+    'big black cock',
+  ]);
   assert.equal(response.posterShape, 'landscape');
 });
 

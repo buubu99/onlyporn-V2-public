@@ -10,6 +10,7 @@ const {
   bucketEvidenceReason,
   curateWebHome,
   evaluateHomeCandidate,
+  evaluateProviderHomeCandidate,
   posterReason,
   shouldCurateWebHome,
   sourcePlanFor,
@@ -46,7 +47,14 @@ test('web Home plans publish 40 slots and reserve only four global AI positions'
     assert.equal(plan.reduce((total, item) => total + item.quota, 0), HOME_LIMIT, provider);
     assert.ok(plan.length <= 7, `${provider} exceeds the two-wave source budget`);
     for (const bucket of requiredStarBuckets) {
-      assert.equal(plan.some(item => item.bucket === bucket), true, `${provider}:${bucket}`);
+      if (provider === 'pornhub' && ['popular-followed-stars', 'award-winning-stars'].includes(bucket)) {
+        assert.equal(plan.some(item => item.bucket === bucket), false, `${provider}:${bucket}`);
+      } else {
+        assert.equal(plan.some(item => item.bucket === bucket), true, `${provider}:${bucket}`);
+      }
+    }
+    if (provider === 'pornhub') {
+      assert.equal(plan.some(item => item.bucket === 'fresh-adult-creators'), true);
     }
     const providerAi = plan.filter(item => item.bucket === 'ai');
     if (AI_HOME_PROVIDERS.has(provider)) {
@@ -95,6 +103,35 @@ test('strict Home evaluation blocks prohibited age, older, graphic, global, and 
   assert.equal(posterReason('https://cdn.example.test/default.jpg'), 'PLACEHOLDER');
   assert.equal(posterReason('https://cdn.example.test/small/poster.jpg'), 'LOW_RESOLUTION');
   assert.equal(posterReason('http://cdn.example.test/poster.jpg'), 'BROKEN_IMAGE');
+});
+
+test('Pornhub Home rejects extracted interracial, senior, and legacy-star detail evidence', () => {
+  assert.match(
+    evaluateProviderHomeCandidate('pornhub', {
+      ...preview('ph-interracial', 'Neutral title'),
+      genres: ['Verified Models', 'Interracial'],
+    }, filterConfig).reason,
+    /^PROHIBITED_TAG:interracial$/
+  );
+  assert.equal(
+    evaluateProviderHomeCandidate('pornhub', {
+      ...preview('ph-older', 'Neutral title'),
+      genres: ['MILF'],
+    }, filterConfig).reason,
+    'PORNHUB_OLDER_CONTENT'
+  );
+  assert.equal(
+    evaluateProviderHomeCandidate('pornhub', preview('ph-legacy', 'Award winning pornstar'), filterConfig).reason,
+    'PORNHUB_LEGACY_PERFORMER'
+  );
+  assert.equal(
+    evaluateProviderHomeCandidate('pornhub', {
+      ...preview('ph-fresh', 'Independent creator debut'),
+      genres: ['Verified Models'],
+      description: 'Watch on the site with the hottest pornstars.',
+    }, filterConfig).excluded,
+    false
+  );
 });
 
 test('candidate arrangement prioritizes proven buckets and cross-source deduplication', () => {

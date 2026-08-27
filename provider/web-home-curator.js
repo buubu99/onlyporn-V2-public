@@ -44,6 +44,9 @@ const AWARD_PERFORMER_EVIDENCE_PATTERN = /\b(?:award(?:ed|[\s-]*winning|[\s-]*wi
 const WEBCAM_PERFORMER_EVIDENCE_PATTERN = /\b(?:web[\s-]*cam|cam[\s-]*(?:girl|model|performer|star)s?|live[\s-]*cam|chaturbate|stripchat|bonga[\s-]*cams?|myfreecams)\b/i;
 const SOCIAL_INFLUENCER_EVIDENCE_PATTERN = /\b(?:instagram|insta[\s-]*(?:girl|model|star)|tik[\s-]*tok|influencers?|social[\s-]*media|only[\s-]*fans|fansly|fanvue|content[\s-]*creators?)\b/i;
 const COSPLAY_CREATOR_EVIDENCE_PATTERN = /\b(?:cosplay(?:er|ing|s)?|costume[\s-]*(?:creator|model|role[\s-]*play)|comic[\s-]*con)\b/i;
+const FRESH_ADULT_CREATOR_EVIDENCE_PATTERN = /\b(?:newcomers?|new[\s-]*(?:creators?|faces?|models?)|rising[\s-]*(?:creators?|stars?|models?)|up[\s-]*and[\s-]*coming|debut|first[\s-]*(?:video|scene)|verified[\s-]*(?:amateurs?|models?)|amateur[\s-]*(?:creators?|models?)|independent[\s-]*creators?|homemade)\b/i;
+const PORNHUB_LEGACY_PERFORMER_PATTERN = /\b(?:superstars?|award(?:ed|[\s-]*winning|[\s-]*winner)?|avn|xbiz|hall[\s-]*of[\s-]*fame|nominated|nominee|performer[\s-]*of[\s-]*the[\s-]*year|veterans?|legendary|industry[\s-]*icons?)\b/i;
+const PORNHUB_OLDER_CONTENT_PATTERN = /\b(?:milfs?|dilfs?|cougars?|momm(?:y|ies)|dadd(?:y|ies)|step[\s-]*(?:mom|mother|dad|father)|granny|grannies|grandma|grandmother|grandpa|grandfather|elderly|senior|mature|old[\s-]*(?:woman|women|lady|ladies|man|men))\b/i;
 
 const BUCKET_EVIDENCE_PATTERNS = Object.freeze({
   'popular-followed-stars': POPULAR_PERFORMER_EVIDENCE_PATTERN,
@@ -51,6 +54,7 @@ const BUCKET_EVIDENCE_PATTERNS = Object.freeze({
   'webcam-stars': WEBCAM_PERFORMER_EVIDENCE_PATTERN,
   'social-influencers': SOCIAL_INFLUENCER_EVIDENCE_PATTERN,
   'cosplay-creators': COSPLAY_CREATOR_EVIDENCE_PATTERN,
+  'fresh-adult-creators': FRESH_ADULT_CREATOR_EVIDENCE_PATTERN,
   ai: AI_EVIDENCE_PATTERN,
 });
 
@@ -105,12 +109,11 @@ const SOURCE_PLANS = Object.freeze({
     source('url', 'https://www.porntrex.com/most-favourited/', 'native-quality', 4),
   ]),
   pornhub: Object.freeze([
-    source('search', 'popular most followed top pornstar', 'popular-followed-stars', 9),
-    source('search', 'award winning pornstar', 'award-winning-stars', 7),
-    source('search', 'top webcam performers', 'webcam-stars', 7),
-    source('search', 'Instagram TikTok influencer OnlyFans', 'social-influencers', 7),
-    source('search', 'cosplay creators', 'cosplay-creators', 5),
-    source('url', 'https://www.pornhub.com/video?o=ht&hd=1', 'native-quality', 4),
+    source('search', 'newcomer verified amateur creator', 'fresh-adult-creators', 15),
+    source('search', 'Instagram TikTok OnlyFans content creator', 'social-influencers', 10),
+    source('search', 'new webcam creator', 'webcam-stars', 7),
+    source('search', 'new cosplay creator', 'cosplay-creators', 5),
+    source('url', 'https://www.pornhub.com/video?o=ht&hd=1', 'native-quality', 2),
     source('search', 'AI generated', 'ai', 1),
   ]),
 });
@@ -121,6 +124,17 @@ function normalizedText(item = {}) {
     item.title,
     item.description,
     item.overview,
+    ...(Array.isArray(item.genres) ? item.genres : []),
+    ...(Array.isArray(item.tags) ? item.tags : []),
+    ...(Array.isArray(item.categories) ? item.categories : []),
+  ];
+  return values.map(value => String(value || '').replace(/\s+/g, ' ').trim()).filter(Boolean).join(' · ');
+}
+
+function normalizedTaxonomyText(item = {}) {
+  const values = [
+    item.name,
+    item.title,
     ...(Array.isArray(item.genres) ? item.genres : []),
     ...(Array.isArray(item.tags) ? item.tags : []),
     ...(Array.isArray(item.categories) ? item.categories : []),
@@ -168,6 +182,23 @@ function evaluateHomeCandidate(item, config = readContentFilterConfig()) {
   const poster = posterReason(item?.poster);
   if (poster) return Object.freeze({ excluded: true, reason: poster });
   return Object.freeze({ excluded: false, reason: '' });
+}
+
+function evaluateProviderHomeCandidate(providerName, item, config = readContentFilterConfig()) {
+  const base = evaluateHomeCandidate(item, config);
+  if (base.excluded || String(providerName || '').toLowerCase() !== 'pornhub') return base;
+
+  // Pornhub's meta description contains generic site-wide promotional prose
+  // (for example "hottest pornstars") that is not taxonomy for this video.
+  // Use only the title and extracted current-video labels for this policy.
+  const text = normalizedTaxonomyText(item);
+  if (PORNHUB_OLDER_CONTENT_PATTERN.test(text)) {
+    return Object.freeze({ excluded: true, reason: 'PORNHUB_OLDER_CONTENT' });
+  }
+  if (PORNHUB_LEGACY_PERFORMER_PATTERN.test(text)) {
+    return Object.freeze({ excluded: true, reason: 'PORNHUB_LEGACY_PERFORMER' });
+  }
+  return base;
 }
 
 function shouldCurateWebHome(provider, args = {}) {
@@ -433,7 +464,7 @@ async function validateCandidates(provider, arranged, config, startedAt, options
           incrementReason(reasons, 'NO_PLAYABLE_STREAM');
           continue;
         }
-        const evaluation = evaluateHomeCandidate(inspected.meta, config);
+        const evaluation = evaluateProviderHomeCandidate(provider.name, inspected.meta, config);
         if (evaluation.excluded) {
           incrementReason(reasons, evaluation.reason);
           continue;
@@ -545,6 +576,7 @@ module.exports = {
   bucketEvidenceReason,
   curateWebHome,
   evaluateHomeCandidate,
+  evaluateProviderHomeCandidate,
   inspectCandidate,
   posterReason,
   shouldCurateWebHome,
@@ -555,8 +587,11 @@ module.exports = {
     AGE_SAFETY_PATTERN,
     COSPLAY_CREATOR_EVIDENCE_PATTERN,
     GRAPHIC_CONTENT_PATTERN,
+    FRESH_ADULT_CREATOR_EVIDENCE_PATTERN,
     EXCLUDED_PRESENTATION_PATTERN,
     OLDER_CONTENT_PATTERN,
+    PORNHUB_LEGACY_PERFORMER_PATTERN,
+    PORNHUB_OLDER_CONTENT_PATTERN,
     POPULAR_PERFORMER_EVIDENCE_PATTERN,
     SOCIAL_INFLUENCER_EVIDENCE_PATTERN,
     WEBCAM_PERFORMER_EVIDENCE_PATTERN,

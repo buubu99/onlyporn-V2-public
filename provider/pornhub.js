@@ -36,6 +36,56 @@ function cleanText(value) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
 
+function decodePornhubLabel(value) {
+  let decoded = cleanText(value).replace(/&amp;/gi, '&').replace(/\+/g, ' ');
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const next = decodeURIComponent(decoded);
+      if (next === decoded) break;
+      decoded = next;
+    } catch {
+      break;
+    }
+  }
+  return cleanText(decoded);
+}
+
+function extractPageLabels(html, $, videoObject) {
+  const labels = [];
+  const seen = new Set();
+  const add = value => {
+    if (Array.isArray(value)) {
+      for (const item of value) add(item);
+      return;
+    }
+    for (const part of decodePornhubLabel(value).split(/[,|]/)) {
+      const label = cleanText(part).replace(/[-_]+/g, ' ');
+      const key = label.toLowerCase();
+      if (!label || seen.has(key)) continue;
+      seen.add(key);
+      labels.push(label);
+    }
+  };
+
+  add($('meta[name="keywords"]').attr('content'));
+  add(videoObject?.keywords);
+  add(videoObject?.genre);
+  add(videoObject?.category);
+
+  // Pornhub no longer consistently emits meta keywords. Its current watch
+  // page puts the taxonomy for *this video* in advertising-context parameters
+  // and dataLayer.videoData. Do not scrape generic category/recommendation
+  // anchors: those describe the whole page and would mislabel the video.
+  const source = String(html || '');
+  const categoryPattern = /["']?categories_in_video["']?\s*:\s*["']([^"']*)/gi;
+  const contextPattern = /channel(?:%5B|\[)context_(?:category|tag)(?:%5D|\])=([^&"'\\<>\s]+)/gi;
+  for (const pattern of [categoryPattern, contextPattern]) {
+    let match;
+    while ((match = pattern.exec(source)) !== null) add(match[1]);
+  }
+  return labels;
+}
+
 function canonicalVideoUrl(value, baseUrl = 'https://www.pornhub.com') {
   try {
     const parsed = new URL(value, baseUrl);
@@ -364,14 +414,14 @@ class PornhubProvider extends Provider {
       videoObject?.description ||
       title
     );
-    const keywords = cleanText($('meta[name="keywords"]').attr('content'));
+    const genres = extractPageLabels(html, $, videoObject);
 
     return new meta.MetaResponse(canonical, Provider.TYPE, title, {
       poster,
       background: poster,
       description,
       posterShape: 'landscape',
-      genres: keywords ? keywords.split(',').map(cleanText).filter(Boolean) : [],
+      genres,
       videoPageUrl: canonical,
     });
   }
@@ -495,6 +545,8 @@ create._test = {
   canonicalVideoUrl,
   cleanText,
   collectMediaDefinitions,
+  decodePornhubLabel,
+  extractPageLabels,
   extractJsonArrayAfterKey,
   normalizeDefinition,
   normalizePoster,
