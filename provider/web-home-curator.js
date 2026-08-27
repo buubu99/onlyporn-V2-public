@@ -17,7 +17,7 @@ const WEB_HOME_PROVIDERS = new Set([
 const AI_HOME_PROVIDERS = new Set(['xvideos', 'xhamster', 'spankbang', 'pornhub']);
 const HOME_LIMIT = 40;
 const MIN_STRICT_RESULTS = 8;
-const SOURCE_CONCURRENCY = 3;
+const SOURCE_CONCURRENCY = 4;
 const DETAIL_CONCURRENCY = Object.freeze({ spankbang: 4, pornhub: 4 });
 const SOURCE_TIMEOUT_MS = 6_500;
 const DETAIL_TIMEOUT_MS = 5_500;
@@ -35,10 +35,24 @@ const pendingHomes = new Map();
 const AGE_SAFETY_PATTERN = /\b(?:minor|underage|child|children|kid|kids|preteen|teen|teens|teenager|barely[\s-]*legal|school[\s-]*(?:girl|boy)|schoolgirl|schoolboy|high[\s-]*school|loli|lolita|shota|freshly\s+18|(?:18|19)[\s-]*(?:yo|y\/o|year[\s-]*old))\b/i;
 const OLDER_CONTENT_PATTERN = /\b(?:granny|grannies|grandma|grandmother|grandpa|grandfather|elderly|senior|old[\s-]*(?:woman|women|lady|ladies|man|men)|mature)\b/i;
 const GRAPHIC_CONTENT_PATTERN = /\b(?:scat|toilet|vomit|puke|feces|faeces|prolapse|gore|bloodplay|injury|close[\s-]*up|extreme[\s-]*(?:gaping|insertion)|violent|forced|rape|hidden[\s-]*(?:cam|camera)|spy[\s-]*cam|bodily[\s-]*fluid)\b/i;
-const EXCLUDED_PRESENTATION_PATTERN = /\b(?:transsexual|transgender|shemale|lady[\s-]*boy|t[\s-]*girl|tranny|futanari|futa)\b/i;
+const EXCLUDED_PRESENTATION_PATTERN = /\b(?:trans|transsexual|transgender|transvestite|cross[\s-]*dress(?:er|ing)?|shemale|lady[\s-]*boy|t[\s-]*girl|tranny|sissy|futanari|futa)\b/i;
 const PLACEHOLDER_POSTER_PATTERN = /(?:placeholder|no[\s_-]*image|image[\s_-]*not[\s_-]*found|default\.(?:gif|png|jpe?g|webp)|blank\.(?:gif|png)|loading(?:\.|[\s_-])|spacer\.(?:gif|png)|sprite|avatar|logo)/i;
 const LOW_RESOLUTION_POSTER_PATTERN = /(?:\/tiny\/|\/small\/|[?&](?:w|width)=(?:[1-2]?\d\d)(?:&|$)|(?:^|[_-])(?:80x|120x|160x|180x|200x|240x)(?:[_-]|\.))/i;
 const AI_EVIDENCE_PATTERN = /\b(?:a\.?i\.?|ai[\s-]*(?:generated|girl|model|video)|artificial[\s-]*intelligence|synthetic[\s-]*model)\b/i;
+const POPULAR_PERFORMER_EVIDENCE_PATTERN = /\b(?:porn[\s-]*stars?|adult[\s-]*(?:stars?|performers?|models?)|top[\s-]*(?:stars?|performers?|models?)|popular[\s-]*(?:stars?|performers?|models?)|most[\s-]*followed|famous[\s-]*(?:stars?|performers?|models?)|superstars?)\b/i;
+const AWARD_PERFORMER_EVIDENCE_PATTERN = /\b(?:award(?:ed|[\s-]*winning|[\s-]*winner)?|avn|xbiz|hall[\s-]*of[\s-]*fame|nominated|nominee|performer[\s-]*of[\s-]*the[\s-]*year)\b/i;
+const WEBCAM_PERFORMER_EVIDENCE_PATTERN = /\b(?:web[\s-]*cam|cam[\s-]*(?:girl|model|performer|star)s?|live[\s-]*cam|chaturbate|stripchat|bonga[\s-]*cams?|myfreecams)\b/i;
+const SOCIAL_INFLUENCER_EVIDENCE_PATTERN = /\b(?:instagram|insta[\s-]*(?:girl|model|star)|tik[\s-]*tok|influencers?|social[\s-]*media|only[\s-]*fans|fansly|fanvue|content[\s-]*creators?)\b/i;
+const COSPLAY_CREATOR_EVIDENCE_PATTERN = /\b(?:cosplay(?:er|ing|s)?|costume[\s-]*(?:creator|model|role[\s-]*play)|comic[\s-]*con)\b/i;
+
+const BUCKET_EVIDENCE_PATTERNS = Object.freeze({
+  'popular-followed-stars': POPULAR_PERFORMER_EVIDENCE_PATTERN,
+  'award-winning-stars': AWARD_PERFORMER_EVIDENCE_PATTERN,
+  'webcam-stars': WEBCAM_PERFORMER_EVIDENCE_PATTERN,
+  'social-influencers': SOCIAL_INFLUENCER_EVIDENCE_PATTERN,
+  'cosplay-creators': COSPLAY_CREATOR_EVIDENCE_PATTERN,
+  ai: AI_EVIDENCE_PATTERN,
+});
 
 function source(kind, value, bucket, quota) {
   return Object.freeze({ kind, value, bucket, quota });
@@ -48,50 +62,55 @@ function source(kind, value, bucket, quota) {
 // provider. A provider with no native rating route does not pretend to have one.
 const SOURCE_PLANS = Object.freeze({
   xvideos: Object.freeze([
-    source('url', 'https://www.xvideos.com/best', 'best', 16),
-    source('default', '', 'trending', 7),
-    source('search', 'OnlyFans stars', 'creator-stars', 7),
-    source('search', 'TikTok stars', 'social-stars', 4),
-    source('search', '4K', '4k', 5),
+    source('search', 'popular most followed top pornstar', 'popular-followed-stars', 9),
+    source('search', 'award winning pornstar', 'award-winning-stars', 7),
+    source('search', 'top webcam performers', 'webcam-stars', 7),
+    source('search', 'Instagram TikTok influencer OnlyFans', 'social-influencers', 7),
+    source('search', 'cosplay creators', 'cosplay-creators', 5),
+    source('url', 'https://www.xvideos.com/best', 'native-quality', 4),
     source('search', 'AI generated', 'ai', 1),
   ]),
   xhamster: Object.freeze([
-    source('genre', 'Best (Weekly)', 'weekly-best', 16),
-    source('genre', 'Best (Monthly)', 'monthly-best', 8),
-    source('search', 'OnlyFans stars', 'creator-stars', 7),
-    source('search', 'TikTok stars', 'social-stars', 4),
-    source('genre', '4K', '4k', 4),
+    source('search', 'popular most followed top pornstar', 'popular-followed-stars', 9),
+    source('search', 'award winning pornstar', 'award-winning-stars', 7),
+    source('search', 'top webcam performers', 'webcam-stars', 7),
+    source('search', 'Instagram TikTok influencer OnlyFans', 'social-influencers', 7),
+    source('search', 'cosplay creators', 'cosplay-creators', 5),
+    source('genre', 'Best (Weekly)', 'native-quality', 4),
     source('search', 'AI generated', 'ai', 1),
   ]),
   eporner: Object.freeze([
-    source('genre', 'HQ Porn (Weekly Top)', 'weekly-best', 16),
-    source('genre', 'HQ Porn (Most Viewed)', 'most-viewed', 7),
-    source('genre', 'HQ Porn (Top Rated)', 'top-rated', 7),
-    source('search', 'OnlyFans stars', 'creator-stars', 6),
-    source('search', 'TikTok stars', 'social-stars', 2),
-    source('genre', '4k Porn (Weekly Top)', '4k', 2),
+    source('search', 'popular most followed top pornstar', 'popular-followed-stars', 9),
+    source('search', 'award winning pornstar', 'award-winning-stars', 7),
+    source('search', 'top webcam performers', 'webcam-stars', 7),
+    source('search', 'Instagram TikTok influencer OnlyFans', 'social-influencers', 7),
+    source('search', 'cosplay creators', 'cosplay-creators', 6),
+    source('genre', 'HQ Porn (Weekly Top)', 'native-quality', 4),
   ]),
   spankbang: Object.freeze([
-    source('genre', 'Trending', 'trending', 14),
-    source('genre', 'Popular', 'popular', 8),
-    source('search', 'OnlyFans stars', 'creator-stars', 7),
-    source('search', 'TikTok stars', 'social-stars', 4),
-    source('genre', '4K (Popular)', '4k', 6),
+    source('search', 'popular most followed top pornstar', 'popular-followed-stars', 9),
+    source('search', 'award winning pornstar', 'award-winning-stars', 7),
+    source('search', 'top webcam performers', 'webcam-stars', 7),
+    source('search', 'Instagram TikTok influencer OnlyFans', 'social-influencers', 7),
+    source('search', 'cosplay creators', 'cosplay-creators', 5),
+    source('genre', 'Trending', 'native-quality', 4),
     source('search', 'AI generated', 'ai', 1),
   ]),
   porntrex: Object.freeze([
-    source('genre', 'Most Popular', 'most-popular', 17),
-    source('genre', 'Top Rated', 'top-rated', 10),
-    source('search', 'OnlyFans stars', 'creator-stars', 6),
-    source('search', 'TikTok stars', 'social-stars', 3),
-    source('genre', '4K porn', '4k', 4),
+    source('search', 'popular most followed top pornstar', 'popular-followed-stars', 9),
+    source('search', 'award winning pornstar', 'award-winning-stars', 7),
+    source('search', 'top webcam performers', 'webcam-stars', 7),
+    source('search', 'Instagram TikTok influencer OnlyFans', 'social-influencers', 7),
+    source('search', 'cosplay creators', 'cosplay-creators', 6),
+    source('url', 'https://www.porntrex.com/most-favourited/', 'native-quality', 4),
   ]),
   pornhub: Object.freeze([
-    source('url', 'https://www.pornhub.com/video?o=ht&hd=1', 'trending-hd', 14),
-    source('url', 'https://www.pornhub.com/video?o=tr', 'top-rated', 10),
-    source('search', 'OnlyFans stars', 'creator-stars', 8),
-    source('search', 'TikTok stars', 'social-stars', 4),
-    source('search', '4K', '4k', 3),
+    source('search', 'popular most followed top pornstar', 'popular-followed-stars', 9),
+    source('search', 'award winning pornstar', 'award-winning-stars', 7),
+    source('search', 'top webcam performers', 'webcam-stars', 7),
+    source('search', 'Instagram TikTok influencer OnlyFans', 'social-influencers', 7),
+    source('search', 'cosplay creators', 'cosplay-creators', 5),
+    source('url', 'https://www.pornhub.com/video?o=ht&hd=1', 'native-quality', 4),
     source('search', 'AI generated', 'ai', 1),
   ]),
 });
@@ -178,9 +197,15 @@ function sourcePlanFor(provider, args = {}) {
   }
   return plan
     .filter(item => item.bucket !== 'ai')
-    .map(item => item.bucket === 'weekly-best'
+    .map(item => item.bucket === 'native-quality'
       ? Object.freeze({ ...item, quota: item.quota + 1 })
       : item);
+}
+
+function bucketEvidenceReason(bucket, item = {}) {
+  const pattern = BUCKET_EVIDENCE_PATTERNS[String(bucket || '')];
+  if (!pattern || pattern.test(normalizedText(item))) return '';
+  return `${String(bucket).replace(/[^a-z0-9]+/gi, '_').toUpperCase()}_EVIDENCE_MISSING`;
 }
 
 function canonicalCandidateKey(item = {}) {
@@ -267,10 +292,6 @@ function arrangeCandidates(sourceResults, plan, config) {
         incrementReason(reasons, evaluation.reason);
         continue;
       }
-      if (result.descriptor.bucket === 'ai' && !AI_EVIDENCE_PATTERN.test(normalizedText(meta))) {
-        incrementReason(reasons, 'AI_EVIDENCE_MISSING');
-        continue;
-      }
       bucket.push({ meta, descriptor: result.descriptor });
     }
     byBucket.set(result.descriptor.bucket, bucket);
@@ -300,7 +321,11 @@ function arrangeCandidates(sourceResults, plan, config) {
     }
   }
 
-  for (const descriptor of plan) {
+  const fallbackPlan = [
+    ...plan.filter(descriptor => !BUCKET_EVIDENCE_PATTERNS[descriptor.bucket]),
+    ...plan.filter(descriptor => BUCKET_EVIDENCE_PATTERNS[descriptor.bucket]),
+  ];
+  for (const descriptor of fallbackPlan) {
     for (const candidate of byBucket.get(descriptor.bucket) || []) add(candidate);
   }
   return { candidates: output, reasons };
@@ -381,7 +406,8 @@ async function validateCandidates(provider, arranged, config, startedAt, options
       }
       const index = cursor;
       cursor += 1;
-      const candidate = candidates[index].meta;
+      const entry = candidates[index];
+      const candidate = entry.meta;
       try {
         const inspected = await withTimeout(
           inspectCandidate(provider, candidate),
@@ -395,6 +421,11 @@ async function validateCandidates(provider, arranged, config, startedAt, options
         const evaluation = evaluateHomeCandidate(inspected.meta, config);
         if (evaluation.excluded) {
           incrementReason(reasons, evaluation.reason);
+          continue;
+        }
+        const evidenceReason = bucketEvidenceReason(entry.descriptor?.bucket, inspected.meta);
+        if (evidenceReason) {
+          incrementReason(reasons, evidenceReason);
           continue;
         }
         if (validated.length < HOME_LIMIT) validated.push({ index, meta: inspected.meta });
@@ -496,6 +527,7 @@ module.exports = {
   SOURCE_PLANS,
   WEB_HOME_PROVIDERS,
   arrangeCandidates,
+  bucketEvidenceReason,
   curateWebHome,
   evaluateHomeCandidate,
   inspectCandidate,
@@ -504,10 +536,15 @@ module.exports = {
   sourcePlanFor,
   _test: {
     AI_EVIDENCE_PATTERN,
+    AWARD_PERFORMER_EVIDENCE_PATTERN,
     AGE_SAFETY_PATTERN,
+    COSPLAY_CREATOR_EVIDENCE_PATTERN,
     GRAPHIC_CONTENT_PATTERN,
     EXCLUDED_PRESENTATION_PATTERN,
     OLDER_CONTENT_PATTERN,
+    POPULAR_PERFORMER_EVIDENCE_PATTERN,
+    SOCIAL_INFLUENCER_EVIDENCE_PATTERN,
+    WEBCAM_PERFORMER_EVIDENCE_PATTERN,
     homeCache,
     lastKnownGoodCache,
     pendingHomes,
