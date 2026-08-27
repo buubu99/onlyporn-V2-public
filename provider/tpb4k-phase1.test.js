@@ -109,10 +109,10 @@ function memoryAdapter() {
 
 test.afterEach(() => clearAdapters());
 
-test('Phase 1 plus the search-only Studios row defines the exact 28 OnlyPorn catalogs', () => {
-  assert.equal(catalogDefinitions.length, 28);
-  assert.equal(tpb4kCatalogs.length, 28);
-  assert.equal(new Set(catalogDefinitions.map(item => item.id)).size, 28);
+test('Phase 1 plus the search-only Studios and Hentai rows defines the exact 29 OnlyPorn catalogs', () => {
+  assert.equal(catalogDefinitions.length, 29);
+  assert.equal(tpb4kCatalogs.length, 29);
+  assert.equal(new Set(catalogDefinitions.map(item => item.id)).size, 29);
   assert.ok(getCatalogDefinition('tpb4k.pornrips.recent'));
   assert.ok(getCatalogDefinition('tpb4k.hentai.top'));
   assert.ok(getCatalogDefinition('tpb4k.stripchat.couples'));
@@ -123,10 +123,10 @@ test('Phase 1 plus the search-only Studios row defines the exact 28 OnlyPorn cat
   assert.equal(catalogDefinitions.some(item => /(?: 4K| 1080p) · Top/.test(item.name)), false);
 });
 
-test('OnlyPorn catalogs stay disabled by default and expose 28 descriptors only behind the feature flag', () => {
+test('OnlyPorn catalogs stay disabled by default and expose 29 descriptors only behind the feature flag', () => {
   assert.equal(isTpb4kEnabled({}), false);
   assert.equal(isTpb4kEnabled({ TPB4K_ENABLED: 'true' }), true);
-  assert.equal(tpb4kCatalogs.filter(item => item.id.startsWith('tpb4k.')).length, 28);
+  assert.equal(tpb4kCatalogs.filter(item => item.id.startsWith('tpb4k.')).length, 29);
 });
 
 test('magnet and info-hash normalization accepts valid hashes and rejects HTML placeholders', () => {
@@ -743,5 +743,5 @@ test('release wiring preserves v2.6.4 hardening and keeps TPB4K off production b
   assert.match(catalogIndex, /isTpb4kEnabled\(\)/);
 
   assert.equal(isTpb4kEnabled({ TPB4K_ENABLED: '' }), false);
-  assert.match(catalogIndex, /\.\.\.\(isTpb4kEnabled\(\) \? tpb4kCatalogs : \[\]\)/);
+  assert.match(catalogIndex, /tpb4kSearchCatalogs/);
 });

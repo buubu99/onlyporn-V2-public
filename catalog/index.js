@@ -126,9 +126,16 @@ const legacyCatalogs = [
 ].map(compactLegacyCatalog);
 
 const tpb4kCatalogs = sourceTpb4kCatalogs.map(compactTpb4kCatalog);
+const tpb4kSearchCatalogs = tpb4kCatalogs.filter(catalog =>
+  catalog.extra?.some(item => item.name === 'search' && item.isRequired === true)
+);
+const tpb4kBrowseCatalogs = tpb4kCatalogs.filter(catalog =>
+  !tpb4kSearchCatalogs.includes(catalog)
+);
 const catalogs = [
+  ...(isTpb4kEnabled() ? tpb4kSearchCatalogs : []),
   ...legacyCatalogs,
-  ...(isTpb4kEnabled() ? tpb4kCatalogs : []),
+  ...(isTpb4kEnabled() ? tpb4kBrowseCatalogs : []),
 ].map(applyDiscoveryProfile);
 
 const addonEnabled = id => getActiveProvider(id) !== null;

@@ -306,18 +306,18 @@ test('eighteen studio definitions are metadata-first catalogs with torrent looku
   assert.equal(calls.length, 0);
 });
 
-test('Phase 2A release wiring preserves 28 internal catalogs, 37 feature catalogs, and prior hardening', () => {
+test('Phase 2A release wiring preserves 29 internal catalogs, 38 feature catalogs, and prior hardening', () => {
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'));
   const relay = fs.readFileSync(path.join(ROOT, 'media-relay.js'), 'utf8');
   assert.match(pkg.version, /^2\.7\.0-alpha\.(?:2[5-9]|[3-9]\d|\d{3,})$/);
-  assert.equal(catalogDefinitions.length, 28);
+  assert.equal(catalogDefinitions.length, 29);
   assert.equal(pkg.scripts['test:release'], 'npm test');
   assert.match(relay, /const SESSION_TTL_MS = 8 \* 60 \* 60 \* 1000/);
   assert.match(relay, /PLAYLIST_CHILD_ERROR_CODE = 'HLS_CHILD_REJECTED'/);
   assert.match(relay, /'vdcdn\.xyz'/);
 
   const catalogIndex = fs.readFileSync(path.join(ROOT, 'catalog/index.js'), 'utf8');
-  assert.match(catalogIndex, /\.\.\.\(isTpb4kEnabled\(\) \? tpb4kCatalogs : \[\]\)/);
-  assert.equal(9 + catalogDefinitions.length, 37);
+  assert.match(catalogIndex, /tpb4kSearchCatalogs/);
+  assert.equal(9 + catalogDefinitions.length, 38);
   assert.deepEqual(parseSourceId('tpdb:scene-1'), { provider: 'tpdb', upstreamId: 'scene-1' });
 });

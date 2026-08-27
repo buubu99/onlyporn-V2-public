@@ -772,7 +772,14 @@ class Tpb4kProvider {
   async _handleCatalogSearchFresh(args, definition, query) {
     if (!this.enabled()) return { metas: [] };
     const aggregateStudioSearch = definition.source === 'studio-search';
-    const adapter = getAdapter(aggregateStudioSearch ? 'studio-metadata' : definition.source);
+    const aggregateHentaiSearch = definition.source === 'hentai-search';
+    const adapter = getAdapter(
+      aggregateStudioSearch
+        ? 'studio-metadata'
+        : aggregateHentaiSearch
+        ? 'hentai'
+        : definition.source
+    );
     if (!adapter) return { metas: [] };
 
     const config = readTpb4kConfig(this.env);
@@ -784,7 +791,7 @@ class Tpb4kProvider {
       Math.max(Number.parseInt(String(this.env.ONLYPORN_SEARCH_POOL_LIMIT || 300), 10) || 300, 80),
       400
     );
-    const poolCatalogId = definition.source === 'hentai'
+    const poolCatalogId = (definition.source === 'hentai' || aggregateHentaiSearch)
       ? 'tpb4k.source.hentai'
       : definition.id;
 
@@ -930,12 +937,13 @@ class Tpb4kProvider {
       }
     } else {
       let matches = rankSearchItems(cachedPool, query);
-      const warmThreshold = definition.source === 'hentai' ? 60 : 30;
+      const hentaiSearch = definition.source === 'hentai' || aggregateHentaiSearch;
+      const warmThreshold = hentaiSearch ? 60 : 30;
 
       if (!matches.length && poolCount >= warmThreshold) {
         searchMode = 'sqlite-warm-miss';
       } else if (matches.length) {
-        searchMode = definition.source === 'hentai' ? 'sqlite-shared-pool' : 'sqlite-pool';
+        searchMode = hentaiSearch ? 'sqlite-shared-pool' : 'sqlite-pool';
       } else {
         searchMode = 'cold-bounded-source-expansion';
         const fetched = await this._withSearchNetworkSlot(() => adapter.catalog({
@@ -986,6 +994,8 @@ class Tpb4kProvider {
       item,
       aggregateStudioSearch
         ? (item?.provenance?.catalogId || definition.id)
+        : aggregateHentaiSearch
+        ? 'tpb4k.hentai.all'
         : definition.id,
       config
     ));

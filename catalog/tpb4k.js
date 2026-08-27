@@ -10,6 +10,13 @@ const SELECTED_CATALOGS = [
     mode: 'search-only',
   },
   {
+    id: 'tpb4k.hentai.search',
+    type: 'series',
+    name: 'OnlyPorn: Hentai · Search',
+    source: 'hentai-search',
+    mode: 'search-only',
+  },
+  {
     id: 'tpb4k.pornrips.recent',
     name: 'OnlyPorn: PornRips · Recent',
     source: 'pornrips',
@@ -220,9 +227,11 @@ function isTpb4kEnabled(env = process.env) {
 }
 
 function toManifestCatalog(definition) {
-  const extra = definition.source === 'studio-search'
+  const searchOnly = ['studio-search', 'hentai-search'].includes(definition.source);
+  const browseOnly = definition.source === 'hentai' || definition.mode === 'studio-top';
+  const extra = searchOnly
     ? [{ name: 'search', isRequired: true }]
-    : definition.source === 'stripchat'
+    : definition.source === 'stripchat' || browseOnly
     ? [{ name: 'skip' }]
     : [{ name: 'search' }, { name: 'skip' }];
 

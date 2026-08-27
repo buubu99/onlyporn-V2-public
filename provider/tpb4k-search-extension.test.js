@@ -25,35 +25,36 @@ const {
   toProviderCatalogArgs,
 } = require('./tpb4k/catalog-search');
 
-test('26 TPB4K catalogs advertise search, including one search-only Studios row, while Stripchat remains browse-only', () => {
-  const targetDefinitions = catalogDefinitions.filter(
-    item => item.source !== 'stripchat'
+test('six TPB4K catalogs advertise focused search while Studio and Hentai Home rows remain browse-only', () => {
+  const targetDefinitions = catalogDefinitions.filter(item =>
+    ['studio-search', 'hentai-search', 'pornrips', 'yesporn', 'sukebei', 'sukebei-hentai'].includes(item.source)
   );
   const stripchatDefinitions = catalogDefinitions.filter(
     item => item.source === 'stripchat'
   );
 
-  assert.equal(catalogDefinitions.length, 28);
-  assert.equal(targetDefinitions.length, 26);
+  assert.equal(catalogDefinitions.length, 29);
+  assert.equal(targetDefinitions.length, 6);
   assert.equal(stripchatDefinitions.length, 2);
-  assert.equal(tpb4kCatalogs.length, 28);
+  assert.equal(tpb4kCatalogs.length, 29);
 
   const sourceSearchable = tpb4kCatalogs.filter(catalog =>
     catalog.extra?.some(item => item.name === 'search')
   );
-  assert.equal(sourceSearchable.length, 26);
+  assert.equal(sourceSearchable.length, 6);
 
-  for (const definition of targetDefinitions) {
+  for (const definition of catalogDefinitions) {
     const catalog = tpb4kCatalogs.find(item => item.id === definition.id);
     assert.ok(catalog, definition.id);
+    const expectedSearch = targetDefinitions.includes(definition);
     assert.equal(
       catalog.extra.some(item => item.name === 'search'),
-      true,
+      expectedSearch,
       definition.id
     );
     assert.equal(
       catalog.extra.some(item => item.name === 'skip'),
-      definition.source !== 'studio-search',
+      !['studio-search', 'hentai-search'].includes(definition.source),
       definition.id
     );
   }
@@ -73,15 +74,15 @@ test('26 TPB4K catalogs advertise search, including one search-only Studios row,
     catalog.extra?.some(item => item.name === 'search')
   );
 
-  assert.equal(finalTpb4k.length, 28);
-  assert.equal(finalSearchable.length, 26);
+  assert.equal(finalTpb4k.length, 29);
+  assert.equal(finalSearchable.length, 6);
   assert.equal(
     finalSearchable.some(item => item.id.startsWith('tpb4k.stripchat.')),
     false
   );
 });
 
-test('final Stremio manifest contains all 26 search rows and keeps Studios search-only', () => {
+test('final Stremio manifest contains explicit Studios and Hentai search-only rows first', () => {
   const manifest = addon.manifest;
   const serialized = JSON.stringify(manifest);
   const tpb4k = manifest.catalogs.filter(item =>
@@ -91,8 +92,8 @@ test('final Stremio manifest contains all 26 search rows and keeps Studios searc
     item.extra?.some(extra => extra.name === 'search')
   );
 
-  assert.equal(tpb4k.length, 28);
-  assert.equal(searchable.length, 26);
+  assert.equal(tpb4k.length, 29);
+  assert.equal(searchable.length, 6);
   assert.equal(
     searchable.some(item => item.id.startsWith('tpb4k.stripchat.')),
     false
@@ -100,6 +101,13 @@ test('final Stremio manifest contains all 26 search rows and keeps Studios searc
   const studiosSearch = searchable.find(item => item.id === 'tpb4k.studios.search');
   assert.deepEqual(studiosSearch.extra, [{ name: 'search', isRequired: true }]);
   assert.equal(studiosSearch.extra.some(item => item.name === 'skip'), false);
+  const hentaiSearch = searchable.find(item => item.id === 'tpb4k.hentai.search');
+  assert.deepEqual(hentaiSearch.extra, [{ name: 'search', isRequired: true }]);
+  assert.equal(hentaiSearch.type, 'series');
+  assert.deepEqual(
+    manifest.catalogs.slice(0, 2).map(item => item.id),
+    ['tpb4k.studios.search', 'tpb4k.hentai.search']
+  );
   assert.ok(Buffer.byteLength(serialized, 'utf8') < 8192);
 });
 
@@ -210,6 +218,53 @@ test('search-only Studios row aggregates playable studio pools and preserves the
     );
     assert.equal(response.metas.length, 1);
     assert.equal(decodeTpb4kId(response.metas[0].id).catalogId, 'tpb4k.studio.vixen.top');
+  } finally {
+    clearAdapters();
+  }
+});
+
+test('search-only Hentai row uses the shared Hentai pool and preserves playable Hentai identity', async () => {
+  clearAdapters();
+  registerAdapter({
+    id: 'hentai',
+    async catalog() { return []; },
+    async meta() { return null; },
+    async resolve() { return []; },
+  });
+  const item = {
+    source: 'hentai',
+    sourceId: 'hentai:school-days',
+    title: 'School Days',
+    tags: ['School'],
+    poster: 'https://hentaimama.io/images/school-days.jpg',
+  };
+  const searchStore = {
+    enabled: false,
+    async listPool(catalogId) {
+      return catalogId === 'tpb4k.source.hentai' ? [item] : [];
+    },
+    async countPool(catalogId) {
+      return catalogId === 'tpb4k.source.hentai' ? 1 : 0;
+    },
+  };
+  const provider = new Tpb4kProvider({
+    installBuiltIns: false,
+    searchStore,
+    env: {
+      TPB4K_ENABLED: 'true',
+      ONLYPORN_CONTENT_FILTER_ENABLED: 'false',
+      ONLYPORN_DISABLE_PERSISTENT_CACHE: 'true',
+    },
+  });
+
+  try {
+    const response = await provider._handleCatalogSearchFresh(
+      { id: 'tpb4k.hentai.search', type: 'series', extra: { search: 'school' } },
+      catalogDefinitions.find(row => row.id === 'tpb4k.hentai.search'),
+      'school'
+    );
+    assert.equal(response.metas.length, 1);
+    assert.equal(decodeTpb4kId(response.metas[0].id).catalogId, 'tpb4k.hentai.all');
   } finally {
     clearAdapters();
   }
