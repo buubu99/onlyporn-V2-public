@@ -97,7 +97,7 @@ test('strict Home evaluation blocks prohibited age, older, graphic, global, and 
   assert.equal(posterReason('http://cdn.example.test/poster.jpg'), 'BROKEN_IMAGE');
 });
 
-test('candidate arrangement enforces source quotas and cross-source deduplication', () => {
+test('candidate arrangement prioritizes proven buckets and cross-source deduplication', () => {
   const plan = SOURCE_PLANS.xvideos;
   const aiSource = plan.find(item => item.bucket === 'ai');
   const duplicate = preview('duplicate');
@@ -109,10 +109,43 @@ test('candidate arrangement enforces source quotas and cross-source deduplicatio
   const arranged = arrangeCandidates(sourceResults, plan, filterConfig);
   assert.deepEqual(
     arranged.candidates.map(item => item.meta.id),
-    [duplicate.id, preview('safe-1').id, preview('safe-2').id, preview('ordinary').id, preview('ai').id]
+    [preview('ai').id, duplicate.id, preview('safe-1').id, preview('safe-2').id, preview('ordinary').id]
   );
   assert.equal(arranged.reasons.PROHIBITED_AGE, 1);
   assert.ok(arranged.reasons.DUPLICATE >= 1);
+});
+
+test('native XVideos provenance survives duplicate polluted star searches', async () => {
+  const plan = SOURCE_PLANS.xvideos;
+  const popular = plan.find(item => item.bucket === 'popular-followed-stars');
+  const native = plan.find(item => item.bucket === 'native-quality');
+  const shared = preview('shared-generic', 'Generic safe native favorite');
+  const arranged = arrangeCandidates([
+    { descriptor: popular, metas: [shared] },
+    { descriptor: native, metas: [shared] },
+  ], plan, filterConfig);
+
+  assert.equal(arranged.candidates.length, 1);
+  assert.equal(arranged.candidates[0].descriptor.bucket, 'native-quality');
+
+  const provider = {
+    name: 'xvideos',
+    async fetchHtml(id) { return id; },
+    parseVideoPage({ id }) {
+      return {
+        metaResponse: { ...shared, id },
+        directMp4Streams: [{ url: 'https://media.example.test/video.mp4' }],
+      };
+    },
+  };
+  const validated = await _test.validateCandidates(
+    provider,
+    arranged,
+    filterConfig,
+    Date.now()
+  );
+  assert.equal(validated.metas.length, 1);
+  assert.equal(validated.reasons.POPULAR_FOLLOWED_STARS_EVIDENCE_MISSING, undefined);
 });
 
 test('every requested star bucket requires exact evidence from full metadata', () => {

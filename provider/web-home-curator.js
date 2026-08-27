@@ -313,19 +313,34 @@ function arrangeCandidates(sourceResults, plan, config) {
     return true;
   };
 
-  for (const descriptor of plan) {
+  // Search providers occasionally return the same generic page for several
+  // multi-word searches and for their native quality route.  Do not let the
+  // first polluted search claim those shared IDs: doing so labels a valid
+  // native card as (for example) an award winner and the later detail-evidence
+  // gate correctly rejects it.  Proven bucket matches stay first, followed by
+  // the provider's truthful native route, with unproven search candidates last
+  // so detail metadata can still rescue a genuinely relevant result.
+  const evidencePlan = plan.filter(descriptor => BUCKET_EVIDENCE_PATTERNS[descriptor.bucket]);
+  const nativePlan = plan.filter(descriptor => !BUCKET_EVIDENCE_PATTERNS[descriptor.bucket]);
+
+  for (const descriptor of evidencePlan) {
     let used = 0;
     for (const candidate of byBucket.get(descriptor.bucket) || []) {
       if (used >= descriptor.quota) break;
+      if (bucketEvidenceReason(descriptor.bucket, candidate.meta)) continue;
       if (add(candidate)) used += 1;
     }
   }
 
-  const fallbackPlan = [
-    ...plan.filter(descriptor => !BUCKET_EVIDENCE_PATTERNS[descriptor.bucket]),
-    ...plan.filter(descriptor => BUCKET_EVIDENCE_PATTERNS[descriptor.bucket]),
-  ];
-  for (const descriptor of fallbackPlan) {
+  // Native quality results are not limited to their preferred quota here.
+  // They form the verified fallback when an upstream search ignores a query.
+  for (const descriptor of nativePlan) {
+    for (const candidate of byBucket.get(descriptor.bucket) || []) add(candidate);
+  }
+
+  // Keep unproven search candidates available after native fallback. Their
+  // complete detail metadata must still satisfy bucketEvidenceReason().
+  for (const descriptor of evidencePlan) {
     for (const candidate of byBucket.get(descriptor.bucket) || []) add(candidate);
   }
   return { candidates: output, reasons };
