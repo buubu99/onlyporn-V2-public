@@ -101,10 +101,10 @@ test('Pornhub returns all unique HLS and MP4 resolutions through the protected r
   assert.deepEqual(
     response.streams.map(stream => stream.name),
     [
-      'Pornhub 1080p HLS',
       'Pornhub 1080p MP4',
-      'Pornhub 720p HLS',
       'Pornhub 720p MP4',
+      'Pornhub 1080p HLS',
+      'Pornhub 720p HLS',
       'Pornhub 480p HLS',
       'Pornhub 240p HLS',
     ]

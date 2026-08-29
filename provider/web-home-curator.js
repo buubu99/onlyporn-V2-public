@@ -16,9 +16,17 @@ const WEB_HOME_PROVIDERS = new Set([
 
 const AI_HOME_PROVIDERS = new Set(['xvideos', 'xhamster', 'spankbang', 'pornhub']);
 const HOME_LIMIT = 40;
-const MIN_STRICT_RESULTS = 8;
+// A single verified card is enough to keep a provider healthy.  The previous
+// implementation required eight cards before remembering a refresh, which
+// allowed a later two-card refresh to replace a better five-card catalog.
+const MIN_STRICT_RESULTS = 1;
 const SOURCE_CONCURRENCY = 4;
-const DETAIL_CONCURRENCY = Object.freeze({ spankbang: 4, pornhub: 4 });
+const DEFAULT_DETAIL_CONCURRENCY = 10;
+const DETAIL_CONCURRENCY = Object.freeze({
+  xvideos: 12,
+  spankbang: 6,
+  pornhub: 6,
+});
 const SOURCE_TIMEOUT_MS = 6_500;
 const DETAIL_TIMEOUT_MS = 5_500;
 // AIOStreams aborts catalog requests after 30 seconds. Keep a meaningful
@@ -58,6 +66,11 @@ const BUCKET_EVIDENCE_PATTERNS = Object.freeze({
   ai: AI_EVIDENCE_PATTERN,
 });
 
+// Star searches are intentionally advisory: upstream engines often return a
+// relevant, attractive result without repeating the search label in its
+// title/tags. Keep AI strict so the reserved AI slot cannot be polluted.
+const STRICT_BUCKET_EVIDENCE = new Set(['ai']);
+
 function source(kind, value, bucket, quota) {
   return Object.freeze({ kind, value, bucket, quota });
 }
@@ -66,54 +79,54 @@ function source(kind, value, bucket, quota) {
 // provider. A provider with no native rating route does not pretend to have one.
 const SOURCE_PLANS = Object.freeze({
   xvideos: Object.freeze([
-    source('search', 'popular most followed top pornstar', 'popular-followed-stars', 9),
-    source('search', 'award winning pornstar', 'award-winning-stars', 7),
-    source('search', 'top webcam performers', 'webcam-stars', 7),
-    source('search', 'Instagram TikTok influencer OnlyFans', 'social-influencers', 7),
-    source('search', 'cosplay creators', 'cosplay-creators', 5),
-    source('url', 'https://www.xvideos.com/best', 'native-quality', 4),
+    source('search', 'popular', 'popular-followed-stars', 9),
+    source('search', 'award winner', 'award-winning-stars', 7),
+    source('search', 'webcam', 'webcam-stars', 7),
+    source('search', 'OnlyFans influencer', 'social-influencers', 7),
+    source('search', 'cosplay', 'cosplay-creators', 5),
+    source('url', 'https://www.xvideos.com/best', 'best-all-time', 4),
     source('search', 'AI generated', 'ai', 1),
   ]),
   xhamster: Object.freeze([
-    source('search', 'popular most followed top pornstar', 'popular-followed-stars', 9),
-    source('search', 'award winning pornstar', 'award-winning-stars', 7),
-    source('search', 'top webcam performers', 'webcam-stars', 7),
-    source('search', 'Instagram TikTok influencer OnlyFans', 'social-influencers', 7),
-    source('search', 'cosplay creators', 'cosplay-creators', 5),
-    source('genre', 'Best (Weekly)', 'native-quality', 4),
+    source('search', 'popular', 'popular-followed-stars', 9),
+    source('search', 'award winner', 'award-winning-stars', 7),
+    source('search', 'webcam', 'webcam-stars', 7),
+    source('search', 'OnlyFans influencer', 'social-influencers', 7),
+    source('search', 'cosplay', 'cosplay-creators', 5),
+    source('genre', 'Best (2026)', 'best-all-time', 4),
     source('search', 'AI generated', 'ai', 1),
   ]),
   eporner: Object.freeze([
-    source('search', 'popular most followed top pornstar', 'popular-followed-stars', 9),
-    source('search', 'award winning pornstar', 'award-winning-stars', 7),
-    source('search', 'top webcam performers', 'webcam-stars', 7),
-    source('search', 'Instagram TikTok influencer OnlyFans', 'social-influencers', 7),
-    source('search', 'cosplay creators', 'cosplay-creators', 6),
-    source('genre', 'HQ Porn (Weekly Top)', 'native-quality', 4),
+    source('search', 'popular', 'popular-followed-stars', 9),
+    source('search', 'award winner', 'award-winning-stars', 7),
+    source('search', 'webcam', 'webcam-stars', 7),
+    source('search', 'OnlyFans influencer', 'social-influencers', 7),
+    source('search', 'cosplay', 'cosplay-creators', 6),
+    source('genre', 'Porn (Top Rated)', 'best-all-time', 4),
   ]),
   spankbang: Object.freeze([
-    source('search', 'popular most followed top pornstar', 'popular-followed-stars', 9),
-    source('search', 'award winning pornstar', 'award-winning-stars', 7),
-    source('search', 'top webcam performers', 'webcam-stars', 7),
-    source('search', 'Instagram TikTok influencer OnlyFans', 'social-influencers', 7),
-    source('search', 'cosplay creators', 'cosplay-creators', 5),
-    source('genre', 'Trending', 'native-quality', 4),
+    source('search', 'popular', 'popular-followed-stars', 9),
+    source('search', 'award winner', 'award-winning-stars', 7),
+    source('search', 'webcam', 'webcam-stars', 7),
+    source('search', 'OnlyFans influencer', 'social-influencers', 7),
+    source('search', 'cosplay', 'cosplay-creators', 5),
+    source('genre', 'Popular', 'best-all-time', 4),
     source('search', 'AI generated', 'ai', 1),
   ]),
   porntrex: Object.freeze([
-    source('search', 'popular most followed top pornstar', 'popular-followed-stars', 9),
-    source('search', 'award winning pornstar', 'award-winning-stars', 7),
-    source('search', 'top webcam performers', 'webcam-stars', 7),
-    source('search', 'Instagram TikTok influencer OnlyFans', 'social-influencers', 7),
-    source('search', 'cosplay creators', 'cosplay-creators', 6),
-    source('url', 'https://www.porntrex.com/most-favourited/', 'native-quality', 4),
+    source('search', 'popular', 'popular-followed-stars', 9),
+    source('search', 'award winner', 'award-winning-stars', 7),
+    source('search', 'webcam', 'webcam-stars', 7),
+    source('search', 'OnlyFans influencer', 'social-influencers', 7),
+    source('search', 'cosplay', 'cosplay-creators', 6),
+    source('url', 'https://www.porntrex.com/top-rated/', 'best-all-time', 4),
   ]),
   pornhub: Object.freeze([
-    source('search', 'newcomer verified amateur creator', 'fresh-adult-creators', 15),
-    source('search', 'Instagram TikTok OnlyFans content creator', 'social-influencers', 10),
-    source('search', 'new webcam creator', 'webcam-stars', 7),
-    source('search', 'new cosplay creator', 'cosplay-creators', 5),
-    source('url', 'https://www.pornhub.com/video?o=ht&hd=1', 'native-quality', 2),
+    source('search', 'newcomer amateur', 'fresh-adult-creators', 15),
+    source('search', 'OnlyFans influencer', 'social-influencers', 10),
+    source('search', 'webcam', 'webcam-stars', 7),
+    source('search', 'cosplay', 'cosplay-creators', 5),
+    source('url', 'https://www.pornhub.com/video?o=mv&hd=1', 'best-all-time', 2),
     source('search', 'AI generated', 'ai', 1),
   ]),
 });
@@ -228,12 +241,13 @@ function sourcePlanFor(provider, args = {}) {
   }
   return plan
     .filter(item => item.bucket !== 'ai')
-    .map(item => item.bucket === 'native-quality'
+    .map(item => item.bucket === 'best-all-time'
       ? Object.freeze({ ...item, quota: item.quota + 1 })
       : item);
 }
 
 function bucketEvidenceReason(bucket, item = {}) {
+  if (!STRICT_BUCKET_EVIDENCE.has(String(bucket || ''))) return '';
   const pattern = BUCKET_EVIDENCE_PATTERNS[String(bucket || '')];
   if (!pattern || pattern.test(normalizedText(item))) return '';
   return `${String(bucket).replace(/[^a-z0-9]+/gi, '_').toUpperCase()}_EVIDENCE_MISSING`;
@@ -344,17 +358,10 @@ function arrangeCandidates(sourceResults, plan, config) {
     return true;
   };
 
-  // Search providers occasionally return the same generic page for several
-  // multi-word searches and for their native quality route.  Do not let the
-  // first polluted search claim those shared IDs: doing so labels a valid
-  // native card as (for example) an award winner and the later detail-evidence
-  // gate correctly rejects it.  Proven bucket matches stay first, followed by
-  // the provider's truthful native route, with unproven search candidates last
-  // so detail metadata can still rescue a genuinely relevant result.
-  const evidencePlan = plan.filter(descriptor => BUCKET_EVIDENCE_PATTERNS[descriptor.bucket]);
-  const nativePlan = plan.filter(descriptor => !BUCKET_EVIDENCE_PATTERNS[descriptor.bucket]);
-
-  for (const descriptor of evidencePlan) {
+  // First honor the planned mix. Star labels are preferences rather than hard
+  // taxonomy requirements; mandatory content exclusions were already applied
+  // above. AI remains evidence-gated so its reserved slot stays truthful.
+  for (const descriptor of plan) {
     let used = 0;
     for (const candidate of byBucket.get(descriptor.bucket) || []) {
       if (used >= descriptor.quota) break;
@@ -363,16 +370,13 @@ function arrangeCandidates(sourceResults, plan, config) {
     }
   }
 
-  // Native quality results are not limited to their preferred quota here.
-  // They form the verified fallback when an upstream search ignores a query.
-  for (const descriptor of nativePlan) {
-    for (const candidate of byBucket.get(descriptor.bucket) || []) add(candidate);
-  }
-
-  // Keep unproven search candidates available after native fallback. Their
-  // complete detail metadata must still satisfy bucketEvidenceReason().
-  for (const descriptor of evidencePlan) {
-    for (const candidate of byBucket.get(descriptor.bucket) || []) add(candidate);
+  // Then retain additional safe candidates as detail-verified fallback. This
+  // prevents a sparse catalog when one preferred source has few unique cards.
+  for (const descriptor of plan) {
+    for (const candidate of byBucket.get(descriptor.bucket) || []) {
+      if (bucketEvidenceReason(descriptor.bucket, candidate.meta)) continue;
+      add(candidate);
+    }
   }
   return { candidates: output, reasons };
 }
@@ -437,7 +441,7 @@ async function validateCandidates(provider, arranged, config, startedAt, options
   const validated = [];
   const reasons = { ...arranged.reasons };
   const candidates = arranged.candidates;
-  const concurrency = DETAIL_CONCURRENCY[provider.name] || 8;
+  const concurrency = DETAIL_CONCURRENCY[provider.name] || DEFAULT_DETAIL_CONCURRENCY;
   const totalBudgetMs = Number(options.totalBudgetMs || TOTAL_BUDGET_MS);
   const detailTimeoutMs = Number(options.detailTimeoutMs || DETAIL_TIMEOUT_MS);
   let cursor = 0;
@@ -524,22 +528,36 @@ async function buildCuratedHome(provider, args, cacheKey) {
     'Strict curated web Home catalog completed'
   );
 
-  if (validated.metas.length >= MIN_STRICT_RESULTS) {
-    lastKnownGoodCache.set(cacheKey, validated.metas);
-    return validated.metas;
-  }
-
   const lastKnownGood = lastKnownGoodCache.get(cacheKey);
-  if (lastKnownGood !== undefined) {
+  if (validated.metas.length >= MIN_STRICT_RESULTS) {
+    if (lastKnownGood === undefined || validated.metas.length >= lastKnownGood.length) {
+      lastKnownGoodCache.set(cacheKey, validated.metas);
+      return validated.metas;
+    }
+
     logger.warn(
       {
-        event: 'WEB_HOME_LAST_KNOWN_GOOD',
+        event: 'WEB_HOME_BEST_VERIFIED',
         provider: provider.name,
         freshlyVerified: validated.metas.length,
         published: lastKnownGood.length,
-        reason: 'UPSTREAM_DETAIL_QUORUM_UNAVAILABLE',
+        reason: 'WEAKER_REFRESH_PRESERVED',
       },
-      'Web Home retained its previously verified strict catalog'
+      'Web Home retained its larger verified catalog'
+    );
+    return lastKnownGood;
+  }
+
+  if (lastKnownGood !== undefined) {
+    logger.warn(
+      {
+        event: 'WEB_HOME_BEST_VERIFIED',
+        provider: provider.name,
+        freshlyVerified: 0,
+        published: lastKnownGood.length,
+        reason: 'EMPTY_REFRESH_PRESERVED',
+      },
+      'Web Home retained its verified catalog after an empty refresh'
     );
     return lastKnownGood;
   }
@@ -595,6 +613,7 @@ module.exports = {
     POPULAR_PERFORMER_EVIDENCE_PATTERN,
     SOCIAL_INFLUENCER_EVIDENCE_PATTERN,
     WEBCAM_PERFORMER_EVIDENCE_PATTERN,
+    buildCuratedHome,
     homeCache,
     lastKnownGoodCache,
     pendingHomes,

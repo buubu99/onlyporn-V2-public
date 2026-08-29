@@ -46,6 +46,7 @@ test('web Home plans publish 40 slots and reserve only four global AI positions'
   for (const [provider, plan] of Object.entries(SOURCE_PLANS)) {
     assert.equal(plan.reduce((total, item) => total + item.quota, 0), HOME_LIMIT, provider);
     assert.ok(plan.length <= 7, `${provider} exceeds the two-wave source budget`);
+    assert.equal(plan.some(item => item.bucket === 'best-all-time'), true, `${provider}:best-all-time`);
     for (const bucket of requiredStarBuckets) {
       if (provider === 'pornhub' && ['popular-followed-stars', 'award-winning-stars'].includes(bucket)) {
         assert.equal(plan.some(item => item.bucket === bucket), false, `${provider}:${bucket}`);
@@ -71,11 +72,11 @@ test('web Home plans publish 40 slots and reserve only four global AI positions'
   assert.equal(bestPlan.some(item => item.bucket === 'ai'), false);
   assert.equal(sourcePlanFor({ name: 'xhamster' }, { id: 'xhamster.trending' }).some(item => item.bucket === 'ai'), true);
   assert.deepEqual(
-    SOURCE_PLANS.porntrex.find(item => item.bucket === 'native-quality'),
+    SOURCE_PLANS.porntrex.find(item => item.bucket === 'best-all-time'),
     {
       kind: 'url',
-      value: 'https://www.porntrex.com/most-favourited/',
-      bucket: 'native-quality',
+      value: 'https://www.porntrex.com/top-rated/',
+      bucket: 'best-all-time',
       quota: 4,
     }
   );
@@ -146,24 +147,22 @@ test('candidate arrangement prioritizes proven buckets and cross-source deduplic
   const arranged = arrangeCandidates(sourceResults, plan, filterConfig);
   assert.deepEqual(
     arranged.candidates.map(item => item.meta.id),
-    [preview('ai').id, duplicate.id, preview('safe-1').id, preview('safe-2').id, preview('ordinary').id]
+    [duplicate.id, preview('safe-1').id, preview('safe-2').id, preview('ai').id]
   );
   assert.equal(arranged.reasons.PROHIBITED_AGE, 1);
   assert.ok(arranged.reasons.DUPLICATE >= 1);
 });
 
-test('native XVideos provenance survives duplicate polluted star searches', async () => {
+test('best-of-all-time cards remain eligible without brittle label evidence', async () => {
   const plan = SOURCE_PLANS.xvideos;
-  const popular = plan.find(item => item.bucket === 'popular-followed-stars');
-  const native = plan.find(item => item.bucket === 'native-quality');
-  const shared = preview('shared-generic', 'Generic safe native favorite');
+  const best = plan.find(item => item.bucket === 'best-all-time');
+  const shared = preview('shared-generic', 'Generic safe all-time favorite');
   const arranged = arrangeCandidates([
-    { descriptor: popular, metas: [shared] },
-    { descriptor: native, metas: [shared] },
+    { descriptor: best, metas: [shared] },
   ], plan, filterConfig);
 
   assert.equal(arranged.candidates.length, 1);
-  assert.equal(arranged.candidates[0].descriptor.bucket, 'native-quality');
+  assert.equal(arranged.candidates[0].descriptor.bucket, 'best-all-time');
 
   const provider = {
     name: 'xvideos',
@@ -185,27 +184,22 @@ test('native XVideos provenance survives duplicate polluted star searches', asyn
   assert.equal(validated.reasons.POPULAR_FOLLOWED_STARS_EVIDENCE_MISSING, undefined);
 });
 
-test('every requested star bucket requires exact evidence from full metadata', () => {
-  const examples = [
-    ['popular-followed-stars', 'Most followed top pornstar'],
-    ['award-winning-stars', 'AVN award winning performer'],
-    ['webcam-stars', 'Top live cam model'],
-    ['social-influencers', 'Instagram and TikTok influencer'],
-    ['cosplay-creators', 'Cosplay creator'],
-    ['ai', 'AI generated model'],
-  ];
-  for (const [bucket, title] of examples) {
-    assert.equal(bucketEvidenceReason(bucket, preview(`good-${bucket}`, title)), '', bucket);
-    assert.match(
-      bucketEvidenceReason(bucket, preview(`bad-${bucket}`, 'Unrelated generic result')),
-      /EVIDENCE_MISSING$/,
-      bucket
-    );
+test('star searches are advisory while AI still requires exact evidence', () => {
+  for (const bucket of [
+    'popular-followed-stars',
+    'award-winning-stars',
+    'webcam-stars',
+    'social-influencers',
+    'cosplay-creators',
+    'best-all-time',
+  ]) {
+    assert.equal(bucketEvidenceReason(bucket, preview(`generic-${bucket}`, 'Unrelated generic result')), '', bucket);
   }
-  assert.equal(bucketEvidenceReason('native-quality', preview('native')), '');
+  assert.equal(bucketEvidenceReason('ai', preview('ai', 'AI generated model')), '');
+  assert.equal(bucketEvidenceReason('ai', preview('ordinary', 'Unrelated generic result')), 'AI_EVIDENCE_MISSING');
 });
 
-test('strict detail validation rejects search pollution and retains native fallback cards', async () => {
+test('detail validation accepts safe playable cards from loose star and best-of-all-time routes', async () => {
   const provider = {
     name: 'xvideos',
     async fetchHtml(id) { return id; },
@@ -220,14 +214,13 @@ test('strict detail validation rejects search pollution and retains native fallb
   const arranged = {
     candidates: [
       { meta: preview('polluted'), descriptor: { bucket: 'webcam-stars' } },
-      { meta: preview('native'), descriptor: { bucket: 'native-quality' } },
+      { meta: preview('native'), descriptor: { bucket: 'best-all-time' } },
     ],
     reasons: {},
   };
   const result = await _test.validateCandidates(provider, arranged, filterConfig, Date.now());
-  assert.equal(result.metas.length, 1);
-  assert.match(result.metas[0].name, /native/i);
-  assert.equal(result.reasons.WEBCAM_STARS_EVIDENCE_MISSING, 1);
+  assert.equal(result.metas.length, 2);
+  assert.equal(result.reasons.WEBCAM_STARS_EVIDENCE_MISSING, undefined);
 });
 
 test('curated Home validates detail playback, enriches metadata, and caches the result', async () => {
@@ -279,6 +272,42 @@ test('curated Home validates detail playback, enriches metadata, and caches the 
   const second = await curateWebHome(provider, args);
   assert.deepEqual(second, first);
   assert.equal(sourceCalls, SOURCE_PLANS.xvideos.length);
+});
+
+test('a weak refresh cannot replace a larger verified Home snapshot', async () => {
+  _test.homeCache.clear();
+  _test.lastKnownGoodCache.clear();
+  _test.pendingHomes.clear();
+  let weakRefresh = false;
+  const provider = {
+    name: 'xvideos',
+    limit: 50,
+    async _fetchCatalogPage(args) {
+      const marker = String(args.extra?.search || args.extra?.genre || 'home').replace(/\W+/g, '-');
+      if (weakRefresh && !/popular/i.test(marker)) return [];
+      const isAi = /AI-generated/i.test(marker);
+      return [preview(`${weakRefresh ? 'weak' : 'strong'}-${marker}`, isAi ? 'AI generated model' : `Safe ${marker}`)];
+    },
+    async _fetchCatalogUrl(args, url) {
+      if (weakRefresh) return [];
+      return [preview(`strong-${new URL(url).pathname.replace(/\W+/g, '-')}`, 'Safe all-time favorite')];
+    },
+    async fetchHtml(id) { return id; },
+    parseVideoPage({ id }) {
+      return {
+        metaResponse: { ...preview(id.split('.').pop()), id },
+        directMp4Streams: [{ url: 'https://media.example.test/video.mp4' }],
+      };
+    },
+  };
+  const args = { type: 'movie', id: 'xvideos', extra: {} };
+  const cacheKey = 'xvideos:xvideos';
+  const strong = await _test.buildCuratedHome(provider, args, cacheKey);
+  weakRefresh = true;
+  const preserved = await _test.buildCuratedHome(provider, args, cacheKey);
+
+  assert.ok(strong.length > 1);
+  assert.deepEqual(preserved, strong);
 });
 
 test('detail validation obeys the global Home deadline even when upstream detail pages hang', async () => {

@@ -225,13 +225,17 @@ function structuredDataFromPage($) {
 
 function sortStreams(streams) {
   return [...streams].sort((left, right) => {
+    // Direct MP4 is materially more reliable in Web Stremio than Pornhub HLS
+    // when the CDN serves individual transport segments very slowly. Keep HLS
+    // as a fallback, but never place it ahead of an available MP4.
+    const leftHls = /HLS$/i.test(left.name) ? 1 : 0;
+    const rightHls = /HLS$/i.test(right.name) ? 1 : 0;
+    if (leftHls !== rightHls) return leftHls - rightHls;
+
     const leftResolution = Number.parseInt(left.quality, 10) || 0;
     const rightResolution = Number.parseInt(right.quality, 10) || 0;
     if (rightResolution !== leftResolution) return rightResolution - leftResolution;
-
-    const leftHls = /HLS$/i.test(left.name) ? 0 : 1;
-    const rightHls = /HLS$/i.test(right.name) ? 0 : 1;
-    return leftHls - rightHls || left.name.localeCompare(right.name);
+    return left.name.localeCompare(right.name);
   });
 }
 
