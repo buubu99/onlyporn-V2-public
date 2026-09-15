@@ -842,7 +842,9 @@ async function upstreamRequest(
 }
 
 function javSegmentRetryableStatus(status) {
-  return [403, 408, 425, 429, 500, 502, 503, 504].includes(Number(status));
+  const numericStatus = Number(status);
+  return [403, 408, 425, 429, 500, 502, 503, 504].includes(numericStatus)
+    || (numericStatus >= 520 && numericStatus <= 527);
 }
 
 function disposeUpstreamResponse(response) {

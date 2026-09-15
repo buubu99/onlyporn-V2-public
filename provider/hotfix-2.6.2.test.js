@@ -114,6 +114,15 @@ test('JAVHDPorn accepts only the observed cdnsync redirector host', () => {
   );
 });
 
+test('JAVHDPorn retries bounded Cloudflare edge failures', () => {
+  for (const status of [520, 521, 522, 523, 524, 525, 526, 527]) {
+    assert.equal(mediaRelay._test.javSegmentRetryableStatus(status), true, `status ${status}`);
+  }
+  for (const status of [200, 404, 501]) {
+    assert.equal(mediaRelay._test.javSegmentRetryableStatus(status), false, `status ${status}`);
+  }
+});
+
 test('JAVHDPorn segment recovery retries a rejected byte range without Range', async () => {
   const originalRequest = axios.request;
   const calls = [];

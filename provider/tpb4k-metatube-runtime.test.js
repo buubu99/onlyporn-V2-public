@@ -240,6 +240,10 @@ test('startup forces database, logs, cache and temp work onto ephemeral file sto
   assert.match(source, /Refusing RAM-backed MetaTube SQLite storage/);
   assert.match(source, /-dsn "\$METATUBE_DB"/);
   assert.doesNotMatch(source, /file::memory/);
+  assert.match(source, /Docker owns bounded log/);
+  assert.doesNotMatch(source, /> "\$LOG_DIR\/onlyporn\.log"/);
+  assert.doesNotMatch(source, /tail -n \+1 -F/);
+  assert.doesNotMatch(source, /cat "\$temporary" > "\$log_file"/);
   const proxySource = fs.readFileSync(require.resolve('./tpb4k/metatube-image-proxy'), 'utf8');
   assert.match(proxySource, /MAX_CONCURRENT_IMAGES = 2/);
   assert.match(proxySource, /MAX_IMAGE_BYTES = 2_000_000/);

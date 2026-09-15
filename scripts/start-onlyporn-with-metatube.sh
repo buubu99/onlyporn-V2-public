@@ -11,8 +11,6 @@ LOG_DIR="${ONLYPORN_PROCESS_LOG_DIR:-$RUNTIME_ROOT/logs}"
 TMP_DIR="$RUNTIME_ROOT/tmp"
 METATUBE_DB="${METATUBE_DB:-$METATUBE_DIR/metatube.db}"
 MIN_FREE_MB="${ONLYPORN_EPHEMERAL_MIN_FREE_MB:-2048}"
-LOG_MAX_BYTES="${ONLYPORN_LOG_MAX_BYTES:-10485760}"
-LOG_KEEP_BYTES="${ONLYPORN_LOG_KEEP_BYTES:-5242880}"
 PROXY_SECRET="${TPB4K_METATUBE_PROXY_SECRET:-}"
 
 case "$RUNTIME_ROOT" in
@@ -69,16 +67,12 @@ printf 'OnlyPorn runtime storage: root=%s fstype=%s freeMiB=%s db=%s cache=%s lo
 METATUBE_PID=""
 NODE_PID=""
 PROXY_PID=""
-TAIL_PID=""
-LOG_GUARD_PID=""
 
 shutdown() {
   set +e
   [[ -n "$PROXY_PID" ]] && kill -TERM "$PROXY_PID" 2>/dev/null
   [[ -n "$NODE_PID" ]] && kill -TERM "$NODE_PID" 2>/dev/null
   [[ -n "$METATUBE_PID" ]] && kill -TERM "$METATUBE_PID" 2>/dev/null
-  [[ -n "$TAIL_PID" ]] && kill -TERM "$TAIL_PID" 2>/dev/null
-  [[ -n "$LOG_GUARD_PID" ]] && kill -TERM "$LOG_GUARD_PID" 2>/dev/null
   wait 2>/dev/null
 }
 trap shutdown INT TERM EXIT
@@ -96,8 +90,7 @@ kill -0 "$PROXY_PID" 2>/dev/null || { echo "Public gate proxy failed to bind" >&
 
 /usr/local/bin/metatube-server \
   -dsn "$METATUBE_DB" \
-  -port "$METATUBE_PORT" \
-  > "$LOG_DIR/metatube.log" 2>&1 &
+  -port "$METATUBE_PORT" &
 METATUBE_PID=$!
 
 for _ in $(seq 1 60); do
@@ -105,7 +98,6 @@ for _ in $(seq 1 60); do
     break
   fi
   if ! kill -0 "$METATUBE_PID" 2>/dev/null; then
-    cat "$LOG_DIR/metatube.log" >&2 || true
     exit 31
   fi
   sleep 1
@@ -123,37 +115,17 @@ done
   exit 36
 }
 
-PORT="$INTERNAL_PORT" node /app/server.js > "$LOG_DIR/onlyporn.log" 2>&1 &
+# Keep application output attached to the container. Docker owns bounded log
+# rotation, avoiding stale tail forwarders and sparse files caused by truncating
+# a pathname while long-lived writers still hold an older file offset.
+PORT="$INTERNAL_PORT" node /app/server.js &
 NODE_PID=$!
-touch "$LOG_DIR/onlyporn.log"
-tail -n +1 -F "$LOG_DIR/onlyporn.log" &
-TAIL_PID=$!
-
-# Keep diagnostic files useful without allowing them to consume the ephemeral
-# filesystem over a long Starter-service lifetime. Render still receives the
-# live stdout stream; these files are only bounded local diagnostics.
-(
-  while sleep 300; do
-    for log_file in "$LOG_DIR/metatube.log" "$LOG_DIR/onlyporn.log"; do
-      [[ -f "$log_file" ]] || continue
-      size="$(wc -c < "$log_file" 2>/dev/null || echo 0)"
-      if [[ "$size" =~ ^[0-9]+$ ]] && (( size > LOG_MAX_BYTES )); then
-        temporary="$log_file.trim.$$"
-        tail -c "$LOG_KEEP_BYTES" "$log_file" > "$temporary" 2>/dev/null || continue
-        cat "$temporary" > "$log_file"
-        rm -f "$temporary"
-      fi
-    done
-  done
-) &
-LOG_GUARD_PID=$!
 
 for _ in $(seq 1 60); do
   if curl -fsS --max-time 5 "http://127.0.0.1:${INTERNAL_PORT}/manifest.json" >/dev/null; then
     break
   fi
   if ! kill -0 "$NODE_PID" 2>/dev/null; then
-    cat "$LOG_DIR/onlyporn.log" >&2 || true
     exit 33
   fi
   sleep 1
@@ -168,6 +140,5 @@ while true; do
   kill -0 "$METATUBE_PID" 2>/dev/null || exit 41
   kill -0 "$NODE_PID" 2>/dev/null || exit 42
   kill -0 "$PROXY_PID" 2>/dev/null || exit 43
-  kill -0 "$LOG_GUARD_PID" 2>/dev/null || exit 44
   sleep 2
 done
