@@ -189,7 +189,9 @@ test('Eporner fetches HLS playlists with Referer-aware headers', async () => {
 
 test('Porntrex parses modern flashvars variables with quoted source keys', async () => {
   const provider = createPorntrex();
-  provider.resolveStream = async url => url;
+  provider.resolveMediaUrl = () => {
+    throw new Error('Porntrex detail parsing must not probe media with HEAD');
+  };
 
   const html = `<!doctype html><html><head>
     <meta property="og:title" content="Modern Porntrex Fixture">

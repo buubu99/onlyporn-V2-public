@@ -13,7 +13,6 @@ const {
   normalizeAbsoluteUrl,
 } = require('./media-utils');
 const { collectStructuredMediaUrls, parseStructuredDataBlocks } = require('./structured-data');
-const { sanitizeUrlForLogs } = require('./url-security');
 
 const PLAYBACK_USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36';
@@ -207,21 +206,6 @@ class PorntrexProvider extends Provider {
     };
   }
 
-  async resolveStream(url, videoPageUrl) {
-    try {
-      return await this.resolveMediaUrl(url, {
-        headers: this.playbackHints(videoPageUrl).proxyHeaders.request,
-      });
-    } catch (error) {
-      // Many signed KVS media URLs reject HEAD while playing correctly with GET.
-      logger.debug(
-        { provider: this.name, url: sanitizeUrlForLogs(url), error: error.message },
-        'Porntrex HEAD resolution skipped'
-      );
-      return url;
-    }
-  }
-
   getInitialUrl(catalogId) {
     if (catalogId?.includes('top-rated')) return `${this.baseUrl}top-rated/`;
     if (catalogId?.includes('most-popular')) return `${this.baseUrl}most-popular/`;
@@ -352,12 +336,12 @@ class PorntrexProvider extends Provider {
 
     const streams = [];
     for (const candidate of selected) {
-      const finalUrl = await this.resolveStream(candidate.url, id);
-      if (!finalUrl) continue;
+      // KVS media URLs often reject or stall HEAD even when GET playback works.
+      // The extracted URL is already vetted above; let the player follow GET redirects.
       streams.push({
         type: Provider.TYPE,
-        url: finalUrl,
-        name: candidate.quality || (isHls(finalUrl) ? 'HLS' : 'MP4'),
+        url: candidate.url,
+        name: candidate.quality || (isHls(candidate.url) ? 'HLS' : 'MP4'),
         behaviorHints: this.playbackHints(id),
       });
     }
